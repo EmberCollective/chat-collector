@@ -725,30 +725,28 @@ class WeChatDatabaseDecryptor:
                 stored_hmac = page[PAGE_SIZE - HMAC_SIZE: PAGE_SIZE]
                 expected_hmac = _compute_page_hmac(mac_key, page, page_num)
                 if not hmac.compare_digest(stored_hmac, expected_hmac):
-                    logger.warning("Page %s HMAC verification failed; decrypting page anyway", page_num)
                     _append_hmac_warning_page(page_num)
-                    anomaly_debug = _build_page_anomaly_debug(
-                        enc_key,
-                        mac_key,
-                        page,
-                        page_num,
-                        stored_hmac=stored_hmac,
-                        expected_hmac=expected_hmac,
-                        reason="hmac",
-                    )
+                    # Keep every warning count, but expensive diagnostic variants need only samples.
                     if len(result["hmac_debug_samples"]) < 8:
+                        logger.warning("Page %s HMAC verification failed; decrypting page anyway", page_num)
+                        anomaly_debug = _build_page_anomaly_debug(
+                            enc_key,
+                            mac_key,
+                            page,
+                            page_num,
+                            stored_hmac=stored_hmac,
+                            expected_hmac=expected_hmac,
+                            reason="hmac",
+                        )
                         result["hmac_debug_samples"].append(anomaly_debug)
-                    logger.warning(
-                        "[decrypt.page_anomaly] %s",
-                        json.dumps(
-                            {
-                                "db_name": result["db_name"],
-                                "anomaly": anomaly_debug,
-                            },
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        ),
-                    )
+                        logger.warning(
+                            "[decrypt.page_anomaly] %s",
+                            json.dumps(
+                                {"db_name": result["db_name"], "anomaly": anomaly_debug},
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            ),
+                        )
 
                 try:
                     decrypted_data.extend(_decrypt_page(enc_key, page, page_num))

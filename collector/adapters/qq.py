@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import sqlite3
 import tempfile
+import time
 
 from .qq_vendor.c2c_40800_parser import parse_40800
 
@@ -19,7 +22,7 @@ def _prefix_digest(stream, size, destination=None):
     while size:
         chunk = stream.read(min(size, 8 * 1024 * 1024))
         if not chunk:
-            raise RuntimeError("QQ WAL shrank during snapshot capture")
+            raise RuntimeError("QQ snapshot input shrank during capture")
         digest.update(chunk)
         if destination is not None:
             destination.write(chunk)
@@ -87,7 +90,8 @@ def _export_tables(conn, plain):
                 columns.insert(0, "rowid")
             names = ','.join(map(quote, columns))
             conn.execute(f"INSERT INTO plaintext.{quote(name)} ({names}) SELECT {names} FROM main.{quote(name)} NOT INDEXED")
-            expected = conn.execute(f"SELECT count(*) FROM main.{quote(name)} NOT INDEXED").fetchone()[0]
+            # INSERT reports its source rows; avoid decrypting the whole table again to count.
+            expected = conn.execute("SELECT changes()").fetchone()[0]
             if conn.execute(f"SELECT count(*) FROM plaintext.{quote(name)}").fetchone()[0] != expected:
                 raise RuntimeError("QQ table export count mismatch: " + name)
             counts[name] = expected
@@ -106,8 +110,35 @@ def _export_tables(conn, plain):
     return counts
 
 
+def _publish_snapshot(plain, destination):
+    """Cross-volume publication is copied and verified before replacing the good snapshot."""
+    try:
+        plain.replace(destination)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV and getattr(exc, 'winerror', None) != 17:
+            raise
+    staging = None
+    try:
+        with plain.open('rb') as source, tempfile.NamedTemporaryFile(
+                dir=destination.parent, prefix='.qq-publish-', suffix='.db', delete=False) as target:
+            staging = Path(target.name)
+            expected = _prefix_digest(source, plain.stat().st_size, target)
+            target.flush()
+            os.fsync(target.fileno())
+        with staging.open('rb') as stream:
+            if hashlib.file_digest(stream, 'sha256').digest() != expected:
+                raise RuntimeError('QQ snapshot copy hash mismatch')
+        staging.replace(destination)
+    finally:
+        if staging is not None:
+            staging.unlink(missing_ok=True)
+
+
 def refresh(config):
     """Export a stable NTQQ DB+WAL copy through the official SQLCipher engine."""
+    started = time.perf_counter()
+    timings = {}
     import sqlcipher3.dbapi2 as sqlcipher
 
     source = (Path(config["encrypted_dir"]) / "nt_msg.db").resolve(strict=True)
@@ -143,12 +174,20 @@ def refresh(config):
 
     before = stamp()
     if destination.exists() and marker.exists() and json.loads(marker.read_text(encoding="utf-8")) == before:
-        return {"changed": False, "database": str(destination)}
-    with tempfile.TemporaryDirectory(prefix="qq-refresh-", dir=destination.parent) as temp:
+        return {"changed": False, "database": str(destination),
+                "timings_seconds": {"total": round(time.perf_counter()-started, 3)}}
+    work_dir = Path(config.get('work_dir') or destination.parent).resolve()
+    if work_dir == source.parent or source.parent in work_dir.parents:
+        raise ValueError('QQ work_dir must be outside the original encrypted directory')
+    work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="qq-refresh-", dir=work_dir) as temp:
         stripped = Path(temp) / "encrypted.db"
         plain = Path(temp) / "plain.db"
+        phase = time.perf_counter()
         before = _capture_snapshot(source, stripped, stamp)
+        timings['capture'] = round(time.perf_counter()-phase, 3)
 
+        phase = time.perf_counter()
         conn = sqlcipher.connect(str(stripped), isolation_level=None)
         try:
             conn.execute("PRAGMA cipher_page_size=4096")
@@ -163,21 +202,30 @@ def refresh(config):
             counts = _export_tables(conn, plain)
         finally:
             conn.close()
+        timings['export'] = round(time.perf_counter()-phase, 3)
         check = sqlite3.connect(plain)
         try:
+            phase = time.perf_counter()
             if check.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
                 raise RuntimeError("The exported QQ snapshot failed SQLite integrity validation")
+            timings['integrity_check'] = round(time.perf_counter()-phase, 3)
+            phase = time.perf_counter()
             for table in ("group_msg_table", "c2c_msg_table"):
                 if table in counts:
                     check.execute(f'CREATE INDEX IF NOT EXISTS "_collector_time_{table}" ON "{table}"("40050")')
             check.commit()
+            timings['time_indexes'] = round(time.perf_counter()-phase, 3)
         finally:
             check.close()
-        plain.replace(destination)
+        phase = time.perf_counter()
+        _publish_snapshot(plain, destination)
+        timings['publish'] = round(time.perf_counter()-phase, 3)
         marker_temp = Path(temp) / "source.json"
         marker_temp.write_text(json.dumps(before), encoding="utf-8")
-        marker_temp.replace(marker)
-    return {"changed": True, "database": str(destination), "tables": counts, "quick_check_ok": True}
+        _publish_snapshot(marker_temp, marker)
+    timings['total'] = round(time.perf_counter()-started, 3)
+    return {"changed": True, "database": str(destination), "tables": counts,
+            "quick_check_ok": True, "timings_seconds": timings}
 
 
 def _body(blob):
@@ -207,7 +255,7 @@ def _body(blob):
 
 def scan(config, window_start, window_end, where_sql="1", where_params=None, *, context=None, conversations=None):
     """Yield the half-open time window; predicates are trusted local configuration."""
-    if window_end <= window_start:
+    if window_end < window_start or (window_end == window_start and context is None):
         raise ValueError("window_end must be greater than window_start")
     bindings = dict(where_params or {})
     if any(key.startswith("_qq_") for key in bindings):
@@ -219,6 +267,7 @@ def scan(config, window_start, window_end, where_sql="1", where_params=None, *, 
     conn.create_function("qq_body", 1, _body, deterministic=True)
     try:
         conn.execute("PRAGMA query_only=ON")
+        conn.execute("BEGIN")
         available = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         tables = [(name, kind) for name, kind in (("group_msg_table", "group"), ("c2c_msg_table", "direct")) if name in available]
         if not tables:

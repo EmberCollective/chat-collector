@@ -80,6 +80,8 @@ def test_context_never_crosses_group_and_direct_with_same_numeric_id(config):
     with sqlite3.connect(config['database']) as db:
         db.execute('CREATE TABLE c2c_msg_table AS SELECT * FROM group_msg_table WHERE 0')
         db.execute('INSERT INTO c2c_msg_table VALUES(99,150,123,"123",456,"sender",1,?)',(body.SerializeToString(),))
-    settings = {'platform':'qq','source':config,'filters':{'rules':[
-        {'type':'nearby','before':10,'after':0,'condition':{'type':'keywords','values':['deadline']}}]}}
+    from pathlib import Path
+    settings = {'platform':'qq','source':config,'filters':{'rulesets':[
+        {'file':str(Path(__file__).resolve().parents[1]/'rulesets/context.sql'),
+         'recent_count':5}]}}
     assert [row['message_id'] for row in scan_filtered(settings,0,300)] == ['1','2','3']

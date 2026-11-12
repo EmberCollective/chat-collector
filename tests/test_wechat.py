@@ -91,7 +91,10 @@ def test_refresh_reuses_unchanged_snapshot_and_keeps_source(messages, tmp_path):
     keys.write_text(json.dumps({"test": {"db_key": "01" * 32}}))
     refresh_config = {"account_id": "test", "encrypted_dir": str(encrypted),
                       "decrypted_dir": str(tmp_path / "decoded"), "key_file": str(keys)}
-    assert wechat.refresh(refresh_config)["updated"] == 1
+    refreshed = wechat.refresh(refresh_config)
+    assert refreshed["updated"] == 1
+    assert refreshed['timings_seconds']['total'] >= 0
+    assert set(refreshed['validation'][0]['timings_seconds']) == {'decrypt_and_validate', 'time_indexes'}
     assert wechat.refresh(refresh_config)["updated"] == 0
     assert (encrypted / "message/message_0.db").read_bytes() == original
     assert len(list(wechat.scan(refresh_config, 100, 200))) == 2

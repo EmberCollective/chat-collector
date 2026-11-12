@@ -7,6 +7,7 @@ import json
 import re
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -214,6 +215,8 @@ def _fingerprint(path):
 def _index_snapshot(path):
     connection = sqlite3.connect(path)
     try:
+        # DDL otherwise commits each index separately, causing one disk sync per conversation.
+        connection.execute("BEGIN")
         tables = [r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'") if _TABLE.fullmatch(r[0])]
         for table in tables:
             connection.execute(f'CREATE INDEX IF NOT EXISTS "_collector_time_{table[4:]}" ON "{table}"(create_time,local_id)')
@@ -224,6 +227,7 @@ def _index_snapshot(path):
 
 def refresh(config):
     """Decrypt only changed source DB/WAL snapshots through preserved upstream code."""
+    started = time.perf_counter()
     source = _source(config)
     if not source.get("encrypted_dir"):
         return {"updated": 0, "mode": "decrypted_only"}
@@ -237,6 +241,8 @@ def refresh(config):
     files = sorted(p for p in root.glob("message/message_*.db") if re.fullmatch(r"message_\d+\.db", p.name))
     if not files:
         raise FileNotFoundError("No encrypted WeChat message/message_*.db databases found")
+    if (root / 'contact/contact.db').is_file():
+        files.append(root / 'contact/contact.db')
     if source.get("resource_db") and Path(source["resource_db"]).resolve() == destination / "message_resource.db":
         for relative in ("message/message_resource.db", "hardlink/hardlink.db"):
             if (root / relative).is_file():
@@ -251,16 +257,22 @@ def refresh(config):
         fingerprint = {"source": str(database), "files": _fingerprint(database), "key_digest": hashlib.sha256(bytes.fromhex(key)).hexdigest()}
         target = destination / database.name
         if previous.get(database.name) != fingerprint or not target.exists():
+            phase = time.perf_counter()
             if not decryptor.decrypt_database(str(database), str(target)):
                 raise RuntimeError(f"WeChat refresh failed for {database.name}: {decryptor.last_result.get('error', 'unknown error')}")
+            decrypt_seconds = time.perf_counter() - phase
+            phase = time.perf_counter()
             _index_snapshot(target)
             validation.append({"database": database.name,
                                "quick_check_ok": decryptor.last_result.get("diagnostics", {}).get("quick_check_ok"),
-                               "hmac_warning_pages": decryptor.last_result.get("hmac_warning_pages", 0)})
+                               "hmac_warning_pages": decryptor.last_result.get("hmac_warning_pages", 0),
+                               "timings_seconds": {"decrypt_and_validate": round(decrypt_seconds, 3),
+                                                   "time_indexes": round(time.perf_counter()-phase, 3)}})
             updated += 1
         current[database.name] = fingerprint
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination, delete=False) as stream:
         json.dump(current, stream, sort_keys=True)
         temp = Path(stream.name)
     temp.replace(manifest)
-    return {"updated": updated, "databases": len(files), "validation": validation}
+    return {"updated": updated, "databases": len(files), "validation": validation,
+            "timings_seconds": {"total": round(time.perf_counter()-started, 3)}}

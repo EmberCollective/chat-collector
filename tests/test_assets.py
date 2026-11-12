@@ -72,6 +72,44 @@ def test_ambiguous_names_are_not_assigned(tmp_path):
     assert result["reason"] == "ambiguous_local_candidates"
 
 
+@pytest.mark.parametrize('kind', ['file', 'image'])
+def test_indexed_match_is_authorized_before_reading(tmp_path, monkeypatch, kind):
+    cfg = config(tmp_path)
+    root = Path(cfg['source']['media_dir'])
+    md5 = 'a'*32
+    path = root/((md5+'.jpg') if kind=='image' else 'secret.txt')
+    path.write_bytes(image_bytes() if kind=='image' else b'private')
+    archive = AttachmentArchive(cfg,'qq','account')
+    real_allowed = archive._allowed
+    monkeypatch.setattr(archive,'_allowed',lambda p: p != path and real_allowed(p))
+    real_open = Path.open
+    def guarded_open(p,*args,**kwargs):
+        assert p != path, 'An unauthorized indexed file must never be opened'
+        return real_open(p,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',guarded_open)
+    result = archive.enrich(message(kind,name=path.name,md5=md5))['attachments'][0]
+    assert result['status'] == 'missing'
+    assert not Path(cfg['attachments']['archive_dir']).exists()
+
+
+def test_filename_catalog_does_not_resolve_unrelated_files(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    root = Path(cfg['source']['media_dir'])
+    for i in range(100):
+        (root/f'unrelated-{i}.txt').write_bytes(b'unrelated')
+    wanted = root/'wanted.txt'
+    wanted.write_bytes(b'content')
+    archive = AttachmentArchive(cfg,'qq','account')
+    checked, real = [], archive._allowed
+    def allowed(path):
+        checked.append(path)
+        return real(path)
+    monkeypatch.setattr(archive,'_allowed',allowed)
+    result = archive.enrich(message(name=wanted.name,size_bytes=7))['attachments'][0]
+    assert result['status']=='archived' and Path(result['archive_path']).read_bytes()==b'content'
+    assert wanted in checked and not any(p.name.startswith('unrelated-') for p in checked)
+
+
 def test_missing_md5_uses_message_db_and_preserves_encrypted_thumb(tmp_path):
     cfg = config(tmp_path)
     root = Path(cfg["source"]["media_dir"])

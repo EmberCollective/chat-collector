@@ -143,13 +143,13 @@ class AttachmentArchive:
     def _index(self, root):
         if root not in self.indexes:
             index = defaultdict(list)
-            if root.is_dir():
+            if root.is_dir() and self._allowed(root):
                 for directory, dirs, files in os.walk(root, followlinks=False):
                     dirs[:] = [d for d in dirs if not (Path(directory) / d).is_symlink() and self._allowed(Path(directory) / d)]
                     for name in files:
                         path = Path(directory) / name
-                        if self._allowed(path):
-                            index[name.casefold()].append(path)
+                        # Catalog names only; resolve and authorize matched files before opening.
+                        index[name.casefold()].append(path)
             self.indexes[root] = index
         return self.indexes[root]
 
@@ -247,7 +247,7 @@ class AttachmentArchive:
                     if match:
                         variants[match[1]].extend(paths)
                 self.indexes[index_key] = variants
-            candidates.extend(self.indexes[index_key].get(md5, []))
+            candidates.extend(p for p in self.indexes[index_key].get(md5, []) if self._allowed(p))
         variants, choices = [], []
         for path in sorted(set(candidates)):
             saved = dict(self._publish(path=path, suffix=path.suffix), original_source=str(path))
@@ -299,7 +299,7 @@ class AttachmentArchive:
             return [], "filename_missing"
         root = self.media / "msg" / "file" if self.platform == "wechat" else self.media
         candidates = list(dict.fromkeys(p for folder in [root, *self.extra_roots]
-                                       for p in self._index(folder).get(name.casefold(), [])))
+                                       for p in self._index(folder).get(name.casefold(), []) if self._allowed(p)))
         if expected is not None:
             candidates = [p for p in candidates if p.stat().st_size == int(expected)]
         if candidates and md5:

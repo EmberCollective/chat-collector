@@ -68,3 +68,46 @@ def test_unknown_frame_size_still_enforces_limit():
     payload = zstandard.ZstdCompressor(write_content_size=False).compress(b'A' * (17 * 1024 * 1024))
     with pytest.raises(ValueError, match='limit'):
         wechat.decode_text(None, payload)
+
+
+def test_time_indexes_rollback_together_when_one_table_is_invalid(tmp_path):
+    database = tmp_path / 'snapshot.db'
+    first = 'Msg_' + '1' * 32
+    second = 'Msg_' + '2' * 32
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(f'CREATE TABLE {first}(local_id INTEGER, create_time INTEGER)')
+        connection.execute(f'CREATE TABLE {second}(local_id INTEGER)')
+        connection.commit()
+    with pytest.raises(sqlite3.OperationalError, match='create_time'):
+        wechat._index_snapshot(database)
+    with closing(sqlite3.connect(database)) as connection:
+        assert not connection.execute("SELECT name FROM sqlite_master WHERE name LIKE '_collector_time_%'").fetchall()
+
+
+def test_hmac_diagnostics_are_bounded_without_skipping_pages(tmp_path, monkeypatch):
+    sqlcipher = pytest.importorskip('sqlcipher3.dbapi2')
+    from collector.vendor.wechat import decrypt
+    source = tmp_path / 'encrypted.db'
+    key = 'a1' * 32
+    with closing(sqlcipher.connect(str(source))) as connection:
+        connection.execute('PRAGMA key="x\'' + key + '\'"')
+        connection.execute('CREATE TABLE proof(value TEXT)')
+        connection.execute("INSERT INTO proof VALUES('preserved')")
+        connection.commit()
+    # WCDB preallocates pages beyond SQLite's logical size; retain their diagnostics counts.
+    with source.open('ab') as stream:
+        stream.write(bytes(12 * decrypt.PAGE_SIZE))
+    calls = []
+    build = decrypt._build_page_anomaly_debug
+    def sample(*args, **kwargs):
+        calls.append(args[3])
+        return build(*args, **kwargs)
+    monkeypatch.setattr(decrypt, '_build_page_anomaly_debug', sample)
+    decoder = decrypt.WeChatDatabaseDecryptor(key)
+    target = tmp_path / 'plain.db'
+    assert decoder.decrypt_database(str(source), str(target))
+    assert decoder.last_result['hmac_warning_pages'] == 12
+    assert len(calls) == len(decoder.last_result['hmac_debug_samples']) == 8
+    assert decoder.last_result['successful_pages'] == source.stat().st_size // decrypt.PAGE_SIZE
+    with closing(sqlite3.connect(target)) as connection:
+        assert connection.execute('SELECT value FROM proof').fetchall() == [('preserved',)]
