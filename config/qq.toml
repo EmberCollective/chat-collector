@@ -7,6 +7,7 @@ decrypted_dir = "../data/qq/decrypted"
 key_file = "../secrets/account-key.json"
 refresh = true
 media_dir = 'D:\UserFolders\Documents\Tencent Files\997698095\nt_qq\nt_data'
+work_dir = "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\chat-collector-qq"
 
 [processing]
 intensity = "full" # metadata / standard / full
@@ -26,9 +27,15 @@ refresh_interval_seconds = 0
 interval_seconds = 1800
 initial_lookback_seconds = 86400
 
-[filters]
-conversation_ids = []
-mentions_all = false
-files = false
-keywords = []
-match = "any"
+[[filters.rulesets]]
+file = "../rulesets/mentions-all.sql"
+enabled = true
+
+[[filters.rulesets]]
+file = "../rulesets/files.sql"
+enabled = true
+
+[[filters.rulesets]]
+file = "../rulesets/context.sql"
+enabled = true
+recent_count = 5

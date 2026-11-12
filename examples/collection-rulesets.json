@@ -1,0 +1,6 @@
+[
+  { "file": "../rulesets/mentions-all.sql", "enabled": true },
+  { "file": "../rulesets/files.sql", "enabled": true },
+  { "file": "../rulesets/keyword.sql", "enabled": true, "params": { "keyword": "截止" } },
+  { "file": "../rulesets/context.sql", "enabled": true, "recent_count": 5 }
+]

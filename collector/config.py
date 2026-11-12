@@ -1,4 +1,3 @@
-import importlib.util
 from pathlib import Path
 import tomllib
 
@@ -12,10 +11,11 @@ def load_config(path):
     source = config['source']
     if not str(source.get('account_id', '')).strip():
         raise ValueError('source.account_id is required')
-    for section, names in [(source, ('encrypted_dir', 'decrypted_dir', 'key_file', 'database', 'media_dir', 'resource_db', 'image_cache_dir', 'decoder_dll')),
+    if 'account_label' in source and (not isinstance(source['account_label'], str) or len(source['account_label'])>200):
+        raise ValueError('source.account_label must be text up to 200 characters')
+    for section, names in [(source, ('encrypted_dir', 'decrypted_dir', 'key_file', 'database', 'media_dir', 'resource_db', 'image_cache_dir', 'decoder_dll', 'work_dir')),
                            (config.setdefault('storage', {}), ('state_file', 'output_dir')),
-                           (config.setdefault('attachments', {}), ('archive_dir',)),
-                           (config.setdefault('filters', {}), ('sql_file', 'code_file'))]:
+                           (config.setdefault('attachments', {}), ('archive_dir',))]:
         for name in names:
             if section.get(name):
                 value = Path(section[name]).expanduser()
@@ -24,9 +24,12 @@ def load_config(path):
         raise ValueError('storage.state_file and output_dir are required')
     if not isinstance(source.get('refresh', True), bool):
         raise ValueError('source.refresh must be true or false, without quotes')
-    for name in ('mentions_all', 'files'):
-        if not isinstance(config['filters'].get(name, False), bool):
-            raise ValueError(f'filters.{name} must be true or false, without quotes')
+    if source.get('work_dir') and source.get('encrypted_dir'):
+        work = Path(source['work_dir']).resolve()
+        original = Path(source['encrypted_dir']).resolve()
+        if work == original or original in work.parents:
+            raise ValueError('source.work_dir must be outside the original encrypted directory')
+    validate_filters(config.setdefault('filters', {}))
     attachments = config['attachments']
     if not isinstance(attachments.get('enabled', False), bool):
         raise ValueError('attachments.enabled must be a boolean')
@@ -68,60 +71,6 @@ def load_config(path):
     return config
 
 
-def load_filter_extension(settings):
-    spec = importlib.util.spec_from_file_location('collector_local_filter', settings['code_file'])
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def build_filter(config):
-    from .filters import SqlRules
-    settings = config.get('filters', {})
-    for name in ('mentions_all', 'files'):
-        if not isinstance(settings.get(name, False), bool):
-            raise ValueError(f'filters.{name} must be a boolean')
-    compiler = SqlRules(prefix='_f_p')
-    params = compiler.params
-    clauses = []
-    groups = settings.get('conversation_ids', [])
-    keywords = settings.get('keywords', [])
-    if not isinstance(groups, list) or not isinstance(keywords, list):
-        raise ValueError('conversation_ids and keywords must be arrays')
-    if any(not isinstance(x, str) or not x for x in [*groups, *keywords]):
-        raise ValueError('group IDs and keywords must be nonempty strings')
-    if groups:
-        clauses.append(compiler.compile({'type':'conversation','values':groups}))
-    content = []
-    if settings.get('mentions_all', False):
-        content.append(compiler.compile({'type':'mentions_all'}))
-    if settings.get('files', False):
-        content.append(compiler.compile({'type':'kind','values':['file']}))
-    if keywords:
-        content.append(compiler.compile({'type':'keywords','values':keywords}))
-    match = settings.get('match', 'any')
-    if match not in {'any', 'all'}:
-        raise ValueError('filters.match must be any or all')
-    if content:
-        clauses.append('(' + (' OR ' if match == 'any' else ' AND ').join(content) + ')')
-    extra = dict(settings.get('params', {}))
-    if any(str(name).startswith('_') for name in extra):
-        raise ValueError('custom parameter names starting with _ are reserved')
-    if settings.get('sql_file'):
-        clauses.append('(' + Path(settings['sql_file']).read_text(encoding='utf-8').strip() + ')')
-    if settings.get('code_file'):
-        module = load_filter_extension(settings)
-        if hasattr(module,'build_filter'):
-            sql, values = module.build_filter(settings)
-        elif hasattr(module,'register_filters'):
-            sql, values = '1', {}
-        else:
-            raise ValueError('Filter extension must define build_filter or register_filters')
-        if not isinstance(sql, str) or not isinstance(values, dict):
-            raise ValueError('build_filter must return (SQL expression, parameter dict)')
-        if any(str(name).startswith('_') or name in extra for name in values):
-            raise ValueError('duplicate or reserved custom SQL parameter')
-        clauses.append('(' + sql + ')')
-        extra.update(values)
-    params.update(extra)
-    return ' AND '.join(clauses) if clauses else '1', params
+def validate_filters(settings):
+    if not isinstance(settings, dict) or set(settings)-{'rulesets'}:
+        raise ValueError('Only filters.rulesets is supported; migrate retired filter fields into SQL files (see FILTERS.md)')

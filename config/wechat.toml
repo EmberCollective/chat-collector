@@ -29,14 +29,15 @@ refresh_interval_seconds = 0
 interval_seconds = 1800
 initial_lookback_seconds = 86400
 
-[filters]
-conversation_ids = []
-mentions_all = false
-files = false
-keywords = []
-match = "any"
-# sql_file = "../examples/extra-filter.sql"
-# code_file = "../examples/extra-filter.py"
+[[filters.rulesets]]
+file = "../rulesets/mentions-all.sql"
+enabled = true
 
-# [filters.params]
-# sender = "wxid_example"
+[[filters.rulesets]]
+file = "../rulesets/files.sql"
+enabled = true
+
+[[filters.rulesets]]
+file = "../rulesets/context.sql"
+enabled = true
+recent_count = 5

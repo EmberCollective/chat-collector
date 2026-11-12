@@ -1,172 +1,166 @@
-"""Registered SQL predicates and conversation-local context selection."""
+"""One round snapshot, registered SQL queries, and unique selected message IDs."""
 import importlib
+import hashlib
 import json
 from pathlib import Path
-import re
 import sqlite3
 import tempfile
 
-
-class RuleRegistry:
-    def __init__(self):
-        self.builders = {}
-
-    def register(self, name, builder):
-        if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9_]*', name):
-            raise ValueError('Invalid filter type name')
-        if name in self.builders or not callable(builder):
-            raise ValueError('Duplicate filter type or non-callable builder: '+name)
-        self.builders[name] = builder
+from .store import canonical, digest
+from .identities import IdentityContext
 
 
-def fields(rule, required=(), optional=()):
-    if set(rule)-{'type', *required, *optional} or not set(required)<=set(rule):
-        raise ValueError('Invalid fields for filter '+str(rule.get('type')))
+def _schema(db):
+    db.executescript('''
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE messages(
+            identity TEXT PRIMARY KEY, platform TEXT, account_id TEXT,
+            conversation_id TEXT, conversation_type TEXT, sender_id TEXT,
+            sent_at INTEGER, message_id TEXT, local_id INTEGER, database_name TEXT,
+            text TEXT, kind TEXT, mentions_all INTEGER, eligible INTEGER, body TEXT);
+        CREATE INDEX conversation_time ON messages(
+            platform,account_id,conversation_type,conversation_id,sent_at,local_id);
+        CREATE VIEW candidates AS SELECT * FROM messages WHERE eligible=1;
+        CREATE TABLE hits(identity TEXT NOT NULL REFERENCES messages(identity),
+            rule TEXT NOT NULL, PRIMARY KEY(identity,rule));
+    ''')
 
 
-def _values(rule):
-    fields(rule, ('values',))
-    values = rule['values']
-    if not isinstance(values, list) or not values or any(not isinstance(x,str) or not x for x in values):
-        raise ValueError('Filter values must be a nonempty array of nonempty strings')
-    return values
+def _read_only(action, first, second, database, trigger):
+    if action == sqlite3.SQLITE_READ:
+        return sqlite3.SQLITE_OK if first in {'messages', 'candidates'} else sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_FUNCTION:
+        return sqlite3.SQLITE_DENY if second == 'load_extension' or second.startswith('pragma_') else sqlite3.SQLITE_OK
+    return sqlite3.SQLITE_OK if action in {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE} else sqlite3.SQLITE_DENY
 
 
-def _keywords(rule, compiler):
-    return '('+' OR '.join(f'instr(lower(text),lower({compiler.bind(v)}))>0' for v in _values(rule))+')'
+def load_rulesets(config):
+    from .config import validate_filters
+    settings = config.get('filters', {})
+    validate_filters(settings)
+    entries = settings.get('rulesets', [])
+    if not isinstance(entries, list):
+        raise ValueError('filters.rulesets must be an array')
+    base = Path(config.get('_config_path', '.')).resolve().parent
+    result = []
+    db = sqlite3.connect(':memory:')
+    try:
+        _schema(db)
+        db.set_authorizer(_read_only)
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry)-{'file', 'params', 'recent_count', 'enabled'} or not entry.get('file'):
+                raise ValueError('Each ruleset needs file, optional enabled, params and recent_count')
+            if not isinstance(entry['file'], str) or Path(entry['file']).suffix.lower() != '.sql':
+                raise ValueError('ruleset.file must name a .sql file')
+            if not isinstance(entry.get('enabled', True), bool):
+                raise ValueError('ruleset.enabled must be true or false')
+            count = entry.get('recent_count', 0)
+            if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 1000:
+                raise ValueError('ruleset.recent_count must be an integer from 0 to 1000')
+            params = entry.get('params', {})
+            if not isinstance(params, dict) or any(
+                not isinstance(k, str) or k.startswith('_') or k in {'window_start', 'window_end', 'recent_count'}
+                or (v is not None and not isinstance(v, (str, int, float))) for k, v in params.items()
+            ):
+                raise ValueError('Ruleset params must be named scalars; window_start/window_end/recent_count and _ prefixes are reserved')
+            if not entry.get('enabled', True):
+                continue
+            path = (base / entry['file']).resolve()
+            sql = path.read_text(encoding='utf-8-sig').strip()
+            bound = dict(params, window_start=0, window_end=1, recent_count=count)
+            try:
+                db.execute('EXPLAIN '+sql, bound).fetchall()
+            except sqlite3.Error as exc:
+                raise ValueError(f'Invalid read-only SQL ruleset {path.name}: {exc}') from exc
+            provenance = dict(file=Path(entry['file']).as_posix(), params=params,
+                              recent_count=count, sql_sha256=hashlib.sha256(sql.encode('utf-8')).hexdigest())
+            result.append(dict(file=str(path), sql=sql, params=params, recent_count=count,
+                               provenance=provenance))
+    finally:
+        db.close()
+    return result
 
 
-def _membership(column):
-    def build(rule, compiler):
-        return column+' IN ('+','.join(compiler.bind(v) for v in _values(rule))+')'
-    return build
-
-
-def _mentions(rule, compiler):
-    fields(rule)
-    return 'mentions_all=1'
-
-
-def _combine(rule, compiler):
-    fields(rule, ('conditions',))
-    conditions = rule['conditions']
-    if not isinstance(conditions,list) or not conditions:
-        raise ValueError('Combined filters need nonempty conditions')
-    return '('+(' AND ' if rule['type']=='all' else ' OR ').join('('+compiler.compile(c)+')' for c in conditions)+')'
-
-
-def _nearby(rule, compiler):
-    fields(rule, ('condition',), ('before','after'))
-    before, after = rule.get('before',1), rule.get('after',1)
-    for value in (before,after):
-        if isinstance(value,bool) or not isinstance(value,int) or not 0<=value<=1000:
-            raise ValueError('nearby before/after must be integers from 0 to 1000')
-    condition = compiler.compile(rule['condition'])
-    compiler.before += before
-    compiler.after += after
-    if max(compiler.before,compiler.after)>1000:
-        raise ValueError('Total context span per side cannot exceed 1000')
-    alias = '_rule_window_'+str(len(compiler.windows))
-    expression = f'''max(CASE WHEN ({condition}) THEN 1 ELSE 0 END) OVER (
-        PARTITION BY conversation_type,conversation_id
-        ORDER BY sent_at,CAST(local_id AS INTEGER),database_name,message_id
-        ROWS BETWEEN {before} PRECEDING AND {after} FOLLOWING)'''
-    compiler.windows.append((alias,expression))
-    return alias+'=1'
-
-
-class SqlRules:
-    """Builders return SQL; bind() parameterizes values; compile() composes children."""
-    def __init__(self, register=None, prefix='_rule_p'):
-        self.registry = RuleRegistry()
-        for name,builder in {'keywords':_keywords,'kind':_membership('kind'),
-                             'conversation':_membership('conversation_id'),'sender':_membership('sender_id'),
-                             'mentions_all':_mentions,'all':_combine,'any':_combine,'nearby':_nearby}.items():
-            self.registry.register(name,builder)
-        if register:
-            register(self.registry)
-        self.params, self.windows = {}, []
-        self.prefix = prefix
-        self.before = self.after = self.depth = self.nodes = 0
-
-    def bind(self, value):
-        if value is not None and not isinstance(value,(str,int,float,bytes)):
-            raise ValueError('SQL filter parameter must be a scalar')
-        key = self.prefix+str(len(self.params))
-        self.params[key] = value
-        return ':'+key
-
-    def compile(self, rule):
-        self.depth += 1
-        self.nodes += 1
-        try:
-            if self.depth>8 or self.nodes>128:
-                raise ValueError('Filter tree exceeds 8 levels or 128 nodes')
-            if not isinstance(rule,dict) or not isinstance(rule.get('type'),str) or rule['type'] not in self.registry.builders:
-                raise ValueError('Unknown filter type')
-            sql = self.registry.builders[rule['type']](rule,self)
-            if not isinstance(sql,str) or not sql.strip():
-                raise ValueError('Filter builder must return a SQL expression')
-            return sql
-        finally:
-            self.depth -= 1
-
-
-def compile_rules(config):
-    from .config import load_filter_extension
-    settings = config.get('filters',{})
-    rules = settings.get('rules',[])
-    if not isinstance(rules,list):
-        raise ValueError('filters.rules must be an array')
-    module = load_filter_extension(settings) if rules and settings.get('code_file') else None
-    compiler = SqlRules(getattr(module,'register_filters',None))
-    predicate = ' AND '.join('('+compiler.compile(rule)+')' for rule in rules) or '1'
-    return compiler,predicate
-
-
-def scan_filtered(config, start, end):
-    """Keep native timestamp filtering; context affects eligibility, not checkpoints."""
-    from .config import build_filter
-    adapter = importlib.import_module('collector.adapters.'+config['platform'])
-    where, params = build_filter(config)
-    compiler,predicate = compile_rules(config)
-    if not compiler.windows:
-        yield from adapter.scan(config['source'],start,end,f'({where}) AND ({predicate})',dict(params,**compiler.params))
+def scan_filtered(config, start, end, *, rulesets=None):
+    """Finish all rules before yielding; SQL explicitly chooses candidates or context."""
+    if end <= start:
+        raise ValueError('end must be after start')
+    if rulesets is None:
+        rulesets = load_rulesets(config)
+    if not rulesets:
         return
+    adapter = importlib.import_module('collector.adapters.'+config['platform'])
+    count = max((r['recent_count'] for r in rulesets), default=0)
     with tempfile.TemporaryDirectory(prefix='collector-filter-') as folder:
-        db = sqlite3.connect(Path(folder)/'context.db')
+        db = sqlite3.connect(Path(folder)/'round.db')
         try:
-            db.execute('''CREATE TABLE messages(identity TEXT PRIMARY KEY,conversation_id TEXT,
-                conversation_type TEXT,sender_id TEXT,sent_at INTEGER,message_id TEXT,local_id TEXT,
-                database_name TEXT,text TEXT,kind TEXT,mentions_all INTEGER,eligible INTEGER,body TEXT)''')
+            _schema(db)
             conversations = set()
+
             def insert(message, eligible):
-                source = message.get('source',{})
-                identity = json.dumps([message.get(k) for k in ('platform','account_id','conversation_id','message_id')])
-                db.execute('INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                    (identity,message['conversation_id'],message['conversation_type'],message['sender_id'],
-                     message['sent_at'],message['message_id'],str(source.get('local_id','0')),
-                     Path(source.get('database','')).name,message['text'],message['kind'],
-                     int(message['mentions_all']),eligible,json.dumps(message,ensure_ascii=False)))
-            for message in adapter.scan(config['source'],start,end,where,params):
-                insert(message,1)
-                conversations.add((message['conversation_type'],message['conversation_id']))
-            if not conversations:
-                return
-            # Unfiltered neighbors must retain their positions even when they fail base filters.
-            for message in adapter.scan(config['source'],start,end,context=(compiler.before,compiler.after),conversations=conversations):
-                insert(message,0)
+                source = message.get('source', {})
+                identity = json.dumps([message.get(k) for k in (
+                    'platform', 'account_id', 'conversation_type', 'conversation_id', 'message_id')])
+                db.execute('INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (
+                    identity, message['platform'], message['account_id'], message['conversation_id'],
+                    message.get('conversation_type', 'direct'), message['sender_id'], message['sent_at'],
+                    message['message_id'], int(source.get('local_id', 0)), Path(source.get('database', '')).name,
+                    message['text'], message['kind'], int(message['mentions_all']), eligible,
+                    json.dumps(message, ensure_ascii=False)))
+
+            for message in adapter.scan(config['source'], start, end):
+                insert(message, 1)
+                conversations.add((message['conversation_type'], message['conversation_id']))
+            if count and conversations:
+                # An anchor N rows before the window can need another N rows of context.
+                for message in adapter.scan(config['source'], start, start, context=(2 * count, 0), conversations=conversations):
+                    insert(message, 0)
             db.commit()
-            previous = 'messages'
-            stages = []
-            for index,(alias,expression) in enumerate(compiler.windows):
-                name = '_stage_'+str(index)
-                stages.append(f'{name} AS (SELECT *,{expression} AS {alias} FROM {previous})')
-                previous = name
-            query = 'WITH '+','.join(stages)+f''' SELECT body FROM {previous}
-                WHERE eligible=1 AND ({predicate})
-                ORDER BY sent_at,CAST(local_id AS INTEGER),database_name,message_id'''
-            for row in db.execute(query,compiler.params):
-                yield json.loads(row[0])
+            for rule in rulesets:
+                bound = dict(rule['params'], window_start=start, window_end=end, recent_count=rule['recent_count'])
+                cursor = db.cursor()
+                try:
+                    db.set_authorizer(_read_only)
+                    cursor.execute(rule['sql'], bound)
+                    if [column[0] for column in cursor.description or []] != ['identity']:
+                        raise ValueError('SQL must return exactly one column named identity')
+                    rows = cursor.fetchall()
+                    if any(not isinstance(row[0], str) for row in rows):
+                        raise ValueError('SQL identity must be a non-null string from messages')
+                except (sqlite3.Error, ValueError) as exc:
+                    raise ValueError(f'Ruleset {Path(rule["file"]).name} failed: {exc}') from exc
+                finally:
+                    cursor.close()
+                    db.set_authorizer(None)
+                # Rules share all input rows; only their output IDs are deduplicated.
+                try:
+                    db.executemany('INSERT OR IGNORE INTO hits VALUES(?,?)',
+                                   ((row[0], canonical(rule['provenance'])) for row in rows))
+                except sqlite3.IntegrityError as exc:
+                    raise ValueError(f'Ruleset {Path(rule["file"]).name} returned an unknown identity') from exc
+            cursor = db.execute('''WITH ordered AS (
+                    SELECT *,lag(body) OVER (
+                        PARTITION BY platform,account_id,conversation_type,conversation_id
+                        ORDER BY sent_at,local_id,database_name,message_id,identity) AS previous_body
+                    FROM messages
+                ), matches AS (
+                    SELECT identity,json_group_array(json(rule)) AS rules
+                    FROM (SELECT identity,rule FROM hits ORDER BY identity,rule) GROUP BY identity
+                ) SELECT body,rules,previous_body FROM ordered JOIN matches USING(identity)
+                    ORDER BY sent_at,local_id,database_name,message_id,identity''')
+            identities = IdentityContext(config)
+            try:
+                for body, rules, previous_body in cursor:
+                    message = json.loads(body)
+                    previous = json.loads(previous_body) if previous_body else None
+                    message.setdefault('source', {})['selection_context'] = {
+                        'previous_message_key': digest([str(previous[k]) for k in (
+                            'platform', 'account_id', 'conversation_id', 'message_id')]) if previous else None,
+                        'previous_known': previous is not None,
+                    }
+                    yield identities.enrich(dict(message, matched_rules=json.loads(rules)))
+            finally:
+                identities.close()
+                cursor.close()
         finally:
             db.close()

@@ -1,79 +1,127 @@
-# 筛选种类与上下文规则
+# SQL 规则集与执行时序
 
-普通条件和新规则共用 `collector/filters.py` 的类型注册器。CLI、正式采集、重放和控制台预览使用 `scan_filtered()`，不各自实现筛选。没有配置 `filters.rules` 时保持原有行为；只有点条件时直接查询源快照，只有涉及上下文时才构建临时 SQL 查询表。
+每个规则集是一个 `.sql` 文件。条件组合直接使用 SQLite 的 `AND`、`OR`、`EXISTS`、`JOIN`、CTE 和窗口函数；没有规则父类或 JSON 条件语言。微信、QQ、CLI、预览和重放统一使用 `collector/filters.py`。
 
-## 使用上下文筛选
+## 一轮怎么执行
 
-面板 → “筛选与重放” → “上下文筛选”：填写向前、向后的条数，选择关键词、文件或 @所有人，点击“加入扩展规则”，先预览。正式采集前到配置页保存。
+1. 触发扫描，固定时间范围 `[上次成功终点, 本轮开始时间)`；首轮使用配置的回溯长度。
+2. 按配置刷新解密快照，将本轮消息读入临时 SQLite 查询表。所有规则共享这份数据，增加规则不会增加原始消息扫描次数。
+3. 按注册顺序执行 SQL；每条规则返回消息 `identity`。所有规则读取相同输入，先命中的消息仍能参与后续规则的判断。
+4. 结果写入本轮 `hits` 表，以消息 identity 和命中规则构成联合主键，使用 `INSERT OR IGNORE` 合并，再按消息聚合。规则 A 命中 1、2，B 命中 2、3，C 命中 2、4，最终为 1、2、3、4。
+5. 全部规则成功后，读取唯一命中的消息，按处理强度归档附件；执行持久去重，将消息事件和时间终点一并提交，再原子输出 JSONL。
 
-示例：当前消息自身或前后各 2 条中，有消息包含“截止”，则选中当前消息。
+某条规则失败时整轮失败，不处理该轮附件、不推进时间终点。附件或写入阶段失败也不提交该轮消息进度；已归档的内容寻址文件可能保留，重试可复用。输出阶段失败时已提交的待输出队列仍存在，下次运行先恢复输出。
 
-```json
-[
-  {
-    "type": "nearby",
-    "before": 2,
-    "after": 2,
-    "condition": {"type": "keywords", "values": ["截止"]}
-  }
-]
+## 注册规则
+
+两平台各自的 TOML 使用相同结构，文件路径相对 TOML 所在目录。当前默认注册 `../rulesets/all.sql`，保持原先的全部候选输出行为。启用限制性规则时，替换这个默认注册项，否则它仍会选中全部候选。
+
+```toml
+[[filters.rulesets]]
+file = "../rulesets/keyword.sql"
+params = { keyword = "截止" }
+
+[[filters.rulesets]]
+file = "../rulesets/files-or-all.sql"
+
+[[filters.rulesets]]
+file = "../rulesets/context.sql"
+recent_count = 5
 ```
 
-这是“判断当前消息的邻近消息是否命中”的语义，直接命中的当前消息也保留。前后方向针对当前消息的邻居，不是针对命中点向外扩张的方向。`before=0, after=0` 只判断当前消息。先按消息时间，再按数字本地 ID、数据库名、消息 ID 稳定排序；同一会话的微信消息跨分库合并排序。QQ 群聊与私聊即使数字 ID 相同也不混合。
+注册项之间取并集。需要同时满足条件，就在同一个 SQL 文件里写 `AND`。每项可设置 `enabled=true/false`，省略表示启用。关闭的条目不读取 SQL 文件、不执行查询，也不参与历史补读量计算。`rulesets=[]`、省略注册表或全部关闭时不选取消息，正式采集报告 `no_enabled_rules`，不刷新数据库、不推进时间终点；已提交的待输出队列仍可恢复。
 
-**上下 N 条计数包含不满足条件的消息。** 上方基础筛选限制输出的当前消息，不提前删除它的邻居。例如“当前消息为文件，前后两条中有截止关键词”可用基础 `files=true` 配合上述规则。若希望保留所有上下文消息，不要再用基础关键词把当前消息限制为必须包含该词。
+规则必须是**一条只读查询，只返回一列 `identity`**。例如：
 
-`rules` 数组内各项为 AND；需要 OR 时使用 `any`。条件可嵌套；方向条数为 0–1000 的整数，树深最多 8 层、节点最多 128 个，所有上下文算子的累计向前/向后范围各最多 1000 条。超出或拼写错误会报错，不会默默忽略。
-
-## 可用种类
-
-| type | 参数 | 判断 |
-|---|---|---|
-| keywords | values: 字符串数组 | 文本包含任一关键词；沿用 SQLite lower/instr 语义 |
-| kind | values: 字符串数组 | 消息类别属于列表，如 file、image、text |
-| conversation | values: 字符串数组 | 会话 ID 属于列表 |
-| sender | values: 字符串数组 | 发送者 ID 属于列表 |
-| mentions_all | 无 | 数据库中的真实 @所有人 标记 |
-| all | conditions: 规则数组 | 所有子条件成立 |
-| any | conditions: 规则数组 | 任一子条件成立 |
-| nearby | before、after、condition | 当前消息或指定邻居存在符合 condition 的消息 |
-
-TOML 配置示例见 [context-filter.toml](examples/context-filter.toml)。把内容合并到已有 `[filters]`，不要替换账号、存储或调度配置。扩展规则 JSON 可通过现有配置 PATCH 和预览 API 传入 `filters.rules`。
-
-## 新增种类的开放接口
-
-可信本地 Python 扩展通过配置中已有的 `filters.code_file` 加载。实现 `register_filters(registry)`，调用 `registry.register(type_name, builder)`；无需修改微信或 QQ 适配器。种类名必须唯一，不能覆盖内置种类。
-
-```python
-from collector.filters import fields
-
-def register_filters(registry):
-    def text_length(rule, compiler):
-        fields(rule, ("minimum",))
-        minimum = rule["minimum"]
-        if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 0:
-            raise ValueError("minimum must be a nonnegative integer")
-        return "length(text) >= " + compiler.bind(minimum)
-    registry.register("text_length", text_length)
+```sql
+SELECT identity FROM candidates
+WHERE conversation_type = 'group'
+  AND (kind = 'file' OR mentions_all = 1 OR instr(text, :keyword) > 0);
 ```
 
-规则可写为 `{"type":"text_length","minimum":20}`，也可放入 `nearby.condition`。完整示例见 [registered-filter.py](examples/registered-filter.py)。
+`params` 使用命名参数绑定，不进行字符串插值。`window_start`、`window_end`、`recent_count` 由本轮注入，禁止自定义覆盖；下划线开头的参数名也保留。规则文件每轮重新读取，修改只影响后续轮次。
 
-builder 接收规则字典与编译器，校验参数后返回 SQL 表达式；值使用 `compiler.bind(value)` 绑定，组合条件使用 `compiler.compile(child)`。跨平台公共列为 `conversation_id`、`conversation_type`、`sender_id`、`sent_at`、`text`、`kind`、`mentions_all`。需要原生列的旧 `build_filter(settings) -> (sql, params)` 和 `sql_file` 仍保留，作为当前消息的基础限制；这类原生 SQL 不直接嵌入跨平台上下文条件。
+## 三个独立规则集
 
-扩展可同时定义旧 `build_filter` 和新注册函数。面板允许填写已注册种类的规则，不允许上传或编辑 Python 代码。扩展是可信本地代码，会在配置校验和执行时加载，注册函数不应产生外部副作用。
+直接将 [three-rulesets.json](examples/three-rulesets.json) 的数组粘贴到注册表，可分别启用 @所有人、文件和上下文。不增加页面上的独立开关，启停只编辑各项 `enabled`。
 
-## 增量与去重
+- `mentions-all.sql`：真实全员提及。
+- `files.sql`：文件消息。
+- `context.sql`：以同会话的 @所有人或文件消息为中心，取前后各 5 条（recent_count=5），包含中心消息。
 
-- 默认时间范围继续是 `[上次成功终点, 本轮开始)`。邻居可以来自范围外，但输出仅包含范围内的当前消息，不修改时间游标。
-- 查询先用原生数据库取得本轮候选和同会话的边界邻居，再在临时 SQLite 表中用窗口函数判断；不会为此解码全历史消息。微信每个分库各取得足量边界邻居后统一计算。
-- 同一消息被多个邻居或规则命中，只进入本次结果一次。最终仍按平台、账号、会话、消息 ID 去重，正文和附件不变就不产生新事件，变化则产生修订。规则名称或命中路径不写入消息语义载荷。
-- 预览不调用附件归档或推进断点。输出消息的附件依旧遵循轻量／标准／完整设置。
+关键词是另一个独立规则 keyword.sql，只对当条正文判断，不参与上下文触发；空关键词不命中。带关键词的完整四项注册表见 [collection-rulesets.json](examples/collection-rulesets.json)。
+
+三个规则彼此独立，关闭 @所有人或文件规则不会改变上下文规则的判断输入。取消注册与 enabled=false 均可停止该条规则；空注册表不会回退到全量采集。要全量需明确注册 all.sql。
+
+## 可查询的表
+
+| 表或视图 | 内容 |
+|---|---|
+| `messages` | 本轮全部消息，以及为上下文补读的历史消息；历史仅涵盖本轮有新增消息的会话 |
+| `candidates` | 本轮时间范围内的全部消息；普通规则从这里选择 |
+
+公共列：`identity, platform, account_id, conversation_type, conversation_id, sender_id, sent_at, message_id, local_id, database_name, text, kind, mentions_all, eligible, body`。`body` 是原标准消息的 JSON，可用 `json_extract` 查询附件元数据。`identity` 是内部不透明标识，直接返回，不自行拼装；它包含平台、账号、会话类型、会话 ID、消息 ID。
+
+SQL 返回 messages 中的历史消息 ID 时也会输出，这是上下文带出前文的显式机制；普通规则从 candidates 查询，因此仍只输出本轮消息。返回不存在的 ID、空 ID、错误列、无效 SQL 都会失败。不能访问命中表或通过先前规则的结果改变后续规则输入。
+
+所有筛选都属于 SQL 规则集：群聊用 `conversation.sql`，关键词用 `keyword.sql`，文件用 `files.sql`，全员提及用 `mentions-all.sql`；组合示例 `group-content.sql` 在指定群内判断文件、全员提及或关键词。默认时间窗口是唯一统一约束，没有隐藏的基础筛选。
+
+多个注册文件取并集。若需要“群 A 并且有关键词”，将两个条件用 AND 写在同一个 SQL 中；分别注册群规则和关键词规则会得到 OR 的效果。`eligible` 只标记消息是否属于本轮时间窗口，不含任何内容条件。
+
+## 关键词与前后五条上下文
+
+`keyword.sql` 只检查当前候选消息的 `text` 是否包含非空 `:keyword`。另一条消息包含关键词，不能让当前消息通过。旧名 `recent-keyword.sql` 仅作相同语义的兼容入口，已去掉整群放行逻辑；新注册请使用 keyword.sql。
+
+`context.sql` 独立运行，触发点是 `mentions_all=1 OR kind='file'`，无需关键词参数。默认示例配置 recent_count=5，绑定 SQL 中前后各取的条数。扫描器最多补读 `2 × recent_count` 条历史，保证窗口前第五条的旧触发点也能拿到它自己的前五条；实际输出范围仍由 SQL 决定。
+
+按平台、账号、会话类型、会话 ID 分组，按 sent_at、数字 local_id、database_name、message_id 稳定排序，用 row_number() 取得位置。前后各 5 条是消息条数，不是分钟；包含中心最多 11 条。不同触发点可以重叠，合并后每条消息仍只处理一次。群聊和私聊不相互串入。无法显示正文的记录仍算一条真实数据库消息，不擅自忽略后再计数。
+
+跨轮次：
+
+1. 本轮新出现的触发点可以带出它之前的 5 条历史消息，因此上下文输出的 sent_at 可以早于事件 window.start_inclusive。
+2. 之后的消息只处理已进入本轮时间范围的部分，不提前读取 window_end 之后的消息。
+3. 后续轮次若有新消息进入旧触发点的前后五条范围，SQL 重新选中该触发点及其完整可用上下文。第六条不会触发它；没有范围内新消息的旧触发点也不触发。存储层对已输出且未变化的消息去重，处理层从累计事件中组合上下文，不会把续到的一句话孤立提交。
+
+这保留了默认增量扫描的 `[上次成功终点, 本轮开始)`，没有新增 ID 游标、隐式扩大时间窗或未来消息队列。历史补读是上下文规则显式请求的数据，查询与本轮范围不重叠。微信先从各分库取得足量边界记录，再统一排序。
+
+messages 是有限输入，不是全历史数据库。自定义上下文 SQL 必须配置足量 recent_count；普通关键词规则不需要此字段。迟到入库且时间戳已落在旧窗口的消息仍需重放；相同时间戳使用稳定排序，不宣称知道真实亚秒先后。
+
+## 两种去重与时间推进
+
+- **本轮规则之间**：SQL 主键去重，每条消息最多归档一次。不会因 A 先命中，就从 B 的上下文移除该消息。
+- **不同轮次及重放**：保持已有消息身份（平台、账号、会话 ID、消息 ID）和内容哈希逻辑；消息内容与命中规则集合都不变时不输出；任一变化产生递增修订。命中来源作为事件顶层 matched_rules 输出，不计入消息内容哈希，也不改变持久消息身份。不同消息即使文字一样也保留。
+- 成功后推进整个时间片，包括没命中的消息。下一轮不会重新把它们当作候选。默认时间窗口属于 SQL 条件；SQLite 索引加快范围查询，项目状态库负责保存上次终点。
+- 修改规则、晚同步的旧时间戳消息、旧消息附件补齐，需要显式重放；不增加隐式重叠扫描。重放不推进定时进度。
+
+## 调试与迁移
+
+调试台“筛选与重放”中可编辑注册表：只包含文件路径、参数和最近条数；查询逻辑写在本地 SQL 文件。先预览，再保存配置。预览只读、不刷新快照、不处理附件，也不改变进度。工具仍在 `tools/console`，核心不依赖它。
+
+原基础筛选、`sql_file / code_file` 扩展、JSON 条件树及 `register_filters` 已移除。filters 下仅允许 rulesets，其他字段即使为空也明确报错，避免悄悄放宽筛选。旧条件要迁入完整 SQL；有多条规则时，要将原全局限制加入每条规则，保持“原限制 AND（规则 A OR 规则 B）”的含义。旧 Python 不会再被加载。
+
+当前本机两份配置的旧条件均未启用，已备份到 tools/console/.runtime/config-backups 并清理，不影响现有采集范围。新示例见 `examples/sql-rulesets.toml`。
 
 ## 风险与限制
 
-尚未进入快照的后续消息无法参与判断。之后才出现的命中消息不会自动回补上一轮未输出的旧消息；要补查请重放相应时间段。这与原有严格时间增量规则一致，不新增隐式重叠窗口或待补队列。
+新 SQL 运行在临时查询库，SQLite 授权器禁止写入、附加数据库、PRAGMA 和加载扩展；不会修改源库，也不再加载 Python 筛选扩展。
 
-上下文筛选比单条筛选需要更多读取和临时存储，大时间范围、多会话或较大的 N 会增加耗时。临时数据库含本轮消息，放在系统临时目录，正常结束会关闭并清理；进程被强杀可能遗留临时目录，应按聊天明文管理。没有新增 CPU/内存硬限额。
+临时表包含聊天明文，位于系统临时目录；正常结束会清理，强杀可能留下文件。每条规则的 ID 结果暂存内存，复杂 SQL、大时间窗或大量上下文会增加耗时和存储，没有新增 CPU/内存硬限额，未做全历史压力测试。
 
-读取的是本地快照，不代表云端完整聊天顺序。没有进行全历史压力测试。注册器允许可信扩展执行代码，不是插件隔离机制；不要配置不信任的脚本。
+各规则使用同一份已准备数据；这不等于微信和 QQ 在同一时刻生成全局事务快照。不要让其他程序同时替换本模块的明文库。本轮开始之后才到达的消息不能参与该轮判断。
+
+## 输出命中来源
+
+每条 JSONL 事件增加顶层 `matched_rules` 数组，与 `message` 同级。每项记录：
+
+- `file`：注册表里的 SQL 文件路径（统一为正斜杠），可直接定位是哪条规则。
+- `params`：本次注册的参数；同一 SQL 使用不同参数注册时可区分。
+- `recent_count`：该条规则配置的上下文条数。
+- `sql_sha256`：本轮实际读取的 SQL 文本的 UTF-8 SHA-256；读取时去除 BOM、统一换行并去除首尾空白。便于分辨文件修改前后的版本，不是完整 SQL 历史归档。
+
+只列实际命中的已启用规则，未命中与禁用项不列出。相同注册重复命中只记一次，不同参数或 SQL 版本分别保留；列表按固定顺序输出，不受注册顺序影响。SQL 文件本身仍只返回 identity，无需自行返回规则名或改写 params。
+
+预览没有事件封装，字段位于 `messages[].matched_rules`；正式输出位于事件的 `matched_rules`，原 message 中不混入规则字段。面板显示规则文件，完整结构可查看参数与摘要。
+
+持久去重同时比较消息内容哈希与规则集合哈希。只调整规则顺序或重复添加相同注册不会新增事件；重放时若命中集合、参数或 SQL 版本改变，则仍用原 message_key，生成新 revision，payload_sha256 在消息正文和附件不变时保持不变。它是来源标记更新，不是另一条聊天消息。
+
+状态库自动增加 rules_hash 列，旧批次原样保留。旧记录没有命中标记，不推测当时是哪条规则；只有显式重放后才能用当前规则补充，首次补充产生修订，不能还原旧规则版本。未命中任何当前规则的旧消息不会输出删除事件。

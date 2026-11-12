@@ -20,7 +20,8 @@ class Store:
         self.db = sqlite3.connect(path)
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS seen(message_key TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, revision INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS seen(message_key TEXT PRIMARY KEY, payload_hash TEXT NOT NULL,
+                revision INTEGER NOT NULL, rules_hash TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL, exported INTEGER NOT NULL DEFAULT 0);
         ''')
         identity = canonical([platform, str(account)])
@@ -29,6 +30,8 @@ class Store:
             self.db.close()
             raise ValueError('State database belongs to a different platform/account')
         with self.db:
+            if 'rules_hash' not in {row[1] for row in self.db.execute('PRAGMA table_info(seen)')}:
+                self.db.execute("ALTER TABLE seen ADD COLUMN rules_hash TEXT NOT NULL DEFAULT ''")
             self.set('identity', identity)
         self.identity = digest([platform, str(account)])[:16]
         self.platform, self.account = platform, str(account)
@@ -47,6 +50,13 @@ class Store:
         matched = emitted = 0
         with self.db:
             for message in messages:
+                rules = message.get('matched_rules', [])
+                if not isinstance(rules, list) or any(not isinstance(rule, dict) or not isinstance(rule.get('file'), str) for rule in rules):
+                    raise ValueError('matched_rules must contain rule objects with a file')
+                unique_rules = {canonical(rule): rule for rule in rules}
+                rules = [unique_rules[key] for key in sorted(unique_rules)]
+                rules_hash = digest(rules) if rules else ''
+                message = {k: v for k, v in message.items() if k != 'matched_rules'}
                 identity = [message.get(k) for k in ('platform', 'account_id', 'conversation_id', 'message_id')]
                 if any(value is None or str(value) == '' for value in identity):
                     raise ValueError('Message lacks a stable platform/account/conversation/message identity')
@@ -54,19 +64,30 @@ class Store:
                     raise ValueError('Message platform/account does not match this collector')
                 message_key = digest([str(value) for value in identity])
                 semantic = {k: v for k, v in message.items() if k != 'source'}
+                if 'identity' in semantic:
+                    def stable_profile(value):
+                        if isinstance(value, dict):
+                            return {k:stable_profile(v) for k,v in value.items() if k not in {'observed_at','source'}}
+                        if isinstance(value, list):
+                            return [stable_profile(v) for v in value]
+                        return value
+                    semantic['identity'] = stable_profile(semantic['identity'])
                 payload_hash = digest(semantic)
-                previous = self.db.execute('SELECT payload_hash,revision FROM seen WHERE message_key=?', (message_key,)).fetchone()
+                previous = self.db.execute('SELECT payload_hash,revision,rules_hash FROM seen WHERE message_key=?', (message_key,)).fetchone()
                 matched += 1
-                if previous and previous[0] == payload_hash:
+                if previous and previous[0] == payload_hash and previous[2] == rules_hash:
                     continue
                 revision = previous[1] + 1 if previous else 1
                 event = {'schema_version': 1, 'event_id': digest([message_key, revision]),
                          'message_key': message_key, 'revision': revision, 'operation': 'upsert',
                          'payload_sha256': payload_hash, 'collected_at': collected_at,
+                         'matched_rules': rules,
                          'window': {'start_inclusive': window_start, 'end_exclusive': window_end},
                          'message': message}
                 self.db.execute('INSERT INTO outbox(body) VALUES (?)', (canonical(event),))
-                self.db.execute('INSERT INTO seen VALUES (?,?,?) ON CONFLICT(message_key) DO UPDATE SET payload_hash=excluded.payload_hash,revision=excluded.revision', (message_key, payload_hash, revision))
+                self.db.execute('''INSERT INTO seen(message_key,payload_hash,revision,rules_hash) VALUES (?,?,?,?)
+                    ON CONFLICT(message_key) DO UPDATE SET payload_hash=excluded.payload_hash,
+                    revision=excluded.revision,rules_hash=excluded.rules_hash''', (message_key, payload_hash, revision, rules_hash))
                 emitted += 1
             if advance:
                 self.set('window_end', window_end)

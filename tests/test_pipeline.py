@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from collector.config import build_filter, load_config
+from collector.config import load_config, validate_filters
 from collector.store import Store
 from collector.__main__ import InstanceLock
 
@@ -27,6 +27,44 @@ def test_replay_edit_and_revert_are_distinct_revisions(tmp_path):
         assert [record['revision'] for record in records] == [1, 2, 3]
         assert len({record['event_id'] for record in records}) == 3
         assert store.export(tmp_path / 'out') == []
+    finally:
+        store.close()
+
+
+def test_rule_provenance_revisions_preserve_content_hash_and_ignore_order(tmp_path):
+    store = Store(tmp_path/'state.db','wechat','account')
+    first, second = {'file':'files.sql'}, {'file':'mentions-all.sql'}
+    try:
+        assert store.ingest([dict(message(),matched_rules=[first,second])],0,200,'now')['emitted'] == 1
+        assert store.ingest([dict(message(),matched_rules=[second,first,first])],0,200,'later')['emitted'] == 0
+        assert store.ingest([dict(message(),matched_rules=[second])],0,200,'later')['emitted'] == 1
+        records = [json.loads(row[0]) for row in store.db.execute('SELECT body FROM outbox ORDER BY seq')]
+        assert [row['revision'] for row in records] == [1,2]
+        assert records[0]['payload_sha256'] == records[1]['payload_sha256']
+        assert records[0]['message_key'] == records[1]['message_key']
+        assert records[0]['event_id'] != records[1]['event_id']
+        assert records[1]['matched_rules'] == [second]
+        assert 'matched_rules' not in records[0]['message']
+        path = Path(store.export(tmp_path/'out')[0])
+        assert [json.loads(line) for line in path.read_text().splitlines()] == records
+    finally:
+        store.close()
+
+
+def test_legacy_state_migrates_without_rewriting_old_events(tmp_path):
+    path = tmp_path/'old.db'
+    store = Store(path,'wechat','account')
+    store.ingest([message()],0,200,'now')
+    old = store.db.execute('SELECT body FROM outbox').fetchone()[0]
+    store.close()
+    with sqlite3.connect(path) as db:
+        db.execute('ALTER TABLE seen DROP COLUMN rules_hash')
+    store = Store(path,'wechat','account')
+    try:
+        assert store.get('window_end') == '200'
+        assert store.ingest([message()],0,200,'later')['emitted'] == 0
+        assert store.ingest([dict(message(),matched_rules=[{'file':'files.sql'}])],0,200,'later',advance=False)['emitted'] == 1
+        assert store.db.execute('SELECT body FROM outbox ORDER BY seq LIMIT 1').fetchone()[0] == old
     finally:
         store.close()
 
@@ -97,33 +135,10 @@ def test_explicit_replay_does_not_move_scheduled_checkpoint(tmp_path):
         store.close()
 
 
-def test_sql_builtins_group_and_any_content():
-    sql, values = build_filter({'filters': {'conversation_ids': ['g1'], 'mentions_all': True,
-                                         'files': True, 'keywords': ["it's due"]}})
-    conn = sqlite3.connect(':memory:')
-    conn.execute('CREATE TABLE messages(conversation_id,text,kind,mentions_all)')
-    conn.executemany('INSERT INTO messages VALUES (?,?,?,?)', [('g1', "it's due", 'text', 0),
-                        ('g1', 'other', 'file', 0), ('g2', 'all', 'text', 1), ('g1', 'other', 'text', 0)])
-    assert len(conn.execute('SELECT * FROM messages WHERE ' + sql, values).fetchall()) == 2
-    conn.close()
-
-
-def test_sql_and_code_extensions(tmp_path):
-    sql_file = tmp_path / 'filter.sql'
-    sql_file.write_text('sender_id = :sender')
-    code = tmp_path / 'filter.py'
-    code.write_text("def build_filter(settings):\n    return 'length(text) >= :minimum', {'minimum': 3}\n")
-    sql, params = build_filter({'filters': {'sql_file': str(sql_file), 'code_file': str(code), 'params': {'sender': 'u1'}}})
-    conn = sqlite3.connect(':memory:')
-    assert conn.execute('SELECT 1 FROM (SELECT :sender AS sender_id, \'hello\' AS text) WHERE ' + sql, params).fetchone() == (1,)
-    conn.close()
-
-
-def test_reserved_parameter_and_bad_match_rejected():
-    with pytest.raises(ValueError):
-        build_filter({'filters': {'params': {'_wc_start': 0}}})
-    with pytest.raises(ValueError):
-        build_filter({'filters': {'match': 'sometimes'}})
+@pytest.mark.parametrize('field', ['conversation_ids','keywords','files','mentions_all','match','sql_file','code_file','params','rules'])
+def test_legacy_filter_fields_are_rejected_not_silently_ignored(field):
+    with pytest.raises(ValueError, match='Only filters.rulesets'):
+        validate_filters({field: []})
 
 
 def test_state_cannot_change_account(tmp_path):
@@ -148,12 +163,14 @@ def test_relative_config_paths_and_schedule_validation(tmp_path):
 [source]
 account_id="a"
 decrypted_dir="plain"
+work_dir="scratch"
 [storage]
 state_file="state.db"
 output_dir="batches"
 ''')
     config = load_config(path)
     assert config['source']['decrypted_dir'] == str(tmp_path / 'plain')
+    assert config['source']['work_dir'] == str(tmp_path / 'scratch')
     assert config['schedule']['interval_seconds'] == 60
     assert config['schedule']['refresh_interval_seconds'] == 0
     assert config['processing']['intensity'] == 'full'
@@ -176,11 +193,12 @@ def test_refresh_interval_defers_without_losing_window_and_replay_bypasses(tmp_p
     cfg = {'platform':'wechat', 'source':{'account_id':'account','refresh':True},
            'storage':{'state_file':str(tmp_path/'state.db'),'output_dir':str(tmp_path/'out')},
            'schedule':{'initial_lookback_seconds':100,'refresh_interval_seconds':300},
-           'processing':{'intensity':'metadata'}}
+           'processing':{'intensity':'metadata'},
+           'filters':{'rulesets':[{'file':str(Path(__file__).resolve().parents[1]/'rulesets/all.sql')}]}}
     monkeypatch.setattr(wechat, 'refresh', lambda source: calls.append('refresh') or {})
-    def scan(source, start, end, where, params):
+    def scan(source, start, end, **kwargs):
         calls.append((start, end))
-        return [message()] if start <= 100 < end else []
+        return [dict(message(),conversation_type='group')] if start <= 100 < end else []
     monkeypatch.setattr(wechat, 'scan', scan)
     monkeypatch.setattr(runner.time, 'time', lambda: 200)
     assert runner.run_round(cfg)['matched'] == 1
@@ -196,12 +214,6 @@ def test_refresh_interval_defers_without_losing_window_and_replay_bypasses(tmp_p
     monkeypatch.setattr(runner.time, 'time', lambda: 500)
     runner.run_round(cfg)
     assert calls == ['refresh', (200, 500)]
-
-
-@pytest.mark.parametrize('name', ['files', 'mentions_all'])
-def test_string_false_is_not_a_boolean(name):
-    with pytest.raises(ValueError):
-        build_filter({'filters': {name: 'false'}})
 
 
 def test_state_input_collision_rejected_before_open(tmp_path):
@@ -230,6 +242,15 @@ state_file="plain/message_0.db"
 output_dir="batches"
 ''')
     with pytest.raises(ValueError, match='outside source'):
+        load_config(path)
+
+
+@pytest.mark.parametrize('work_dir', ['original', 'original/scratch'])
+def test_work_dir_inside_original_database_is_rejected(tmp_path, work_dir):
+    path = tmp_path / 'config.toml'
+    path.write_text('platform="qq"\n[source]\naccount_id="a"\nencrypted_dir="original"\n'
+                    f'work_dir="{work_dir}"\n[storage]\nstate_file="state.db"\noutput_dir="out"\n')
+    with pytest.raises(ValueError, match='work_dir must be outside'):
         load_config(path)
 
 

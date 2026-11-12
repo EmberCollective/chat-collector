@@ -10,12 +10,13 @@ import time
 from .config import load_config
 from .store import Store
 from .assets import AttachmentArchive
-from .filters import scan_filtered
+from .filters import scan_filtered, load_rulesets
 
 
 class InstanceLock:
-    def __init__(self, path):
+    def __init__(self, path, timeout=0):
         self.path = Path(str(path) + '.lock')
+        self.timeout = timeout
 
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -24,16 +25,22 @@ class InstanceLock:
             self.stream.write(b'0')
             self.stream.flush()
         self.stream.seek(0)
-        try:
-            if sys.platform == 'win32':
-                import msvcrt
-                msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            self.stream.close()
-            raise RuntimeError('Another collector is using this state file') from None
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                if sys.platform == 'win32':
+                    import msvcrt
+                    msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self.stream.close()
+                    raise RuntimeError('Another collector is using this state file') from None
+                time.sleep(min(.1, remaining))
         return self
 
     def __exit__(self, *args):
@@ -48,6 +55,10 @@ def run_round(config, *, start=None, end=None):
         store = Store(storage['state_file'], config['platform'], source['account_id'])
         try:
             recovered = store.export(storage['output_dir'])
+            rulesets = load_rulesets(config)
+            if not rulesets:
+                return {'platform': config['platform'], 'status': 'no_enabled_rules',
+                        'matched': 0, 'emitted': 0, 'duplicates': 0, 'batches': recovered}
             window_end = int(time.time()) if end is None else end
             previous = store.get('window_end')
             window_start = start if start is not None else (int(previous) if previous else window_end - config['schedule']['initial_lookback_seconds'])
@@ -63,7 +74,7 @@ def run_round(config, *, start=None, end=None):
                     return {'platform': config['platform'], 'status': 'waiting_for_refresh',
                             'retry_after_seconds': remaining, 'batches': recovered}
             refresh_result = adapter.refresh(source) if source.get('refresh', True) else {'mode': 'decrypted_only'}
-            messages = scan_filtered(config, window_start, window_end)
+            messages = scan_filtered(config, window_start, window_end, rulesets=rulesets)
             archive = AttachmentArchive(config, config['platform'], source['account_id'])
             messages = (archive.enrich(message) for message in messages)
             result = store.ingest(messages, window_start, window_end,

@@ -6,6 +6,7 @@ Extracted from the user's existing WeChatDataAnalysis checkout, version 2.10.1.
 - `decrypt.py`: required constants, helper functions and `WeChatDatabaseDecryptor` from `src/wechat_decrypt_tool/wechat_decrypt.py`; application-wide discovery, UI/API entry points and batch dispatch were omitted. The application logger import is replaced with Python's `logging.getLogger`.
 - `sqlite_wal.py` and `sqlite_diagnostics.py`: copied unchanged, preserving WAL authentication, snapshot validation, index diagnostics and atomic publication behavior.
 - `message_text.py`: original SQLite/zstd decoder and its three helper functions from `chat_helpers.py`, with only required imports. Every zstd expansion is now limited to 16 MiB, including nested/encoded paths; recognized compressed-data errors propagate instead of silently falling back to encoded text.
+- `contact_names.py`: `_load_group_nickname_map_from_contact_db` extracted unchanged from the same checkout's `chat_helpers.py`; only standard-library imports were added. Function text SHA-256: `3822d9e52b09403a162b3460de8c3469fc3f3579727d750e248cf5acc3d3e7b0`. Its requested-member filtering is retained; no replacement decoder was written.
 
 These are existing algorithms, not a new cryptographic implementation or reverse-engineering engine. No native DLL, lease, web server, AI model or frontend is required. Runtime dependencies are `cryptography` and `zstandard`.
 
@@ -16,3 +17,5 @@ Collection queries the actual decrypted `Msg_*` SQLite tables and their `Name2Id
 Refreshing decrypts only changed numbered `message_N.db` files and associated WAL content. It preserves original encrypted files and publishes a plain snapshot only after upstream validation. The refresh manifest is a file-change cache, not a message cursor. A source changing during its read fails the round and is retried by the caller; cross-database snapshots are sequential, not one global transaction.
 
 Generated snapshots receive a SQLite index on `(create_time, local_id)` for each message table. The original databases have no timestamp index in this installation; this index keeps native time-window queries bounded. Existing externally supplied decrypted-only snapshots are read-only and are not altered by `scan`.
+
+Performance maintenance: time indexes now build in one SQLite transaction per database, avoiding a durable commit per conversation table. HMAC verification and page decryption still run for every page; expensive anomaly variant diagnostics and per-page warning logs are limited to the first eight samples per database. Total warning counts, sample details, final diagnostics and integrity checks remain available. No cryptographic algorithm was replaced.

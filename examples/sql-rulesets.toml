@@ -1,0 +1,14 @@
+# Merge into an existing module's filters section. Do not enable all.sql alongside these.
+[[filters.rulesets]]
+enabled = true
+file = "../rulesets/keyword.sql"
+params = { keyword = "截止" }
+
+[[filters.rulesets]]
+enabled = true
+file = "../rulesets/files-or-all.sql"
+
+[[filters.rulesets]]
+enabled = true
+file = "../rulesets/context.sql"
+recent_count = 5
