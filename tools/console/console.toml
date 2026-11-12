@@ -1,0 +1,6 @@
+collector_root = '../..'
+port = 10400
+
+[modules]
+wechat = 'config/wechat.toml'
+qq = 'config/qq.toml'

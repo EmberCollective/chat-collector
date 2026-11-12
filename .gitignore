@@ -1,0 +1,9 @@
+data/
+runtime-deps/
+secrets/
+__pycache__/
+.pytest_cache/
+*.log
+tools/console/.runtime/
+.venv/
+tools/qq-nt-export/config.json

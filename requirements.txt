@@ -1,0 +1,6 @@
+cryptography>=41
+zstandard>=0.23
+protobuf>=7.34.1
+sqlcipher3>=0.6.2
+Pillow>=10
+pycryptodome>=3.23

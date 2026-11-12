@@ -1,0 +1,34 @@
+platform = "qq"
+
+[source]
+account_id = "997698095"
+encrypted_dir = 'D:\UserFolders\Documents\Tencent Files\997698095\nt_qq\nt_db'
+decrypted_dir = "../data/qq/decrypted"
+key_file = "../secrets/account-key.json"
+refresh = true
+media_dir = 'D:\UserFolders\Documents\Tencent Files\997698095\nt_qq\nt_data'
+
+[processing]
+intensity = "full" # metadata / standard / full
+
+[attachments]
+enabled = true
+archive_dir = "../data/assets"
+allowed_roots = ['D:\UserFolders\Downloads']
+
+[storage]
+state_file = "../data/qq/state.db"
+output_dir = "../data/batches"
+
+[schedule]
+# 0 refreshes every round; positive values defer whole rounds without advancing the checkpoint.
+refresh_interval_seconds = 0
+interval_seconds = 1800
+initial_lookback_seconds = 86400
+
+[filters]
+conversation_ids = []
+mentions_all = false
+files = false
+keywords = []
+match = "any"

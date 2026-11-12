@@ -1,0 +1,17 @@
+# Merge these keys into your existing [filters] section; retain source/storage settings.
+[filters]
+conversation_ids = []
+keywords = []
+mentions_all = false
+files = false
+match = "any"
+rules = [
+  { type = "nearby", before = 2, after = 2, condition = { type = "any", conditions = [
+    { type = "keywords", values = ["截止", "提交"] },
+    { type = "kind", values = ["file"] },
+    { type = "mentions_all" }
+  ] } }
+]
+# For code-defined types:
+# code_file = "registered-filter.py"
+# rules = [{ type = "nearby", before = 2, after = 2, condition = { type = "text_length", minimum = 20 } }]

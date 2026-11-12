@@ -1,0 +1,6 @@
+# Preserve byte-level provenance for bundled third-party code and assets.
+collector/vendor/** -text
+collector/adapters/qq_vendor/** -text
+collector/asset_vendor.py -text
+tools/qq-nt-export/scripts/** -text
+tools/console/static/vendor/** -text
