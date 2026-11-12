@@ -1,0 +1,7 @@
+# Optional attachment processing only; collection does not depend on these.
+PyMuPDF>=1.24
+python-docx>=1.2
+Pillow>=10.4
+psutil>=6
+python-dotenv>=1,<2
+# Legacy .doc conversion uses a separately installed LibreOffice executable.

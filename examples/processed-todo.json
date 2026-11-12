@@ -1,0 +1,97 @@
+{
+  "_example_notice": "全部内容为合成示例，未调用模型，不代表真实聊天或实际提取质量。",
+  "schema_version": 1,
+  "event_id": "synthetic-task-event-001",
+  "operation": "upsert",
+  "task_id": "synthetic-task-001",
+  "revision": 1,
+  "task": {
+    "schema_version": 1,
+    "task_id": "synthetic-task-001",
+    "revision": 1,
+    "title": "提交实验报告",
+    "event": "小王在教务办公室提交实验报告。",
+    "priority": "P2",
+    "priority_reason": "有明确动作、负责人和截止时间的常规任务；本例没有立即处置或重大影响的证据。",
+    "status": "open",
+    "time": {
+      "start": null,
+      "deadline": "2026-11-13T17:00:00+08:00",
+      "timezone": "Asia/Shanghai",
+      "text": "明天17点前"
+    },
+    "people": [
+      {
+        "name": "小王",
+        "role": "负责人"
+      }
+    ],
+    "location": "教务办公室",
+    "needs_review": false,
+    "review_reasons": [],
+    "source_message_keys": [
+      "synthetic-message-001"
+    ],
+    "sources": [
+      {
+        "message_key": "synthetic-message-001",
+        "event_id": "synthetic-event-001",
+        "revision": 1,
+        "collector_module": "qq",
+        "collector_description": "合成示例：QQ 本地数据库采集模块，SQLCipher 快照与 SQL 规则筛选。",
+        "account_id": "example-account",
+        "conversation_id": "example-group",
+        "conversation_type": "group",
+        "message_id": "example-message",
+        "sender_id": "teacher-example",
+        "sent_at": 1794466800,
+        "sent_at_local": "2026-11-12T15:00:00+08:00",
+        "collected_at": "2026-11-12T07:01:00+00:00",
+        "text": "小王请于明天17点前在教务办公室提交实验报告。",
+        "attachments": [],
+        "source": {
+          "database": "EXAMPLE/qq/decrypted/nt_msg.db",
+          "table": "group_msg_table",
+          "local_id": "example-message"
+        },
+        "matched_rules": [
+          {
+            "file": "../rulesets/keyword.sql",
+            "params": {
+              "keyword": "提交"
+            },
+            "recent_count": 0,
+            "sql_sha256": "example-sql-sha256"
+          }
+        ],
+        "window": {
+          "start_inclusive": 1794466740,
+          "end_exclusive": 1794466860
+        }
+      }
+    ],
+    "conversation": {
+      "platform": "qq",
+      "account_id": "example-account",
+      "conversation_id": "example-group"
+    },
+    "context": {
+      "group_id": "synthetic-group-001",
+      "continuity": "time_adjacent_filtered_candidates",
+      "original_conversation_complete": false,
+      "primary_message_keys": [
+        "synthetic-message-001"
+      ],
+      "history_message_keys": []
+    },
+    "processing": {
+      "rules_sha256": "1797163f775120c78db093a065ee967fb3e14a70e4f543d6a857f997e66acb44",
+      "rules_file": "processing-rules/default.md",
+      "model": "synthetic-example-no-model-call",
+      "base_url": "",
+      "input_sha256": "1d59164d58c3249cd6e7b9f916080ecbe5990932f20fd259b6c2a6065c881bf5",
+      "processed_at": "2026-11-12T07:02:00+00:00"
+    },
+    "updated_at": "2026-11-12T07:02:00+00:00"
+  }
+}

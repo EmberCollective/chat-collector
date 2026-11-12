@@ -7,3 +7,8 @@ __pycache__/
 tools/console/.runtime/
 .venv/
 tools/qq-nt-export/config.json
+.env
+.env.*
+!.env.example
+node_modules/
+processor/pi-runtime/node/
