@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let token = '', currentConfig = null, pendingPreview = null, previewShown = null, imageUrl = null, refreshing = false;
-const names = {wechat:'微信', qq:'QQ'}, actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放'};
+const names = {wechat:'微信', qq:'QQ',processor:'待办处理'}, actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放',processor_preview:'上下文预览',process:'提取待办'};
 const states = {running:'执行中',succeeded:'已完成',failed:'失败',interrupted:'结果未确认'};
 const intensities = {metadata:'轻量',standard:'标准',full:'完整'};
 const assetStates = {deferred:'按强度暂缓保存',archived:'已归档',missing:'本地未找到',thumbnail_only:'仅缩略图',unverified:'内容待核验',encrypted_only:'仅保留密文',unsupported:'格式未支持'};
@@ -16,9 +16,8 @@ async function api(path, method='GET', data) {
 function time(value){return value?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(value*1000)):'尚无记录';}
 function localValue(sec){return new Date(sec*1000+8*3600000).toISOString().slice(0,19);}
 function windowValues(){const start=Date.parse($('start').value+'+08:00')/1000,end=Date.parse($('end').value+'+08:00')/1000;if(!Number.isInteger(start)||!Number.isInteger(end)||end<=start)throw Error('请填写有效的开始与结束时间');return {start,end};}
-function lines(id){return $(id).value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);}
-function ruleValues(){let rules;try{rules=JSON.parse($('filter-rules').value||'[]');}catch{throw Error('扩展规则必须是有效 JSON');}if(!Array.isArray(rules))throw Error('扩展规则必须是数组');return rules;}
-function filters(){return {conversation_ids:lines('filter-groups'),keywords:lines('filter-keywords'),mentions_all:$('filter-all').checked,files:$('filter-files').checked,match:$('filter-match').value,rules:ruleValues()};}
+function ruleValues(){let rules;try{rules=JSON.parse($('filter-rulesets').value||'[]');}catch{throw Error('规则集注册表必须是有效 JSON');}if(!Array.isArray(rules))throw Error('规则集注册表必须是数组');return rules;}
+function filters(){return {rulesets:ruleValues()};}
 function lastDay(){const now=Math.floor(Date.now()/1000);$('start').value=localValue(now-86400);$('end').value=localValue(now);}
 function button(text, handler, secondary=true){const node=el('button',text,secondary?'secondary':'');node.addEventListener('click',()=>guard(handler,node));return node;}
 async function guard(fn,node){if(node)node.disabled=true;try{await fn();}catch(error){notice(error.message,true);}finally{if(node)node.disabled=false;}}
@@ -50,10 +49,12 @@ async function refresh(){
   try{renderStatus(await api('/status'));if(pendingPreview&&pendingPreview.module===selected()&&previewShown!==pendingPreview.id){const job=await api('/jobs/'+pendingPreview.id);if(job.status!=='running'){previewShown=job.id;if(job.status==='succeeded'){renderMessages(job.result.messages,$('preview-output'),true,pendingPreview.module);$('preview-output').prepend(el('p',`命中 ${job.result.matched} 条，显示最近 ${job.result.messages.length} 条。使用现有快照；未推进断点或归档附件。`));}else{$('preview-output').replaceChildren(el('p',job.error||'预览失败','empty'));notice(job.error||'预览失败',true);}}}}
   catch(error){$('connection').textContent='连接异常：'+error.message;$('connection').className='bad';}
   finally{refreshing=false;}
+  await guard(pollProcessor);
 }
 const fields=[
  ['schedule','interval_seconds','扫描间隔：轮后等待秒数（5–86400）','number'],['schedule','refresh_interval_seconds','数据库刷新最小间隔（秒，0 为每轮）','number'],['processing','intensity','附件抓取解码强度','select'],['schedule','initial_lookback_seconds','首次回溯时长（秒）','number'],
  ['source','encrypted_dir','原始加密数据库目录','text'],['source','decrypted_dir','明文快照目录','text'],
+ ['source','work_dir','QQ 临时工作目录（建议放 SSD）','text'],
  ['source','media_dir','原始媒体目录','text'],['source','key_file','本机密钥文件路径（不显示内容）','text'],
  ['source','resource_db','微信资源索引数据库','text'],['source','image_cache_dir','微信图片缓存目录','text'],
  ['storage','output_dir','消息批次输出目录','text'],['attachments','archive_dir','附件归档目录','text'],
@@ -62,9 +63,7 @@ const fields=[
 async function loadConfig(){
   const module=selected(),data=await api(`/modules/${module}/config`);if(module!==selected())return;currentConfig=data;
   $('workspace-title').textContent=names[module]+' · 调试工作区';$('config-file').textContent=data.file;
-  const f=data.config.filters||{};$('filter-groups').value=(f.conversation_ids||[]).join('\n');$('filter-keywords').value=(f.keywords||[]).join('\n');$('filter-all').checked=!!f.mentions_all;$('filter-files').checked=!!f.files;$('filter-match').value=f.match||'any';
-  $('filter-rules').value=JSON.stringify(f.rules||[],null,2);
-  $('custom-filter').textContent=f.sql_file||f.code_file?'本模块另有本地 SQL / 代码扩展条件，预览与正式采集都会继续应用；入口在面板中只读。':'';
+  $('filter-rulesets').value=JSON.stringify(data.config.filters?.rulesets||[],null,2);
   $('config-fields').replaceChildren();
   for(const [section,key,title,type] of fields){
     const value=data.config[section]?.[key];if(value===undefined)continue;
@@ -86,11 +85,18 @@ async function saveConfig(){
   await api(`/modules/${selected()}/config`,'PATCH',{revision:currentConfig.revision,patch});notice('配置已校验并保存，旧版本已备份。');await loadConfig();await refresh();
 }
 async function showJob(id){const job=await api('/jobs/'+id);$('job-detail').textContent=JSON.stringify(job,null,2);$('detail-dialog').showModal();}
+function identitySummary(m){
+  const identity=m.identity||{},account=identity.account||{},chat=identity.conversation||{},person=(identity.people||[]).find(p=>p.id===m.sender_id)||{};
+  const sender=m.sender||person.label||person.display_name||'名称未获取';
+  return [account.label||account.nickname||'账号名称未获取',chat.display_name||chat.remark||chat.name||'会话名称未获取',`${person.is_self?'我 · ':''}${sender}`];
+}
 function renderMessages(records,target,preview=false,module=selected()){
   target.replaceChildren();if(!records.length){target.append(el('p','此范围内没有匹配的消息。','empty'));return;}
   for(const record of records){const m=preview?record:record.message,box=el('article',undefined,'message'),head=el('div',undefined,'message-head');
-    head.append(el('span',time(m.sent_at)),el('span',m.kind+(m.mentions_all?' · @所有人':'')),el('span',`会话 ${m.conversation_id}`),el('span',`发送者 ${m.sender_id}`));
+    head.append(el('span',time(m.sent_at)),el('span',m.kind+(m.mentions_all?' · @所有人':'')),...identitySummary(m).map(value=>el('span',value)));
     box.append(head,el('div',m.text||'此消息没有可显示的文本','message-text'));
+    const matchedRules=record.matched_rules||m.matched_rules;
+    box.append(el('p',matchedRules?.length?'命中规则：'+matchedRules.map(rule=>rule.file).join('、'):'历史记录未标记命中规则','muted'));
     for(const a of m.attachments||[]){const item=el('div',undefined,'asset');item.append(el('strong',`${a.name||a.type} · ${assetStates[a.status]||'仅元数据'}`));
       item.append(el('div',[a.reason,a.quality,a.dimensions?`${a.dimensions.join(' × ')} px`:null,a.byte_size?`${a.byte_size.toLocaleString()} bytes`:null,a.message_match_verified===false?'关联/原件内容尚未核实':null].filter(Boolean).join(' · ')));
       if(a.archive_path)item.append(el('div',a.archive_path));
@@ -112,14 +118,6 @@ async function openAsset(module,seq,file,inline){
 }
 function bind(id,fn){$(id).addEventListener('click',()=>guard(fn,$(id)));}
 bind('last-day',lastDay);bind('reload-config',loadConfig);bind('save-config',saveConfig);
-bind('add-context-rule',()=>{
-  const before=$('nearby-before'),after=$('nearby-after');if(!before.reportValidity()||!after.reportValidity())return;
-  const type=$('nearby-condition').value;let condition;
-  if(type==='keywords'){const values=lines('nearby-keywords');if(!values.length)throw Error('请填写上下文关键词');condition={type,values};}
-  else condition=type==='files'?{type:'kind',values:['file']}:{type:'mentions_all'};
-  const rules=ruleValues();rules.push({type:'nearby',before:Number(before.value),after:Number(after.value),condition});
-  $('filter-rules').value=JSON.stringify(rules,null,2);notice('上下文规则已加入。可先预览；正式采集前需保存配置。');
-});
 bind('preview',async()=>{const module=selected(),job=await api(`/modules/${module}/preview`,'POST',{...windowValues(),filters:filters(),limit:20});pendingPreview={id:job.id,module};previewShown=null;$('preview-output').replaceChildren(el('p','正在查询现有快照，可在下方任务记录查看进度…','empty'));await refresh();});
 bind('replay',async()=>{const window=windowValues();if(!confirm('重放使用已保存的筛选配置，可能写入新批次、更新修订并保存附件；不会移动定时采集断点。继续？'))return;const job=await api(`/modules/${selected()}/replay`,'POST',window);notice('重放已启动：'+job.id.slice(0,8));await refresh();});
 bind('load-messages',async()=>{const module=selected(),params=new URLSearchParams({limit:'20',keyword:$('message-keyword').value,conversation:$('message-conversation').value});const result=await api(`/modules/${module}/messages?${params}`);if(module===selected())renderMessages(result.messages,$('message-output'),false,module);});
@@ -129,5 +127,5 @@ $('image-dialog').addEventListener('close',()=>{if(imageUrl)URL.revokeObjectURL(
 async function switchModule(){currentConfig=null;pendingPreview=null;$('preview-output').replaceChildren(el('p','已切换模块，请重新预览。','empty'));$('message-output').replaceChildren(el('p','点击“查看最近 20 条”读取消息。','empty'));await loadConfig();}
 $('module').addEventListener('change',()=>guard(switchModule));
 document.querySelectorAll('[data-tab]').forEach(tab=>tab.addEventListener('click',()=>{document.querySelectorAll('[data-tab]').forEach(other=>{const active=tab===other;other.setAttribute('aria-selected',String(active));$(other.dataset.tab).hidden=!active;});}));
-async function init(){lastDay();const response=await fetch('/api/session');if(!response.ok)throw Error('无法建立本机会话');token=(await response.json()).token;await loadConfig();await refresh();setInterval(refresh,3000);}
+async function init(){lastDay();const response=await fetch('/api/session');if(!response.ok)throw Error('无法建立本机会话');token=(await response.json()).token;await loadConfig();await refresh();await initProcessor();setInterval(refresh,3000);}
 init().catch(error=>notice(error.message,true));

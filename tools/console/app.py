@@ -32,13 +32,15 @@ class Model(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
 
 
+class SqlRuleset(Model):
+    file: TextPath
+    enabled: bool = True
+    recent_count: int = Field(default=0, ge=0, le=1000)
+    params: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
 class Filters(Model):
-    rules: list[dict] = Field(default=None, max_length=128)
-    conversation_ids: list[Annotated[str, Field(min_length=1, max_length=200)]] = []
-    mentions_all: bool = False
-    files: bool = False
-    keywords: list[Annotated[str, Field(min_length=1, max_length=500)]] = []
-    match: Literal['any', 'all'] = 'any'
+    rulesets: list[SqlRuleset] = Field(default=None, max_length=128)
 
 
 class Window(Model):
@@ -72,6 +74,7 @@ class SchedulePatch(Model):
 class SourcePatch(Model):
     encrypted_dir: TextPath = None
     decrypted_dir: TextPath = None
+    work_dir: TextPath = None
     media_dir: TextPath = None
     resource_db: TextPath = None
     image_cache_dir: TextPath = None
@@ -109,6 +112,80 @@ class SaveConfig(Model):
 
 class ScheduleControl(Model):
     enabled: bool
+
+
+class ProcessorModelPatch(Model):
+    base_url: str = Field(default=None, max_length=2048)
+    model: str = Field(default=None, max_length=200)
+    api_key_env: str = Field(default=None, pattern=r'^[A-Za-z_][A-Za-z0-9_]*$', max_length=200)
+    timeout_seconds: int = Field(default=None, ge=1, le=600)
+    vision: bool = None
+    context_window: int = Field(default=None, ge=4096, le=2000000)
+    max_output_tokens: int = Field(default=None, ge=256, le=2000000)
+
+
+class ProcessorAgentPatch(Model):
+    max_turns: int = Field(default=None, ge=1, le=100)
+    max_tool_calls: int = Field(default=None, ge=1, le=1000)
+    batching: Literal['auto', 'single_conversation'] = None
+    auto_compaction: bool = None
+    compaction_reserve_tokens: int = Field(default=None, ge=256, le=1999999)
+    compaction_keep_recent_tokens: int = Field(default=None, ge=128, le=1999999)
+    max_retries: int = Field(default=None, ge=0, le=5)
+
+
+class ProcessorContextPatch(Model):
+    gap_seconds: int = Field(default=None, ge=0, le=86400)
+    max_messages: int = Field(default=None, ge=1, le=200)
+    max_conversation_chars: int = Field(default=None, ge=1000, le=1000000)
+    history_messages: int = Field(default=None, ge=0, le=50)
+    timezone: str = Field(default=None, min_length=1, max_length=100)
+
+
+class ProcessorSchedulePatch(Model):
+    interval_seconds: int = Field(default=None, ge=5, le=86400)
+
+
+class ProcessorLimitsPatch(Model):
+    max_input_chars: int = Field(default=None, ge=1000, le=1000000)
+
+
+class SourceDescriptionsPatch(Model):
+    qq: str = Field(default=None, max_length=10000)
+    wechat: str = Field(default=None, max_length=10000)
+
+
+class ProcessorConfigPatch(Model):
+    model: ProcessorModelPatch = Field(default_factory=ProcessorModelPatch)
+    agent: ProcessorAgentPatch = Field(default_factory=ProcessorAgentPatch)
+    context: ProcessorContextPatch = Field(default_factory=ProcessorContextPatch)
+    processing: ProcessorLimitsPatch = Field(default_factory=ProcessorLimitsPatch)
+    schedule: ProcessorSchedulePatch = Field(default_factory=ProcessorSchedulePatch)
+    source_descriptions: SourceDescriptionsPatch = Field(default_factory=SourceDescriptionsPatch)
+
+
+class SaveProcessorConfig(Model):
+    revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    patch: ProcessorConfigPatch
+
+
+class SaveRules(Model):
+    revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    text: str = Field(min_length=1, max_length=1024*1024)
+
+
+class ProcessorPreview(Model):
+    limit: int = Field(default=5, ge=1, le=20)
+    start: int | None = Field(default=None, ge=0)
+    end: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode='after')
+    def window(self):
+        if (self.start is None) != (self.end is None):
+            raise ValueError('调试起止时间必须一起填写，或一起留空使用默认增量')
+        if self.start is not None:
+            Preview(start=self.start, end=self.end)
+        return self
 
 
 class Jobs:
@@ -194,7 +271,7 @@ class Jobs:
 
     def finish(self, job, process, folder):
         try:
-            process.wait(timeout=120 if job['action'] == 'preview' else None)
+            process.wait(timeout=120 if job['action'] in {'preview', 'processor_preview'} else None)
             result = json.loads((folder/'result.json').read_text(encoding='utf-8'))
         except subprocess.TimeoutExpired:
             process.kill()
@@ -224,6 +301,18 @@ class Jobs:
         if job['status'] != 'running' and path.is_file():
             job.update(json.loads(path.read_text(encoding='utf-8')))
         log = self.directory/identifier/'worker.log'
+        progress = self.directory/identifier/'pi-events.jsonl'
+        if progress.is_file():
+            with progress.open('rb') as stream:
+                stream.seek(max(0, progress.stat().st_size-256000))
+                lines = stream.read().decode('utf-8', errors='replace').splitlines()
+            events = []
+            for line in lines:
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    pass  # A running worker may not have finished the last line yet.
+            job['pi_events'] = events[-200:]
         if log.is_file():
             with log.open('rb') as stream:
                 stream.seek(max(0, log.stat().st_size-16000))
@@ -352,9 +441,66 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     def job(identifier: str):
         return jobs.detail(identifier)
 
+    @app.get('/api/processor/config', dependencies=[Depends(authenticate)], summary='读取处理配置，不含密钥值')
+    def processor_config():
+        return bridge.processor.read_config()
+
+    def processor_save(callback):
+        with jobs.mutex:
+            if 'processor' in jobs.running:
+                raise HTTPException(409, '处理任务运行中，请等待完成后保存')
+            try:
+                with bridge.lock(bridge.processor.config()['storage']['state_file']):
+                    return callback()
+            except (FileExistsError, RuntimeError) as exc:
+                raise HTTPException(409, str(exc)) from None
+
+    @app.patch('/api/processor/config', dependencies=[Depends(authenticate)], summary='校验、备份并保存处理配置')
+    def save_processor_config(body: SaveProcessorConfig):
+        return processor_save(lambda: bridge.processor.write_config(body.revision,
+            body.patch.model_dump(exclude_unset=True), jobs.runtime/'config-backups'))
+
+    @app.get('/api/processor/rules', dependencies=[Depends(authenticate)], summary='读取本地 Markdown 处理规则及版本')
+    def processor_rules():
+        return bridge.processor.read_rules()
+
+    @app.put('/api/processor/rules', dependencies=[Depends(authenticate)], summary='备份并保存处理规则，冲突时拒绝覆盖')
+    def save_processor_rules(body: SaveRules):
+        return processor_save(lambda: bridge.processor.write_rules(body.revision, body.text,
+            jobs.runtime/'rules-backups'))
+
+    @app.get('/api/processor/status', dependencies=[Depends(authenticate)], summary='只读查看处理状态')
+    def processor_status():
+        result = bridge.processor.core().status(bridge.processor.config())
+        with jobs.mutex:
+            return dict(result, running_job=jobs.running.get('processor'), scheduler_enabled=False)
+
+    @app.get('/api/processor/tasks', dependencies=[Depends(authenticate)], summary='查看结构化待办及来源证据')
+    def processor_tasks(limit: int = Query(20, ge=1, le=100)):
+        return {'tasks': bridge.processor.core().list_tasks(bridge.processor.config(), limit=limit)}
+
+    @app.get('/api/processor/reviews', dependencies=[Depends(authenticate)], summary='查看分组结果与附件读取状态')
+    def processor_reviews(limit: int = Query(20, ge=1, le=100)):
+        return {'groups': bridge.processor.core().list_group_results(bridge.processor.config(), limit=limit)}
+
+    @app.post('/api/processor/preview', status_code=202, dependencies=[Depends(authenticate)], summary='只读预览分组上下文，不调用模型')
+    def processor_preview(body: ProcessorPreview):
+        return jobs.submit('processor', 'processor_preview', body.model_dump())
+
+    @app.post('/api/processor/run', status_code=202, dependencies=[Depends(authenticate)], summary='调用已配置模型，执行一轮待办处理')
+    def processor_run(body: ProcessorPreview | None = None):
+        model = bridge.processor.core().status(bridge.processor.config())['model']
+        if not model['configured']:
+            raise HTTPException(400, '模型尚未配置完整，请先填写 API 地址、模型名称和本机凭据')
+        return jobs.submit('processor', 'process', body.model_dump(exclude_none=True) if body else {})
+
     @app.get('/api/modules/{module}/messages', dependencies=[Depends(authenticate)], summary='查看已采集消息的最新修订')
     def messages(module: Module, limit: int = Query(20, ge=1, le=100), keyword: str = Query('', max_length=500), conversation: str = Query('', max_length=200)):
         return {'messages': bridge.messages(module, limit, keyword, conversation)}
+
+    @app.get('/api/modules/{module}/source', dependencies=[Depends(authenticate)], summary='按消息标识和修订读取本地原消息证据')
+    def source(module: Module, message_key: str = Query(min_length=1, max_length=256), revision: int = Query(ge=1)):
+        return bridge.message_by_key(module, message_key, revision)
 
     @app.get('/api/modules/{module}/messages/{seq}/assets/{filename}', dependencies=[Depends(authenticate)], summary='读取此消息的归档附件')
     def asset(module: Module, seq: int, filename: str, inline: bool = False):

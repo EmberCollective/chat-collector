@@ -45,7 +45,7 @@ def console(tmp_path):
                 'storage':{'state_file':str(folder/'state.db'),'output_dir':str(folder/'batches')},
                 'attachments':{'enabled':False,'archive_dir':str(folder/'assets')},
                 'schedule':{'interval_seconds':5,'initial_lookback_seconds':3600},
-                'filters':{'conversation_ids':[],'keywords':[],'mentions_all':False,'files':False,'match':'any'}}
+                'filters':{'rulesets':[{'file':str(Path(settings['collector_root'])/'rulesets/all.sql')}]}}
         path=folder/'config.toml'
         path.write_text('# preserve this comment\n'+tomlkit.dumps(config),encoding='utf-8')
         settings['modules'][module]=str(path)
@@ -56,7 +56,8 @@ def console(tmp_path):
             db.executemany('INSERT INTO Name2Id VALUES(?)',[('room@chatroom',),('sender',)])
             db.execute(f'''CREATE TABLE "{table}"(local_id INTEGER PRIMARY KEY,server_id INTEGER,
                 local_type INTEGER,real_sender_id INTEGER,create_time INTEGER,source BLOB,message_content BLOB,compress_content BLOB)''')
-            db.execute(f'INSERT INTO "{table}" VALUES(1,101,1,2,?,NULL,?,NULL)',(now-10,'deadline <img src=x onerror=alert(1)>'))
+            db.execute(f'INSERT INTO "{table}" VALUES(1,101,1,2,?,?,?,NULL)',
+                       (now-10,'<msgsource><atuserlist>notify@all</atuserlist></msgsource>','deadline <img src=x onerror=alert(1)>'))
         else:
             import sys
             sys.path.insert(0,settings['collector_root'])
@@ -67,6 +68,16 @@ def console(tmp_path):
             db.execute('INSERT INTO group_msg_table VALUES(1,?,123,"123",456,"sender",1,?)',(now-10,body.SerializeToString()))
         db.commit();db.close()
     path=tmp_path/'console.toml'
+    processing=tmp_path/'processing'
+    processing.mkdir()
+    (processing/'rules.md').write_text('# 提取待办\n保留来源，不猜测未知时间。\n',encoding='utf-8')
+    processor_config={'input':{'batches_dir':str(tmp_path/'wechat/batches'),'start_at':0},
+        'storage':{'state_file':str(processing/'state.db'),'output_dir':str(processing/'todos')},
+        'rules':{'file':str(processing/'rules.md')},
+        'model':{'base_url':'','model':'','api_key_env':'CONSOLE_TEST_PROCESSOR_KEY','api_key_file':str(processing/'secret.txt')},
+        'source_descriptions':{'qq':'合成 QQ','wechat':'合成微信'}}
+    (processing/'config.toml').write_text('# processor fixture\n'+tomlkit.dumps(processor_config),encoding='utf-8')
+    settings['processor_config']=str(processing/'config.toml')
     path.write_text(tomlkit.dumps(settings),encoding='utf-8')
     app=create_app(path,tmp_path/'runtime')
     for name in ('wechat','qq'):
@@ -97,6 +108,38 @@ def test_security_and_local_docs(console):
     assert client.get('/api/session',headers={'Origin':'https://evil.example'}).status_code==403
     assert client.get('/api/session',headers={'Sec-Fetch-Site':'cross-site'}).status_code==403
     assert client.get('/openapi.json').json()['components']['securitySchemes']['APIKeyHeader']['name']=='X-Console-Token'
+    page = client.get('/').text
+    assert 'filter-rulesets' in page
+    for field in ('filter-groups', 'filter-keywords', 'filter-files', 'filter-all', 'filter-match'):
+        assert f'id="{field}"' not in page
+
+
+def test_removed_base_filters_are_rejected_by_api(console):
+    client, app, root, now = console
+    url = '/api/modules/wechat/config'
+    revision = client.get(url).json()['revision']
+    for field in ('keywords', 'conversation_ids', 'files', 'mentions_all', 'match', 'sql_file', 'code_file'):
+        assert client.patch(url, json={'revision':revision,'patch':{'filters':{field:[]}}}).status_code == 422
+        assert client.post('/api/modules/wechat/preview', json={'start':now-60,'end':now,'filters':{field:[]}}).status_code == 422
+    assert client.get(url).json()['revision'] == revision
+
+
+def test_ruleset_enable_flags_save_preview_and_collect(console):
+    client, app, root, now = console
+    url = '/api/modules/qq/config'
+    rule = {'file':str(app.state.bridge.root/'rulesets/mentions-all.sql'),'enabled':False}
+    checkpoint = app.state.bridge.state('qq')['checkpoint']
+    revision = client.get(url).json()['revision']
+    response = client.patch(url,json={'revision':revision,'patch':{'filters':{'rulesets':[rule]}}})
+    assert response.status_code == 200, response.text
+    preview = client.post('/api/modules/qq/preview',json={'start':now-60,'end':now})
+    assert wait_job(client,preview.json()['id'])['result']['matched'] == 0
+    collect = client.post('/api/modules/qq/collect')
+    assert wait_job(client,collect.json()['id'])['result']['status'] == 'no_enabled_rules'
+    assert app.state.bridge.state('qq')['checkpoint'] == checkpoint
+    rule['enabled'] = True
+    preview = client.post('/api/modules/qq/preview',json={'start':now-60,'end':now,'filters':{'rulesets':[rule]}})
+    assert wait_job(client,preview.json()['id'])['result']['matched'] == 1
 
 
 @pytest.mark.parametrize('module',['wechat','qq'])
@@ -106,10 +149,11 @@ def test_preview_is_read_only_and_replay_deduplicates(console,module):
     before=state.read_bytes()
     checkpoint=app.state.bridge.state(module)['checkpoint']
     batches={str(p):p.read_bytes() for p in (root/module/'batches').glob('*')}
-    response=client.post(f'/api/modules/{module}/preview',json={'start':now-60,'end':now,'filters':{'keywords':['deadline']}})
+    response=client.post(f'/api/modules/{module}/preview',json={'start':now-60,'end':now,'filters':{'rulesets':[{'file':str(app.state.bridge.root/'rulesets/keyword.sql'),'params':{'keyword':'deadline'}}]}})
     assert response.status_code==202,response.text
     result=wait_job(client,response.json()['id'])['result']
     assert result['matched']==1 and result['checkpoint_advanced'] is False
+    assert Path(result['messages'][0]['matched_rules'][0]['file']).name == 'keyword.sql'
     assert state.read_bytes()==before
     assert {str(p):p.read_bytes() for p in (root/module/'batches').glob('*')}==batches
     assert list((root/module/'assets').iterdir())==[]
@@ -123,7 +167,7 @@ def test_config_backup_revision_validation_and_busy_guard(console):
     client,app,root,_=console
     url='/api/modules/wechat/config'
     config=client.get(url).json()
-    patch={'revision':config['revision'],'patch':{'schedule':{'interval_seconds':10},'filters':{'keywords':['review']}}}
+    patch={'revision':config['revision'],'patch':{'schedule':{'interval_seconds':10},'filters':{'rulesets':[{'file':str(app.state.bridge.root/'rulesets/keyword.sql'),'params':{'keyword':'review'}}]}}}
     response=client.patch(url,json=patch)
     assert response.status_code==200,response.text
     assert Path(response.json()['backup']).read_text(encoding='utf-8').startswith('# preserve this comment')
@@ -185,25 +229,30 @@ def test_intensity_and_intervals_save_and_reach_worker(console, module):
 def test_context_rule_save_preview_and_replay_share_selection(console,module):
     client,app,root,now = console
     url = f'/api/modules/{module}/config'
-    rule = {'type':'nearby','before':2,'after':2,'condition':{'type':'keywords','values':['deadline']}}
+    rule = {'file':str(app.state.bridge.root/'rulesets/context.sql'),'recent_count':5}
     config = client.get(url).json()
-    response = client.patch(url,json={'revision':config['revision'],'patch':{'filters':{'rules':[rule]}}})
+    response = client.patch(url,json={'revision':config['revision'],'patch':{'filters':{'rulesets':[rule]}}})
     assert response.status_code == 200,response.text
-    assert client.get(url).json()['config']['filters']['rules'] == [rule]
+    assert client.get(url).json()['config']['filters']['rulesets'] == [rule]
     state = root/module/'state.db'
     before = hashlib.sha256(state.read_bytes()).hexdigest()
-    # Legacy API clients omitting rules keep the configured extension rules.
-    preview = client.post(f'/api/modules/{module}/preview',json={'start':now-60,'end':now,'filters':{'keywords':['deadline']}})
+    # Omitting rulesets preserves the saved registration.
+    preview = client.post(f'/api/modules/{module}/preview',json={'start':now-60,'end':now,'filters':{}})
     assert preview.status_code==202,preview.text
     result = wait_job(client,preview.json()['id'])['result']
-    assert result['matched']==1 and result['rules']==[rule]
+    assert result['matched']==1 and result['rulesets']==[rule]
     assert hashlib.sha256(state.read_bytes()).hexdigest()==before
     replay = client.post(f'/api/modules/{module}/replay',json={'start':now-60,'end':now}).json()
     result = wait_job(client,replay['id'])['result']
-    assert result['matched']==1 and result['duplicates']==1
+    assert result['matched']==1 and result['emitted']==1
+    records = client.get(f'/api/modules/{module}/messages').json()['messages']
+    assert Path(records[0]['matched_rules'][0]['file']).name == 'context.sql'
+    assert 'matched_rules' not in records[0]['message']
+    replay = client.post(f'/api/modules/{module}/replay',json={'start':now-60,'end':now}).json()
+    assert wait_job(client,replay['id'])['result']['duplicates'] == 1
     revision = client.get(url).json()['revision']
-    response = client.patch(url,json={'revision':revision,'patch':{'filters':{'rules':[dict(rule,before=-1)]}}})
-    assert response.status_code==400
+    response = client.patch(url,json={'revision':revision,'patch':{'filters':{'rulesets':[dict(rule,recent_count=-1)]}}})
+    assert response.status_code==422
     assert client.get(url).json()['revision']==revision
 
 
