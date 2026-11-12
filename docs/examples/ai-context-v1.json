@@ -1,0 +1,82 @@
+{
+  "schema_version": "ai-context.v1",
+  "timezone": "Asia/Shanghai",
+  "accounts": [
+    {
+      "ref": "a1",
+      "platform": "qq",
+      "label": "工作账号",
+      "self": {
+        "ref": "u1",
+        "nickname": "小林"
+      }
+    }
+  ],
+  "conversations": [
+    {
+      "id": "c1",
+      "platform": "qq",
+      "account_ref": "a1",
+      "type": "group",
+      "name": "项目协作群",
+      "remark": null,
+      "people": [
+        {
+          "display_name": "张老师",
+          "nickname": "张三",
+          "remark": "张老师",
+          "group_nickname": "项目负责人",
+          "ref": "u2",
+          "is_self": false,
+          "missing_fields": []
+        }
+      ],
+      "segments": [
+        {
+          "id": "s1",
+          "messages": [
+            {
+              "id": "m1",
+              "time": "2026-11-12T19:00:00+08:00",
+              "sender_ref": "u2",
+              "sender": "张老师（昵称：张三；群昵称：项目负责人）",
+              "role": "history",
+              "text": "",
+              "kind": "file",
+              "mentions_all": false,
+              "attachments": [
+                "f1"
+              ]
+            },
+            {
+              "id": "m2",
+              "time": "2026-11-12T19:01:00+08:00",
+              "sender_ref": "u2",
+              "sender": "张老师（昵称：张三；群昵称：项目负责人）",
+              "role": "current",
+              "text": "请大家明天下午五点前按文件要求提交材料。",
+              "kind": "text",
+              "mentions_all": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "attachments": [
+    {
+      "ref": "f1",
+      "name": "项目说明.pdf",
+      "type": "file",
+      "status": "needs_review",
+      "content_status": "unavailable",
+      "needs_review": true,
+      "warnings": [
+        "attachment_not_archived"
+      ],
+      "vision_enabled": false,
+      "total_units": null,
+      "complete_document": false
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "collected_at": "2026-11-12T11:05:00+00:00",
+  "event_id": "8e2c7c6838504b37c1505d5590d91c32e0a1d733297ffda013844d657c4edf74",
+  "matched_rules": [],
+  "message": {
+    "account_id": "demo-self",
+    "attachments": [
+      {
+        "name": "项目说明.pdf",
+        "status": "deferred",
+        "type": "file"
+      }
+    ],
+    "conversation_id": "demo-room",
+    "conversation_type": "group",
+    "identity": {
+      "account": {
+        "id": "demo-self",
+        "label": "工作账号",
+        "nickname": "小林",
+        "observed_at": "2026-11-12T11:00:00+00:00",
+        "source": "synthetic"
+      },
+      "conversation": {
+        "display_name": "项目协作群",
+        "id": "demo-room",
+        "missing_fields": [
+          "remark"
+        ],
+        "name": "项目协作群",
+        "observed_at": "2026-11-12T11:00:00+00:00",
+        "remark": null,
+        "source": "synthetic",
+        "type": "group"
+      },
+      "people": [
+        {
+          "display_name": "张老师",
+          "group_nickname": "项目负责人",
+          "id": "demo-teacher",
+          "is_self": false,
+          "label": "张老师（昵称：张三；群昵称：项目负责人）",
+          "missing_fields": [],
+          "nickname": "张三",
+          "observed_at": "2026-11-12T11:00:00+00:00",
+          "remark": "张老师",
+          "source": "synthetic"
+        }
+      ]
+    },
+    "kind": "file",
+    "mentions_all": false,
+    "message_id": "demo-file",
+    "platform": "qq",
+    "sender": "张老师（昵称：张三；群昵称：项目负责人）",
+    "sender_id": "demo-teacher",
+    "sent_at": 1794481200,
+    "source": {
+      "database": "synthetic.db",
+      "local_id": 1,
+      "table": "synthetic_messages"
+    },
+    "text": ""
+  },
+  "message_key": "3455138aeefa2bec12f05c913225e1d9a8a7c982adf3752f8e2473972344c96f",
+  "operation": "upsert",
+  "payload_sha256": "7b821602f31c6fc009e6bf962b8feec90783f5c0d755c67b4f172a5eec83e698",
+  "revision": 1,
+  "schema_version": 1,
+  "window": {
+    "end_exclusive": 1794481500,
+    "start_inclusive": 1794481200
+  }
+}
