@@ -60,6 +60,20 @@ class ListenerSupervisor:
             self.service._alert('listener', 'failure', 'listener_identity_unverifiable')
             return
         if process is not None:
+            from messaging import load_config
+            from messaging.feishu import listener_target
+            from messaging.channels import DeliveryRejected
+            try:
+                listener_target(load_config(self.settings['config']))
+                code = None
+            except Exception as exc:
+                code = exc.code if isinstance(exc, DeliveryRejected) else 'listener_configuration_invalid'
+            if code != row['error'] and (code or row['error'] in {
+                    'feishu_listener_multiple_apps_not_supported', 'feishu_listener_target_not_configured',
+                    'credential_not_configured', 'listener_configuration_invalid'}):
+                with closing(_connect(self.config, write=True)) as conn, conn:
+                    conn.execute('UPDATE listener SET error=? WHERE id=1', (code,))
+                self.service._alert('listener', 'failure' if code else 'recovery', code or 'listener_configuration_restored')
             return
         if row['state'] == 'running':
             self._failed(row['attempts'], 'listener_exited')

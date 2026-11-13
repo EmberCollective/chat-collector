@@ -354,6 +354,37 @@ def test_listener_spawns_custom_target_explicitly(config, monkeypatch):
     assert status(config)['listener']['state'] == 'running'
 
 
+def test_running_listener_reports_new_app_configuration_without_killing_or_duplicating(config, monkeypatch):
+    from automation.listener import ListenerSupervisor
+    from messaging.management import read_settings, save_settings
+    import automation.listener as module
+    service = SchedulerService(config, clock=Clock())
+    with core._connect(config, write=True) as conn:
+        conn.execute("UPDATE listener SET state='running',pid=123,attempts=1 WHERE id=1")
+    supervisor, alerts = ListenerSupervisor(service), []
+    monkeypatch.setattr(supervisor, '_owned', lambda row: object())
+    monkeypatch.setattr(service, '_alert', lambda *args: alerts.append(args))
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must retain existing connection'))
+    supervisor.poll()
+    path = config['listener']['config']
+    monkeypatch.setenv('OTHER_LISTENER_APP', 'cli_other')
+    current = read_settings(path)
+    save_settings(path, {'targets': [{'id': 'other-app', 'kind': 'feishu_app', 'enabled': True,
+        'app_id_env': 'OTHER_LISTENER_APP', 'app_secret_env': 'OTHER_LISTENER_SECRET',
+        'recipient_id': 'oc_other', 'allowed_operator_ids': ['ou_tester']}]}, current['version'])
+    supervisor.poll()
+    supervisor.poll()
+    listener = status(config)['listener']
+    assert (listener['state'], listener['pid'], listener['attempts']) == ('running', 123, 1)
+    assert listener['error'] == 'feishu_listener_multiple_apps_not_supported'
+    assert alerts == [('listener', 'failure', 'feishu_listener_multiple_apps_not_supported')]
+    assert not supervisor.stop_file.exists()
+    save_settings(path, {'targets': [{'id': 'other-app', 'enabled': False}]}, read_settings(path)['version'])
+    supervisor.poll()
+    assert status(config)['listener']['error'] is None
+    assert alerts[-1] == ('listener', 'recovery', 'listener_configuration_restored')
+
+
 def test_listener_stop_timeout_keeps_process_for_graceful_shutdown(config, monkeypatch):
     from automation.listener import ListenerSupervisor
     import automation.listener as module
