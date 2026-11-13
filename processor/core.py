@@ -427,8 +427,9 @@ def _run_batches(config, rules, groups, conn):
         else:
             existing = {task['task_id']: task for tasks, _ in related.values() for task in tasks}
             responses = process_batch(config, rules, batch, list(existing.values()), api_key=_api_key(config))
+        committed = {}
         for group in batch:
-            yield group, *related[group['id']], responses[group['id']]
+            yield group, *related[group['id']], responses[group['id']], committed
 
 
 def run_round(config):
@@ -452,8 +453,10 @@ def run_round(config):
                                  (event['message_key'], event['revision'], canonical(event)))
             processed = updated = 0
             outcomes = []
-            for group, existing, previous_ids, response in _run_batches(config, rules, pending[:config['processing']['max_groups_per_round']], conn):
+            for group, existing, previous_ids, response, committed in _run_batches(config, rules, pending[:config['processing']['max_groups_per_round']], conn):
                 existing = list({task['task_id']:task for task in [*existing, *response.get('_existing_tasks', [])]}.values())
+                # Rebase only onto snapshots committed by earlier groups in this Pi batch.
+                existing = [committed.get(task['task_id'], task) for task in existing]
                 result = service.apply_extraction(config, response,
                     request_id='extraction:' + digest([group['id'], group['fingerprint'],
                         [(task['task_id'], task['revision']) for task in existing]]),
@@ -463,6 +466,7 @@ def run_round(config):
                 updated += result['tasks_upserted']
                 outcomes.append(result['outcome'])
                 batches.extend(result['batches'])
+                committed.update({task['task_id']: task for task in result['tasks']})
             # Retire regrouped outputs only after every current group succeeds.
             if processed == len(pending):
                 batches.extend(service._retire_groups(config, {group['id'] for group in groups}))

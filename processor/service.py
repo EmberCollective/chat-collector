@@ -277,7 +277,7 @@ def apply_extraction(config, submission, *, request_id, context):
     request = canonical({'operation': 'apply_extraction', 'submission': submission,
                          'context_sha256': digest(context)})
     def apply(conn):
-        now, ids = _now(), []
+        now, ids, saved = _now(), [], []
         for key, event in messages.items():
             persisted = conn.execute('SELECT body FROM messages WHERE message_key=?', (key,)).fetchone()
             if (persisted is None or json.loads(persisted[0]) != event
@@ -325,6 +325,7 @@ def apply_extraction(config, submission, *, request_id, context):
                 task['origin'] = previous['origin']
             storage._save_task(conn, task)
             ids.append(task['task_id'])
+            saved.append(task)
         for identifier in set(context['previous_ids']) - set(ids):
             old = _get_task(conn, identifier)
             if old.get('context', {}).get('group_id') == group['id']:
@@ -339,7 +340,7 @@ def apply_extraction(config, submission, *, request_id, context):
             'scope': 'selected_messages_and_requested_attachment_content'}
         conn.execute('INSERT OR REPLACE INTO group_results VALUES(?,?)', (group['id'], canonical(outcome)))
         conn.execute("UPDATE settings SET value=? WHERE key='pending_groups'", (str(context['pending_groups']),))
-        return {'task_ids': ids, 'tasks_upserted': len(ids), 'outcome': outcome}
+        return {'task_ids': ids, 'tasks': saved, 'tasks_upserted': len(ids), 'outcome': outcome}
     result, batches = _write(config, request_id, request, apply, export_pending=False)
     return dict(result, batches=batches)
 
