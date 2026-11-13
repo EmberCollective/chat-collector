@@ -123,8 +123,8 @@ package = task_package(config, task_id)
 
 `set_task_state` 仍保留为消息层本地覆盖的兼容接口；接入按钮或外部操作应使用 `request_task_action`。反馈功能显式关闭时，后者退回本地覆盖，不能据此声称正式待办状态已回写。
 
-可选面板提供 `/api/messaging/status`、`preview`、`sync`、`feedback`、`tasks/{id}/state` 与 `tasks/{id}/materials/{resource_id}`，以及只读 `/api/automation/status`、`check`。复用本机来源检查与 `X-Console-Token`，面板不提供外部发送按钮。本地调试令牌不是适合公网部署的长期访问凭据。
+可选面板提供 `/api/messaging/status`、`preview`、`sync`、`feedback`、`tasks/{id}/state` 与 `tasks/{id}/materials/{resource_id}`，以及只读 `/api/automation/status`、`check`。通道配置、合成测试发送、自动化启停和投递恢复由 `/api/operations/` 提供，见 [通道管理](messaging-management.md)。这些接口复用本机来源检查与 `X-Console-Token`；本地调试令牌不是适合公网部署的长期访问凭据。
 
-扩展渠道优先注册 `kind="webhook"` 接 n8n 或已有模块，复用稳定契约；确需进程内插件时，在 `channels.deliver` 加显式分发与对应测试。只有本地配置决定运行什么代码，消息正文不能选择插件。新增提供方无需修改处理规则、采集 SQL 或 Pi 工具。
+扩展渠道优先注册 `kind="webhook"` 接 n8n 或已有模块，复用稳定契约；确需进程内插件时，在 `channels.deliver` 加显式分发与对应测试。接口、注册位置和验收要求见 [渠道开发指南](channel-development.md)。只有本地配置决定运行什么代码，消息正文不能选择插件。新增提供方无需修改处理规则、采集 SQL 或 Pi 工具。
 
 验证覆盖事件重复/乱序/冲突、来源状态库隔离、提醒间隔与完成状态、素材校验及存续、投递退避/未知结果恢复、真实 Notion SDK 的本地模拟响应。尚未配置的外部账户与 OAuth 工作流需另行联调。

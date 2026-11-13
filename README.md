@@ -122,6 +122,7 @@ python -m messaging feedback-status
 - [文档索引](docs/README.md)
 - [提供方契约](docs/data-contract.md) · [收集层开发指南](docs/collector-development.md)
 - [消息层契约、恢复和扩展](docs/messaging.md) · [Notion/MCP 与渠道指南](docs/messaging-channels.md)
+- [渠道开发指南：Webhook、Python 适配器、重试与状态回写](docs/channel-development.md)
 - [行动输出开发说明](docs/actionable-tasks.md) · [Pi 运行时](docs/pi-runtime.md)
 - [自动运行、有限重试与故障提醒](docs/automation.md)
 

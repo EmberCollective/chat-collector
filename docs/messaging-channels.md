@@ -1,6 +1,6 @@
 # 飞书、Notion 与 Notion Calendar 接入
 
-消息层投递通过数据契约校验的待办包，不调用模型，也不设置人工复核门槛。缺失信息作为 notes“说明”随任务展示。正式发送须同时启用 `config/messaging.toml` 的全局 `enabled` 与对应目标。当前模板均关闭；预览和本地同步不要求凭据。
+消息层投递通过数据契约校验的待办包，不调用模型，也不设置人工复核门槛。缺失信息作为 notes“说明”随任务展示。正式发送须同时启用 `config/messaging.toml` 的全局 `enabled` 与对应目标；启用状态以本机配置为准，预览和本地同步不要求凭据。接入新平台见 [渠道开发指南](channel-development.md)。
 
 安装可选渠道依赖：`python -m pip install -r messaging/requirements.txt`。Notion 使用社区维护的 `notion-client==3.1.0`，固定 API 版本 `2025-09-03`；不是自行实现 SDK。官方维护的 JavaScript SDK 是 `@notionhq/client`。
 
@@ -119,4 +119,4 @@ HTTP 200 但缺少匹配回执仍视为结果未知。配置 `token_env` 可让�
 - [飞书自定义机器人](https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot)
 - [Python Notion SDK](https://github.com/ramnes/notion-sdk-py)
 
-测试使用真实 SDK 与本地 HTTP 模拟响应，覆盖分页更新、取消、上传成功/失败、附件完整性、凭据不外泄、重复回执和超时。没有凭据的外部账户、真实通知到达、OAuth 与工作区配额尚未联调；外部投递默认关闭。
+测试使用真实 SDK 与本地 HTTP 模拟响应，覆盖分页更新、取消、上传成功/失败、附件完整性、凭据不外泄、重复回执和超时。本机飞书目标已验证实际卡片、附件和回调；Notion、Calendar OAuth 及其他未配置目标尚未完成真实联调。新增目标应保持关闭，验证后再启用。

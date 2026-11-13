@@ -43,7 +43,7 @@ flowchart LR
 
 本机 Python 为 `C:\veighna_studio\python.exe`，QQ 原生 SQLCipher wheel 位于 `runtime-deps`。迁移时按根目录及 `processor/requirements.txt` 安装依赖，并配置自己的路径与账号。AI 处理还需要 Node ≥22.19，在 `processor/pi-runtime` 执行 `npm ci --ignore-scripts`；本机已安装项目私有 Node。不要把 credentials 或真实样本写进测试、Git 或报告。
 
-消息渠道和统一调度的可选依赖分别是 `messaging/requirements.txt`、`automation/requirements.txt`。模板默认关闭外部投递和自动任务，开发检查不应擅自开启真实模型或渠道。
+消息渠道和统一调度的可选依赖分别是 `messaging/requirements.txt`、`automation/requirements.txt`。新增渠道见 [渠道开发指南](channel-development.md)。本机配置可能已启用外部投递和自动任务，开发检查使用独立配置，不应擅自调用真实模型或渠道。
 
 ```powershell
 $env:PYTHONPATH = "$PWD/runtime-deps"
