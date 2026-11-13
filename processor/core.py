@@ -452,6 +452,10 @@ def _validate_response(response, group, existing, timezone):
         if not isinstance(item, dict):
             raise ValueError('Model task must be an object')
         task = {name: _text(item.get(name), name) for name in ('title', 'event', 'priority_reason')}
+        steps = item.get('action_steps', [])
+        if not isinstance(steps, list) or len(steps) > 50 or any(not isinstance(step, str) or not step.strip() or len(step) > 2000 for step in steps):
+            raise ValueError('Model task action_steps must contain at most 50 nonempty strings of at most 2000 characters')
+        task['action_steps'] = [step.strip() for step in steps]
         if not isinstance(item.get('priority'), str) or item['priority'] not in {'P0', 'P1', 'P2', 'P3', 'P4'} or not isinstance(item.get('status'), str) or item['status'] not in {'open', 'cancelled'}:
             raise ValueError('Model task priority or status is invalid')
         task.update(priority=item['priority'], status=item['status'])
@@ -490,11 +494,24 @@ def _validate_response(response, group, existing, timezone):
         if type(item.get('needs_review')) is not bool or not isinstance(item.get('review_reasons'), list):
             raise ValueError('Model task must state review requirements')
         task['review_reasons'] = [_text(reason, 'review reason') for reason in item['review_reasons']]
-        for missing, reason in [(not task['people'], '负责人未明确'), (not task['time']['deadline'], '截止时间未明确')]:
+        for missing, reason in [(not task['people'], '参与人员未明确'), (not task['time']['deadline'], '截止时间未明确')]:
             if missing and reason not in task['review_reasons']:
                 task['review_reasons'].append(reason)
         task['needs_review'] = item['needs_review'] or bool(task['review_reasons'])
         task['attachment_evidence'] = item.get('attachment_evidence', [])
+        materials = item.get('materials', [])
+        messages = {event['message_key']: event for event in group['messages']}
+        if not isinstance(materials, list) or len(materials) > 1000:
+            raise ValueError('Task materials must be a bounded array of mapped attachments')
+        task['materials'] = []
+        for material in materials:
+            if (not isinstance(material, dict) or set(material) != {'message_key', 'attachment_index', 'attachment'}
+                    or not isinstance(material['message_key'], str) or material['message_key'] not in task['source_message_keys']
+                    or type(material['attachment_index']) is not int
+                    or not 0 <= material['attachment_index'] < len(messages[material['message_key']]['message'].get('attachments', []))
+                    or not isinstance(material['attachment'], dict)):
+                raise ValueError('Task materials must map to cited source attachment indices')
+            task['materials'].append(material)
         signature = digest([task['title'], task['event'], task['source_message_keys']])
         if signature in signatures:
             raise ValueError('Model returned duplicate tasks in one response')
@@ -621,6 +638,9 @@ def run_round(config):
                             evidence = {canonical([e['message_key'], e['attachment_index'], e.get('locator')]): e
                                         for e in [*previous.get('attachment_evidence', []), *task.get('attachment_evidence', [])]}
                             task['attachment_evidence'] = list(evidence.values())
+                            materials = {(item['message_key'], item['attachment_index']): item
+                                         for item in [*previous.get('materials', []), *task.get('materials', [])]}
+                            task['materials'] = list(materials.values())
                         task['task_id'] = task['task_id'] or digest([group['id'], group['fingerprint'], index])
                         task.update(schema_version=1, updated_at=now,
                             conversation=previous['conversation'] if previous else {key: group[key] for key in ('platform', 'account_id', 'conversation_id')},

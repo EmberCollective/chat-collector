@@ -69,6 +69,32 @@ def test_metadata_is_resolved_by_ref_on_demand_and_archive_is_reused(setup, monk
     assert str(path) not in json.dumps(reply)
 
 
+def test_material_preparation_archives_metadata_once_without_reading(setup, monkeypatch):
+    config, event, path, config_path, scans = setup
+    reader = AttachmentContext([event], config)
+    def forbidden(*args):
+        raise AssertionError('Material preparation must not parse attachment content')
+    monkeypatch.setattr(reader, '_prepare', forbidden)
+    before = reader.catalog()
+    material = reader.prepare_material('f1')
+    assert Path(material['archive_path']).read_bytes() == path.read_bytes()
+    assert material['sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert len(scans) == 1
+    assert reader.prepare_material('f1') == material and len(scans) == 1
+    assert reader.evidence == {} and reader.catalog() == before
+    assert not reader.files['f1'].get('requested')
+
+
+def test_missing_material_is_retained_as_unavailable_instead_of_aborting(setup):
+    config, event, path, config_path, scans = setup
+    path.unlink()
+    reader = AttachmentContext([event], config)
+    material = reader.prepare_material('f1')
+    assert material['name'] == 'notice.pdf' and material['status'] == 'unavailable'
+    assert material['reason'] == 'local_source_not_found'
+    assert 'archive_path' not in material and reader.evidence == {}
+
+
 def test_account_mismatch_fails_without_scanning_other_account(setup):
     config,event,path,config_path,scans=setup
     event['message']['account_id']='different-account'

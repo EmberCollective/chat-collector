@@ -198,7 +198,7 @@ class TaskLookup:
                 ref = f't{len(self.tasks)+1}'
                 self.refs[task['task_id']] = ref
             self.tasks[ref] = task
-            row = {k:task.get(k) for k in ('title','event','priority','status','time','people','location','needs_review','updated_at')}
+            row = {k:task.get(k) for k in ('title','event','action_steps','priority','status','time','people','location','needs_review','updated_at')}
             origins = []
             for source in [task['conversation'], *task.get('sources', [])]:
                 source = dict(source, platform=source.get('platform') or source.get('collector_module'))

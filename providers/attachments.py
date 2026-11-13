@@ -184,6 +184,56 @@ class AttachmentContext:
     def catalog(self):
         return [dict(item['catalog']) for item in self.files.values()]
 
+    def prepare_material(self, ref):
+        """Prepare a selected deliverable without reading it into the model's context."""
+        if not isinstance(ref, str) or ref not in self.files:
+            raise ValueError('unknown_attachment_ref')
+        item = self.files[ref]
+        if 'material' in item:
+            return item['material']
+        original = item['event']['message']['attachments'][item['attachment_index']]
+
+        def verified(attachment):
+            if not attachment.get('archive_path') or attachment.get('status') in {'encrypted_only', 'unverified', 'missing', 'unavailable'}:
+                raise ValueError('verified_archive_unavailable')
+            path = Path(attachment['archive_path']).resolve(strict=True)
+            if not path.is_file() or not any(path.is_relative_to(root) for root in self.roots):
+                raise ValueError('attachment_outside_archive_roots')
+            before = path.stat()
+            with path.open('rb') as stream:
+                sha = hashlib.file_digest(stream, 'sha256').hexdigest()
+            after = path.stat()
+            if (before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns):
+                raise ValueError('attachment_changed_during_read')
+            if attachment.get('sha256') and attachment['sha256'].lower() != sha:
+                raise ValueError('attachment_archive_hash_mismatch')
+            return dict(attachment, archive_path=str(path), sha256=sha)
+
+        prepared = dict(original)
+        try:
+            if not self.enabled:
+                raise ValueError('attachment_context_disabled')
+            try:
+                prepared = verified(self.resolved.get((item['event']['message_key'], item['attachment_index']), original))
+            except (OSError, ValueError, TypeError, AttributeError):
+                prepared = self.resolver.resolve(item['event'], item['attachment_index'])
+                if not prepared.get('archive_path'):
+                    raise ValueError(prepared.get('reason', 'verified_archive_unavailable'))
+                prepared = verified(prepared)
+        except Exception as exc:
+            reasons = {'attachment_context_disabled', 'attachment_provider_not_configured', 'attachment_account_mismatch',
+                       'attachment_provider_identity_mismatch', 'attachment_archive_disabled', 'local_source_not_found',
+                       'ambiguous_local_candidates', 'image_decode_unavailable', 'image_source_not_found',
+                       'attachment_path_outside_allowed_roots', 'attachment_outside_archive_roots',
+                       'attachment_changed_during_read', 'attachment_archive_hash_mismatch', 'verified_archive_unavailable'}
+            reason = str(exc) if isinstance(exc, ValueError) and str(exc) in reasons else 'material_prepare_failed'
+            prepared = {key: value for key, value in prepared.items() if key not in {'archive_path', 'sha256'}}
+            prepared.update(status='unavailable', reason=reason)
+        item['material'] = prepared
+        for origin in item['catalog']['origins']:
+            self.resolved[(origin['message_key'], origin['attachment_index'])] = prepared
+        return prepared
+
     def _prepare(self, item):
         if 'document' in item:
             return item['document']

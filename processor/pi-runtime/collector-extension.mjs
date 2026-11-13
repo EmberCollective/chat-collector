@@ -3,6 +3,8 @@ import { Type } from 'typebox';
 const nullableText = Type.Union([Type.String(), Type.Null()]);
 const taskSchema = Type.Object({
   task_id: Type.Optional(nullableText), title: Type.String(), event: Type.String(),
+  action_steps: Type.Optional(Type.Array(Type.String({minLength: 1, maxLength: 2000}), {maxItems: 50})),
+  material_refs: Type.Optional(Type.Array(Type.String({pattern: '^f[1-9][0-9]*$'}), {maxItems: 100})),
   priority: Type.Union(['P0', 'P1', 'P2', 'P3', 'P4'].map(value => Type.Literal(value))),
   priority_reason: Type.String(), status: Type.Union([Type.Literal('open'), Type.Literal('cancelled')]),
   time: Type.Object({start: nullableText, deadline: nullableText, text: nullableText,

@@ -20,7 +20,7 @@
 
 ## 聊天人物与任务人员
 
-`conversations.people` 是资料，不是待办负责人名单。`submit_tasks.tasks[].people` 是模型有依据提取的负责人或参与人，仍为 `{name,role}`。发送消息、被 @、被备注为“老师”，都不能单独证明承担任务。
+`conversations.people` 是资料，不是待办负责人名单。`submit_tasks.tasks[].people` 是模型有依据提取的参与本事项的人；仅明确指派时标注负责人，仍为 `{name,role}`。发送消息、被 @、被备注为“老师”，都不能单独证明承担任务。
 
 未知身份不冒充已知人物；缺失名称用 `null` 与 `missing_fields` 表示。同名不跨账号或跨平台自动合并。当前任务人员尚未升级为稳定人员 ID，相关姓名搜索的限制见 [待办查询](task-search.md)。
 
