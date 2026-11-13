@@ -218,7 +218,7 @@ def test_three_registrations_can_be_enabled_independently(config):
     assert selected(config) == [1,2,3,4,5,6]
 
 
-def test_disabled_rules_do_not_refresh_or_advance_checkpoint(config, monkeypatch):
+def test_disabled_rules_still_refresh_without_scanning_or_advancing_checkpoint(config, monkeypatch):
     rule = register(config, 'files.sql')
     monkeypatch.setattr('collector.__main__.time.time', lambda:111)
     assert run_round(config)['emitted'] == 1
@@ -227,11 +227,14 @@ def test_disabled_rules_do_not_refresh_or_advance_checkpoint(config, monkeypatch
     import importlib
     adapter = importlib.import_module('providers.platforms.'+config['platform'])
     def unexpected(*args, **kwargs):
-        pytest.fail('Disabled rules must not scan or refresh')
-    monkeypatch.setattr(importlib.import_module('collector.adapters.'+config['platform']), 'refresh', unexpected)
+        pytest.fail('Disabled rules must not scan')
+    refreshed = []
+    monkeypatch.setattr(importlib.import_module('collector.adapters.'+config['platform']), 'refresh',
+                        lambda source: refreshed.append(True) or {})
     monkeypatch.setattr(adapter, 'scan', unexpected)
     monkeypatch.setattr('collector.__main__.time.time', lambda:200)
     assert run_round(config)['status'] == 'no_enabled_rules'
+    assert refreshed == [True]
     assert selected(config) == []
     config['filters']['rulesets'] = []
     assert run_round(config)['status'] == 'no_enabled_rules'

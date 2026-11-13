@@ -214,7 +214,11 @@ def test_refresh_interval_defers_without_losing_window_and_replay_bypasses(tmp_p
     calls.clear()
     monkeypatch.setattr(runner.time, 'time', lambda: 500)
     runner.run_round(cfg)
-    assert calls == ['refresh', (200, 500)]
+    assert calls == [(200, 250)]  # Replay refreshed at 250, independently of selection's 200 checkpoint.
+    calls.clear()
+    monkeypatch.setattr(runner.time, 'time', lambda: 550)
+    runner.run_round(cfg)
+    assert calls == ['refresh', (250, 550)]
 
 
 def test_state_input_collision_rejected_before_open(tmp_path):
