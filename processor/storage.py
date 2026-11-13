@@ -33,6 +33,8 @@ def _connect(config, *, write=False):
 
 
 def _save_task(conn, task):
+    for item in task.get('materials', []):
+        item['material_id'] = digest([task['task_id'], item['message_key'], item['attachment_index']])
     previous = conn.execute('SELECT revision FROM tasks WHERE task_id=?', (task['task_id'],)).fetchone()
     task['revision'] = previous[0] + 1 if previous else 1
     body = canonical(task)
