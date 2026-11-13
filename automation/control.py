@@ -14,8 +14,8 @@ import uuid
 
 import psutil
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical
+from common.locking import InstanceLock
+from common.codec import canonical
 from .config import JOBS, load_config
 from . import core
 

@@ -13,8 +13,8 @@ import sqlite3
 import threading
 import time
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical, digest
+from common.locking import InstanceLock
+from common.codec import canonical, digest
 
 from .config import JOBS
 

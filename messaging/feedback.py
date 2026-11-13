@@ -10,8 +10,8 @@ import sqlite3
 import time
 import uuid
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical, digest
+from common.locking import InstanceLock
+from common.codec import canonical, digest
 
 
 SCHEMA = '''

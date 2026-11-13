@@ -51,7 +51,7 @@ def _view(raw, config):
 def read_settings(path):
     path = Path(path).resolve()
     # A writer replaces atomically, so validate exactly the bytes used for the version.
-    from collector.__main__ import InstanceLock
+    from common.locking import InstanceLock
     with InstanceLock(path, timeout=5):
         return _view(path.read_bytes(), load_config(path))
 
@@ -102,7 +102,7 @@ def _validate_target(target, original=None):
 def save_settings(path, payload, expected_version):
     """Merge submitted targets by ID; omitted targets and unknown settings survive."""
     import tomlkit
-    from collector.__main__ import InstanceLock
+    from common.locking import InstanceLock
     path = Path(path).resolve()
     if not isinstance(payload, dict) or set(payload) - {'enabled', 'feedback_enabled', 'targets', *SECTIONS}:
         raise ValueError('unsupported_settings_field')

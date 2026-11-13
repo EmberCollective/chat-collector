@@ -8,7 +8,7 @@ import sys
 
 import psutil
 
-from collector.store import canonical
+from common.codec import canonical
 from .core import _connect
 
 

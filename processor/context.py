@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from collector.store import canonical
+from common.codec import canonical
 from providers.attachments import AttachmentContext
 from .pi_bridge import run_agent
 from .task_search import TaskLookup

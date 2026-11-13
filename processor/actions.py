@@ -5,8 +5,8 @@ import datetime as dt
 import json
 from pathlib import Path
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical
+from common.locking import InstanceLock
+from common.codec import canonical
 from . import core
 
 

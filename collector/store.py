@@ -1,16 +1,10 @@
-import hashlib
 import json
 import os
 from pathlib import Path
 import sqlite3
 
 
-def canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
-
-
-def digest(value):
-    return hashlib.sha256(canonical(value).encode('utf-8')).hexdigest()
+from common.codec import canonical, digest  # Legacy import path.
 
 
 class Store:

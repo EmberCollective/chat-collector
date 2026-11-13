@@ -10,8 +10,8 @@ import tomllib
 import urllib.parse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical, digest
+from common.locking import InstanceLock
+from common.codec import canonical, digest
 from contracts import validate_event as _validate_event
 
 

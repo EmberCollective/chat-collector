@@ -11,8 +11,8 @@ import sqlite3
 import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical, digest
+from common.locking import InstanceLock
+from common.codec import canonical, digest
 from .notifications import deadline_node as _deadline_node, queue_digest
 
 

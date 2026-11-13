@@ -9,8 +9,8 @@ from pathlib import Path
 
 from collector.assets import AttachmentArchive
 from collector.config import load_config
-from collector.__main__ import InstanceLock
-from collector.store import digest
+from common.locking import InstanceLock
+from common.codec import digest
 
 
 class CollectorAttachmentProvider:

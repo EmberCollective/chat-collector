@@ -2,7 +2,7 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from collector.store import canonical, digest
+from common.codec import canonical, digest
 
 
 def deadline_schedule(config, task):
