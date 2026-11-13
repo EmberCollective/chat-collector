@@ -23,7 +23,7 @@ def payload(root):
             dirs[:] = [name for name in dirs if name not in EXCLUDED]
             for name in names:
                 p = Path(folder) / name
-                if p.suffix not in {'.pyc', '.log'}:
+                if p.suffix not in {'.pyc', '.log'} and p.relative_to(root).as_posix() != 'tools/console/console.toml':
                     files[p.relative_to(root).as_posix()] = p.read_bytes()
     for name in SOURCE_FILES:
         files[name] = (root / name).read_bytes()

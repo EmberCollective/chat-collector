@@ -7,7 +7,7 @@ if (-not $Destination) {
     if (-not $Destination) { $Destination = 'D:\opt\chat-collector' }
 }
 $Destination = [IO.Path]::GetFullPath($Destination)
-if ($Destination -ne $sourceRoot -and (Test-Path -LiteralPath $Destination)) {
+if ($Destination.TrimEnd('\') -ne $sourceRoot.TrimEnd('\') -and (Test-Path -LiteralPath $Destination)) {
     if ((Get-ChildItem -LiteralPath $Destination -Force | Measure-Object).Count -gt 0) {
         throw 'Destination is not empty. Use Configure.cmd in the existing installation, or choose a new folder.'
     }
@@ -34,14 +34,40 @@ function Set-PythonPaths($directory) {
 }
 try {
     $manifestPath = Join-Path $sourceRoot 'release-manifest.json'
-    if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'Use the release ZIP built by tools/install/build_release.py; source checkout is not an installation bundle.' }
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        $bundle = Join-Path $sourceRoot 'dist/chat-collector-windows-x64-preview.zip'
+        $checksum = "$bundle.sha256"
+        if (-not (Test-Path -LiteralPath $bundle) -or -not (Test-Path -LiteralPath $checksum)) {
+            throw 'Release ZIP is missing. Extract the release ZIP and run its Install.cmd, or build it with tools/install/build_release.py first.'
+        }
+        $expected = ((Get-Content -LiteralPath $checksum -Raw).Trim() -split '\s+')[0]
+        if ($expected -notmatch '^[0-9a-fA-F]{64}$' -or (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash -ne $expected) {
+            throw 'Release ZIP checksum mismatch. No installation files were executed.'
+        }
+        $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+        $staging = Join-Path $tempRoot ('chat-collector-install-' + [Guid]::NewGuid().ToString('N'))
+        try {
+            Write-Host 'Source checkout detected; installing from the verified release ZIP in dist.'
+            Expand-Archive -LiteralPath $bundle -DestinationPath $staging
+            $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $staging 'chat-collector/tools/install/install.ps1'), '-Destination', $Destination)
+            if ($PrepareOnly) { $arguments += '-PrepareOnly' }
+            & powershell.exe @arguments
+            $result = $LASTEXITCODE
+        } finally {
+            $resolved = [IO.Path]::GetFullPath($staging)
+            if ($resolved.StartsWith($tempRoot + '\', [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $resolved)) {
+                Remove-Item -LiteralPath $resolved -Recurse -Force
+            }
+        }
+        exit $result
+    }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($file in $manifest.files) {
         $candidate = [IO.Path]::GetFullPath((Join-Path $sourceRoot $file.path))
         if (-not $candidate.StartsWith($sourceRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe manifest path.' }
         if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLower() -ne $file.sha256) { throw "Package file verification failed: $($file.path)" }
     }
-    if ($Destination -ne $sourceRoot) {
+    if ($Destination.TrimEnd('\') -ne $sourceRoot.TrimEnd('\')) {
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
         foreach ($file in $manifest.files) {
             $out = Join-Path $Destination $file.path
@@ -49,6 +75,10 @@ try {
             Copy-Item -LiteralPath (Join-Path $sourceRoot $file.path) -Destination $out
         }
         Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $Destination 'release-manifest.json')
+    }
+    $consoleConfig = Join-Path $Destination 'tools/console/console.toml'
+    if (-not (Test-Path -LiteralPath $consoleConfig)) {
+        Copy-Item -LiteralPath (Join-Path $Destination 'tools/install/console.toml') -Destination $consoleConfig
     }
     $runtime = Join-Path $Destination '.runtime'
     $python = Join-Path $runtime 'python/python.exe'

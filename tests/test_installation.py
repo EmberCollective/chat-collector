@@ -102,6 +102,8 @@ def test_release_payload_never_copies_accounts_keys_or_installed_node():
     build = module('build_release')
     files = build.payload(ROOT)
     assert 'tools/install/defaults/processor.toml' in files
+    assert 'tools/install/console.toml' in files
+    assert 'tools/console/console.toml' not in files
     assert 'runtime-deps/native/sqlcipher-pages.dll' in files
     assert 'runtime-deps/sqlcipher3/_sqlite3.cp313-win_amd64.pyd' in files
     assert not any(p.startswith(('data/', 'secrets/', 'config/', '.git/', '.runtime/')) for p in files)
@@ -150,3 +152,22 @@ def test_invalid_model_settings_do_not_replace_saved_configuration(install_root)
         setup.save_config(install_root, 'processor', settings)
     assert path.read_bytes() == before
     assert not path.with_suffix('.tmp').exists()
+
+
+def test_console_port_choice_rejects_busy_port_without_changing_config(tmp_path, monkeypatch):
+    import socket
+    setup = module('setup')
+    path = tmp_path / 'tools/console/console.toml'
+    path.parent.mkdir(parents=True)
+    path.write_text('port = 10400\n', encoding='utf-8')
+    original = path.read_bytes()
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        busy = sock.getsockname()[1]
+        monkeypatch.setattr(setup, 'ask', lambda *args: str(busy))
+        with pytest.raises(RuntimeError, match='已被占用'):
+            setup.configure_console(tmp_path)
+    assert path.read_bytes() == original
+    monkeypatch.setattr(setup, 'ask', lambda *args: str(busy))
+    setup.configure_console(tmp_path)
+    assert tomllib.loads(path.read_text())['port'] == busy

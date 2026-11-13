@@ -164,6 +164,31 @@ def configure_model(root):
     load_config(root / 'config/processor.toml')
 
 
+def configure_console(root):
+    import socket
+    import tomlkit
+    path = root / 'tools/console/console.toml'
+    doc = tomlkit.loads(path.read_text(encoding='utf-8'))
+    def available(port):
+        with socket.socket() as sock:
+            try:
+                sock.bind(('127.0.0.1', port))
+                return True
+            except OSError:
+                return False
+    default = int(doc.get('port', 10400))
+    if not available(default):
+        print('默认面板端口已被占用，请为此安装选择独立端口。')
+        default = 10411
+    port = int(ask('调试台端口（同机多套环境需不同端口）', str(default)))
+    if not 1024 <= port <= 65535 or not available(port):
+        raise RuntimeError('端口无效或已被占用；请重新运行 Configure.cmd 选择其他端口。')
+    doc['port'] = port
+    pending = path.with_suffix('.tmp')
+    pending.write_text(tomlkit.dumps(doc), encoding='utf-8')
+    os.replace(pending, path)
+
+
 def configure_collector(root, platform):
     name = '微信' if platform == 'wechat' else 'QQ'
     options = [(str(p), str(p)) for p in discover_accounts(platform)]
@@ -407,6 +432,10 @@ def wizard(root=ROOT):
             state['initialized'] = True
             save()
         secure_secrets(root)
+        if not state.get('console'):
+            configure_console(root)
+            state['console'] = True
+            save()
         if 'platforms' not in state:
             state['platforms'] = choose([('微信和 QQ', ['wechat', 'qq']), ('仅微信', ['wechat']), ('仅 QQ', ['qq'])], '采集哪些平台')
             save()
