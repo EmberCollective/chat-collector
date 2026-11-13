@@ -82,5 +82,7 @@ def queue_digest(config, conn, tasks, local, now, blocked, target_hash):
                               'generated_at': dt.datetime.fromtimestamp(now, zone).isoformat(),
                               'expires_at': expires, 'items': items}}
         with conn:
-            conn.execute('INSERT OR IGNORE INTO deliveries(id,target_id,target_hash,task_id,revision,local_version,kind,body,status,created_at,package_hash) VALUES(?,?,?,?,1,0,?,?,?,?,?)',
+            conn.execute('''INSERT INTO deliveries(id,target_id,target_hash,task_id,revision,local_version,kind,body,status,created_at,package_hash)
+                         VALUES(?,?,?,?,1,0,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,package_hash=excluded.package_hash
+                         WHERE deliveries.status IN ('pending','retry')''',
                          (identifier, target['id'], fingerprint, 'digest:' + today.isoformat(), 'daily_digest', canonical(payload), 'pending', now, digest(items)))
