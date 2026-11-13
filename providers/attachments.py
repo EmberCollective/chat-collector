@@ -188,7 +188,7 @@ class AttachmentContext:
                     sha = hashlib.sha256(raw).hexdigest()
                     if attachment.get('sha256') and attachment['sha256'].lower() != sha:
                         raise ValueError('attachment_archive_hash_mismatch')
-                    identity = (sha, name)
+                    identity = (sha, str(attachment.get('name') or 'attachment'))
                     if identity in by_content:
                         previous = self.files[by_content[identity]]['catalog']
                         if event['message_key'] not in previous['message_keys']:
