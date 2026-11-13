@@ -63,6 +63,23 @@ def _published(config):
     return json.loads(path.read_text(encoding='utf-8')) if path.is_file() else None
 
 
+def _pending_path(config):
+    return publication_path(config).with_suffix('.pending.json')
+
+
+def _write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    try:
+        with temporary.open('w', encoding='utf-8') as stream:
+            stream.write(canonical(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 @contextmanager
 def source_snapshot(config):
     """Block refresh while reading; fail closed if another writer changes any DB."""
@@ -71,6 +88,9 @@ def source_snapshot(config):
         metadata = _metadata(config, before)
         metadata['capture_managed'] = config['source'].get('refresh', True)
         saved = _published(config)
+        if ((saved is not None and saved.get('snapshot_id') != metadata['snapshot_id']) or
+                (_pending_path(config).exists() and saved is None)):
+            raise RuntimeError('Source snapshot changed without complete collection publication; retry collection')
         if saved is not None:
             metadata['capture_managed'] = True
             if saved.get('snapshot_id') == metadata['snapshot_id']:
@@ -85,19 +105,15 @@ def collect_once(config):
     with InstanceLock(_lock_path(config), timeout=45):
         capture_started_at = int(time.time())
         adapter = importlib.import_module('collector.adapters.' + config['platform'])
+        pending = _pending_path(config)
+        if not config['source'].get('refresh', True) and pending.exists():
+            raise RuntimeError('Source collection is incomplete; enable refresh to recover it')
+        # A crash between per-database commits must never expose a mixed source generation.
+        _write_json(pending, dict(capture_started_at=capture_started_at))
         refresh = (adapter.refresh(config['source']) if config['source'].get('refresh', True)
                    else {'mode': 'decrypted_only'})
         result = dict(_metadata(config, _fingerprint(config)), refresh=refresh,
                       collected_at=int(time.time()), capture_started_at=capture_started_at)
-        path = publication_path(config)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix('.json.tmp')
-        try:
-            with temporary.open('w', encoding='utf-8') as stream:
-                stream.write(canonical(result))
-                stream.flush()
-                os.fsync(stream.fileno())
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        _write_json(publication_path(config), result)
+        pending.unlink()
         return result
