@@ -1,5 +1,7 @@
 # 开发指南
 
+架构重构任务先读 [目标架构与边界契约](architecture.md) 和 [Agent 分工与验收](architecture-agent-tasks.md)。下文描述当前实现；不能据此把 SQL 数据适配留在筛选层，或把附件解码放进 Pi 工具。
+
 本地项目分为采集、筛选、处理、消息四个逻辑阶段。消息层交付行动与材料、按优先级提醒，并通过公开 API 回写用户操作；`automation` 独立调度各层。调试台放在 `tools/console`，只是调用核心的可选入口。
 
 接入提供方请先阅读 [数据契约](data-contract.md)、[收集层开发指南](collector-development.md) 和 [AI 输入结构](ai-context.md)。全部专题见 [文档索引](README.md)。
