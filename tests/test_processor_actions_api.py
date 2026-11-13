@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from collector.__main__ import InstanceLock
+from processor import storage
 from processor import (core, update_task_status, search_tasks, TaskStatusConflict, UnknownTask,
                        TaskStatusBusy, TaskStatusExportPending, update_task_priority)
 from test_processor import batch, config, event, response
@@ -35,7 +36,7 @@ def test_manual_priority_survives_model_update_and_keeps_completion(config, save
 
 def test_priority_export_failure_replays_without_double_revision(config, saved, monkeypatch):
     with monkeypatch.context() as patch:
-        patch.setattr(core, '_export', lambda *args: (_ for _ in ()).throw(OSError('disk')))
+        patch.setattr(storage, '_export', lambda *args: (_ for _ in ()).throw(OSError('disk')))
         with pytest.raises(TaskStatusExportPending):
             update_task_priority(config, saved['task_id'], 'P0', request_id='priority:1', actor=ACTOR)
     assert core.list_tasks(config)[0]['priority'] == 'P0'
@@ -105,7 +106,7 @@ def test_failed_export_is_durable_and_same_request_retries_publication(config, s
     def failed(*args):
         raise OSError('Simulated disk failure')
     with monkeypatch.context() as patch:
-        patch.setattr(core, '_export', failed)
+        patch.setattr(storage, '_export', failed)
         with pytest.raises(TaskStatusExportPending):
             update_task_status(config, saved['task_id'], 'completed', request_id='n:1', actor=ACTOR, expected_revision=1)
     assert core.list_tasks(config)[0]['status'] == 'completed'
