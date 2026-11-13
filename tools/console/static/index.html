@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>聊天收集与待办 · 本地调试</title><link rel="icon" href="/static/icon.svg"><link rel="stylesheet" href="/static/style.css"><script src="/static/processor.js" defer></script><script src="/static/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>聊天收集与待办 · 本地调试</title><link rel="icon" href="/static/icon.svg"><link rel="stylesheet" href="/static/style.css"><script src="/static/processor.js" defer></script><script src="/static/app.js" defer></script><script src="/static/messaging.js" defer></script></head>
 <body>
 <header><div><span class="eyebrow">LOCAL TOOLS / 01</span><h1>聊天收集调试台</h1><p>查看采集状态，验证筛选条件，追踪消息与附件。</p></div><nav><button id="copy-token" class="secondary">复制 API 凭证</button><a href="/docs" target="_blank" rel="noopener">OpenAPI ↗</a></nav></header>
 <main>
@@ -35,6 +35,12 @@
 <details id="processor-settings"><summary>模型连接与上下文设置</summary><p id="processor-config-file" class="muted path"></p><div id="processor-config-fields" class="settings-grid"></div><p class="scope">单会话字符预算由你设置。自动合批保留群聊/会话边界，超过初始批次预算时优先按会话拆分；关联片段不会按条数硬切。单个关联片段过大时明确报错，请调高预算或检查原消息，不会静默截断。</p><p id="processor-key-file" class="muted path"></p><p class="scope">这里只填写密钥环境变量的名称，不填写密钥；也支持项目本地 .env 文件。也可在提示的本机密钥文件中保存密钥原文，已有环境变量优先。地址与模型留空时可以预览，但不能执行处理；保存间隔只供独立命令行定时处理使用。</p><div class="actions"><button id="processor-save-config">保存处理配置</button><button id="processor-load-config" class="secondary">重新加载配置</button></div></details>
 <details id="processor-rules"><summary>编辑处理规则 · Markdown</summary><p id="processor-rules-file" class="muted path"></p><label for="processor-rules-text">规则正文</label><textarea id="processor-rules-text" rows="14" spellcheck="false" maxlength="1048576"></textarea><div class="actions"><button id="processor-save-rules">保存规则并备份</button><button id="processor-load-rules" class="secondary">重新加载规则</button></div><p class="scope">只修改配置指定的本地文件。保存时校验版本；冲突不会覆盖你的编辑内容。规则改变后，下一轮按新规则重新处理相关上下文。</p></details>
 <div class="processor-results"><section aria-labelledby="processor-context-title"><h3 id="processor-context-title">上下文预览</h3><div id="processor-preview-output"><p class="empty">预览会展示最多 5 批消息，不调用模型，也不推进处理状态。</p></div></section><section aria-labelledby="processor-tasks-title"><div id="processor-debug-output"></div><h3 id="processor-tasks-title">待办结果</h3><div id="processor-review-output"></div><div id="processor-tasks"><p class="empty">尚未读取处理结果。</p></div></section></div>
+</section>
+<section class="workspace" id="messaging-panel" aria-labelledby="messaging-title">
+<div class="workspace-title"><div><span class="eyebrow">DELIVERY / 03</span><h2 id="messaging-title">行动与材料 · 消息层</h2><p class="muted">整理用户接下来怎么做，直接查看相关链接和附件。参与人员指需要参与事项的人，不等同于负责人。</p></div></div>
+<p class="scope">先预览，再导入本地待办和材料。本页不发送外部消息；飞书、Notion 与 Notion Calendar 接入及提醒频率在 config/messaging.toml 配置，默认关闭。完成状态属于消息层，不修改原始消息和处理结果。</p>
+<div class="actions"><button id="messaging-preview">预览行动与材料</button><button id="messaging-sync" class="secondary">导入并保存本地材料</button></div>
+<p id="messaging-notice" role="status" aria-live="polite">尚未加载。</p><div id="messaging-output"></div>
 </section>
 <section class="history"><div class="workspace-title"><div><span class="eyebrow">ACTIVITY</span><h2>任务记录</h2></div><span id="connection" class="muted">正在连接…</span></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>模块 / 操作</th><th>触发方式</th><th>状态</th><th>详情</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
 <footer>本机访问 · 调试台可单独关闭，采集与处理核心均可独立运行。<span id="collector-path"></span></footer>

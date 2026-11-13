@@ -339,6 +339,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     app = FastAPI(title='聊天收集调试控制台', version='0.1.0', docs_url=None, redoc_url=None,
                   description='消息收集项目的可选本机调试工具。预览不推进断点；正式采集和重放会写入主项目。', lifespan=lifespan)
     app.state.jobs, app.state.bridge = jobs, bridge
+    from messaging_routes import register_messaging_routes
+    register_messaging_routes(app, bridge, authenticate)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):

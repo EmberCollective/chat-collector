@@ -69,8 +69,10 @@ function renderProcessorTasks(tasks,target=$('processor-tasks')){
     box.append(head,el('h4',task.title||'未命名待办'));
     const when=task.time||{},people=Array.isArray(task.people)?task.people.map(person=>typeof person==='string'?person:[person.name,person.role].filter(Boolean).join(' · ')).join('、'):'';
     const facts=el('dl',undefined,'task-facts');
-    for(const [label,value] of [['事件',task.event],['时间',[when.text,when.start?`开始 ${when.start}`:'',when.deadline?`截止 ${when.deadline}`:'',when.timezone].filter(Boolean).join(' · ')],['人员',people],['地点',task.location]])facts.append(el('dt',label),el('dd',value||'未明确'));
+    for(const [label,value] of [['事件',task.event],['时间',[when.text,when.start?`开始 ${when.start}`:'',when.deadline?`截止 ${when.deadline}`:'',when.timezone].filter(Boolean).join(' · ')],['参与人员',people],['地点',task.location]])facts.append(el('dt',label),el('dd',value||'未明确'));
     box.append(facts);
+    if(task.action_steps?.length){const steps=el('ol');for(const step of task.action_steps)steps.append(el('li',step));box.append(el('h4','你需要做'),steps);}
+    if(task.materials?.length)box.append(el('p','执行材料：'+task.materials.map(m=>m.attachment?.name||'未命名附件').join('、'),'muted'));
     if(task.needs_review)box.append(el('p','待核对：'+(task.review_reasons||[]).join('；'),'pill warn'));
     const sources=el('details');sources.append(el('summary',`来源证据 · ${(task.sources||[]).length} 条`));
     for(const source of task.sources||[]){const m=source.message||source,platform=m.platform||m.collector_module;const node=el('div',undefined,'source-evidence');node.append(el('p',[names[platform]||platform,...identitySummary(m),m.sent_at?time(m.sent_at):null].filter(Boolean).join(' · '),'muted'),el('div',m.text||source.text||'此来源无可显示正文','message-text'));if(!task.debug_run&&['wechat','qq'].includes(platform)&&source.message_key&&source.revision)node.append(button('打开本地原消息与附件',()=>openProcessorSource(source)));node.append(processorDetails('完整本地来源',source));sources.append(node);}

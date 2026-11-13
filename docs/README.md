@@ -7,6 +7,8 @@
 | 检查模型实际收到什么 | [AI 输入结构](ai-context.md)、[合成输入](examples/ai-context-v1.json) |
 | 编写 SQL 筛选 | [规则集](../FILTERS.md) |
 | 调整处理与待办规则 | [处理层](processing.md)、[待办查询](task-search.md) |
+| 整理用户怎么做与参与人员 | [行动输出](actionable-tasks.md) |
+| 配置提醒、材料与成果 | [消息层契约](messaging.md)、[飞书 / Notion / Notion Calendar](messaging-channels.md) |
 | 理解附件工具 | [附件上下文](attachment-context.md) |
 | 调试 Pi 与本地面板 | [Pi 运行时](pi-runtime.md)、[处理调试台](console-processing.md) |
 | 排查采集性能 | [优化方法](optimization.md)、[微信性能](wechat-performance.md) |
