@@ -143,7 +143,7 @@ def blocked_task_ids(config):
     conn = _connect(config)
     try:
         return set() if conn is None else {row[0] for row in conn.execute(
-            "SELECT DISTINCT task_id FROM feedback_requests WHERE status NOT IN ('applied','superseded')")}
+            "SELECT DISTINCT task_id FROM feedback_requests WHERE status IN ('queued','retry','applying')")}
     finally:
         if conn is not None:
             conn.close()
@@ -214,6 +214,7 @@ def _apply(config, row):
 
 def process_pending(config):
     result = {'applied': 0, 'retry': 0, 'failed': 0, 'conflict': 0, 'pending': 0}
+    wake_messaging = False
     if not config.get('feedback', {}).get('enabled', False):
         return result
     from processor.service import TaskStatusBusy, TaskStatusConflict, TaskStatusExportPending, UnknownTask
@@ -238,6 +239,7 @@ def process_pending(config):
                     conn.execute("UPDATE feedback_requests SET status='superseded',updated_at=? WHERE task_id=? AND rowid<? AND status IN ('failed','conflict')",
                                  (time.time(), row['task_id'], row['queue_order']))
                 result['applied'] += 1
+                wake_messaging = True
             except Exception as exc:
                 attempts = row['attempts']
                 if isinstance(exc, TaskStatusBusy) or isinstance(exc, RuntimeError) and str(exc) == 'Another collector is using this state file':
@@ -256,10 +258,11 @@ def process_pending(config):
                 with conn:
                     conn.execute('UPDATE feedback_requests SET status=?,attempts=?,next_attempt=?,error=?,updated_at=? WHERE request_id=?',
                                  (state, attempts, time.time() + delay, code, time.time(), row['request_id']))
+                wake_messaging = wake_messaging or state in {'failed', 'conflict'}
         counts = dict(conn.execute('SELECT status,count(*) FROM feedback_requests GROUP BY status'))
         result.update(retry=counts.get('retry', 0), failed=counts.get('failed', 0), conflict=counts.get('conflict', 0),
                       pending=sum(counts.get(state, 0) for state in ('queued', 'retry', 'applying')))
-    if result['applied']:
+    if wake_messaging:
         from automation.wakeup import notify
         notify(config.get('_config_path'), 'messaging')
     return result
