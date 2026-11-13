@@ -202,7 +202,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const next = node('span', '—');
       if (active && job.enabled && job.next_run && job.state !== 'paused') next.dataset.opsNext = job.next_run;
       const check = checks.jobs?.[job.name];
-      return [jobNames[job.name] || job.name, !job.enabled ? '未启用' : !active ? '服务未运行' : states[job.state] || job.state, job.attempts ?? 0, next, date(job.last_success), job.active_error || job.error || (check?.ready === false ? check.reason : '') || '—'];
+      const failure = snapshot.automation?.service?.['last_failure:' + job.name];
+      const detail = failure?.failures?.[0], frame = detail?.frames?.at(-1);
+      let issue = job.active_error || job.error || (check?.ready === false ? check.reason : '') || '';
+      if (detail) issue += `${issue ? ' · ' : '上次：'}${detail.code}${frame ? ` · ${frame.file}:${frame.line}` : ''}（${date(failure.at)}）`;
+      return [jobNames[job.name] || job.name, !job.enabled ? '未启用' : !active ? '服务未运行' : states[job.state] || job.state, job.attempts ?? 0, next, date(job.last_success), issue || '—'];
     }));
     const recovery = byId('recovery'); recovery.replaceChildren();
     recovery.append(node('h4', '投递失败与不确定结果'));

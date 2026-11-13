@@ -40,7 +40,7 @@
 
 `data/automation/state.db` 独立保存每项任务的状态、尝试次数、下次运行时间、最近成功时间、数值结果和本地故障记录。它不会修改处理层或采集层数据库；配置误指到其他应用的已有数据库会拒绝启动。
 
-同一任务、同一错误代码在 `alerts.cooldown_seconds` 内合并并累计出现次数。故障解除后可发送恢复通知，`alerts.recovery_enabled=false` 可关闭。错误只记录固定错误代码或异常类型，不把聊天正文、SDK 异常详情、URL 或凭据写进报警。
+同一任务、同一错误代码在 `alerts.cooldown_seconds` 内合并并累计出现次数。故障解除后可发送恢复通知，`alerts.recovery_enabled=false` 可关闭。SQLite 错误保留引擎错误码，例如 `sqlite_busy`，不再全部显示为 `OperationalError`。本地状态的 `service["last_failure:任务名"]` 保存该任务最后一次失败时间、项目内调用位置及错误链；恢复后仍保留，面板显示最近故障位置。记录不包含异常原文、SQL、局部变量、聊天正文、URL 或凭据；外部报警仍只发送错误码。
 
 外部报警默认关闭。模板的 `alerts.target_id="feishu-assistant"` 与消息层的飞书应用目标对应；启用时同时配置该目标和消息层全局投递。通知使用 `kind=alert`，只有任务名称、故障代码及检查建议，没有业务待办操作按钮。报警投递自身失败只记为 `failed_or_unknown`，不递归发报警、不进入无限重试；下次满足冷却时间的同类故障才可能再通知。
 

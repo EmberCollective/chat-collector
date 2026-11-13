@@ -65,8 +65,35 @@ def _setting(conn, key, value):
 
 
 def _error(exc):
+    if isinstance(exc, sqlite3.Error):
+        name = getattr(exc, 'sqlite_errorname', None)
+        if isinstance(name, str) and re.fullmatch(r'SQLITE_[A-Z_]{1,60}', name):
+            return name.lower()
     code = getattr(exc, 'code', None)
     return code if isinstance(code, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,100}', code) else type(exc).__name__
+
+
+def _failure_details(exc, root, now):
+    """Keep code locations and SQLite codes, never exception text, SQL or locals."""
+    root = Path(root).resolve()
+    failures, seen = [], set()
+    while exc is not None and id(exc) not in seen and len(failures) < 5:
+        seen.add(id(exc))
+        frames, trace = [], exc.__traceback__
+        while trace:
+            code = trace.tb_frame.f_code
+            path = Path(code.co_filename).resolve()
+            if path.is_relative_to(root):
+                frames.append({'file': path.relative_to(root).as_posix(),
+                               'line': trace.tb_lineno, 'function': code.co_name})
+            trace = trace.tb_next
+        failure = {'code': _error(exc), 'frames': frames[-12:]}
+        sqlite_code = getattr(exc, 'sqlite_errorcode', None)
+        if isinstance(exc, sqlite3.Error) and type(sqlite_code) is int:
+            failure['sqlite_errorcode'] = sqlite_code
+        failures.append(failure)
+        exc = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+    return {'at': now, 'failures': failures}
 
 
 def _stats(result):
@@ -244,11 +271,13 @@ class SchedulerService:
         with closing(_connect(self.config, write=True)) as conn, conn:
             conn.execute('UPDATE alerts SET external_status=? WHERE id=?', (outcome, record['id']))
 
-    def _failed(self, name, attempts, code):
+    def _failed(self, name, attempts, code, *, details=None):
         entry, now = self.config['jobs'][name], self.clock()
         exhausted = attempts >= entry['max_attempts']
         delay = min(entry['backoff_seconds'] * 2 ** max(0, attempts - 1), entry['max_backoff_seconds'])
         with closing(_connect(self.config, write=True)) as conn, conn:
+            if details is not None:
+                _setting(conn, 'last_failure:' + name, details)
             conn.execute('UPDATE jobs SET state=?,next_run=?,error=?,active_error=? WHERE name=?',
                          ('paused' if exhausted else 'retry', 0 if exhausted else now + delay, code, code, name))
         self._alert(name, 'failure', code)
@@ -292,7 +321,8 @@ class SchedulerService:
             elif row['active_error']:
                 self._alert(name, 'recovery', 'recovered')
         except Exception as exc:
-            self._failed(name, attempts, _error(exc))
+            self._failed(name, attempts, _error(exc),
+                         details=_failure_details(exc, self.config['_root'], self.clock()))
         with closing(_connect(self.config, write=True)) as conn, conn:
             result = dict(conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone())
             if operation:

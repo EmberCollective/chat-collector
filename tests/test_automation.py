@@ -101,6 +101,55 @@ def test_one_job_failure_does_not_block_another(config):
     assert json.loads(job(config, 'qq')['result']) == {'emitted': 2}
 
 
+def test_real_sqlite_contention_keeps_safe_diagnostics_after_recovery(config, tmp_path):
+    path = tmp_path / 'PRIVATE_DATABASE_NAME.db'
+    owner = sqlite3.connect(path)
+    owner.execute('CREATE TABLE private_messages(body TEXT)')
+    owner.execute('BEGIN IMMEDIATE')
+    clock = Clock()
+    def write():
+        connection = sqlite3.connect(path, timeout=0)
+        try:
+            connection.execute("INSERT INTO private_messages VALUES('PRIVATE_CHAT_CONTENT')")
+            connection.commit()
+        finally:
+            connection.close()
+        return {'sent': 0}
+    service = SchedulerService(config, callbacks={'wechat': write}, clock=clock)
+    try:
+        result = service.execute('wechat')
+        assert result['state'] == 'retry'
+        assert result['error'] == 'sqlite_busy'
+        recorded = status(config)['service']['last_failure:wechat']
+        assert recorded['at'] == 100
+        detail = recorded['failures'][0]
+        assert detail['sqlite_errorcode'] == sqlite3.SQLITE_BUSY
+        assert detail['frames'][-1]['file'] == 'tests/test_automation.py'
+        assert detail['frames'][-1]['function'] == 'write'
+        assert 'PRIVATE_' not in json.dumps(status(config))
+        owner.rollback()
+        clock.value = 110
+        assert service.execute('wechat')['state'] == 'idle'
+        assert job(config)['error'] is None
+        assert status(config)['service']['last_failure:wechat'] == recorded
+    finally:
+        owner.close()
+
+
+def test_diagnostics_explain_wrapped_failure_without_sql_or_exception_text(config):
+    def fail():
+        try:
+            with sqlite3.connect(':memory:') as connection:
+                connection.execute('SELECT PRIVATE_SQL_TOKEN FROM missing_table')
+        except sqlite3.Error as exc:
+            raise RuntimeError('PRIVATE_CHAT_AND_API_KEY') from exc
+    result = SchedulerService(config, callbacks={'wechat': fail}, clock=Clock()).execute('wechat')
+    assert result['error'] == 'RuntimeError'
+    details = status(config)['service']['last_failure:wechat']
+    assert [item['code'] for item in details['failures']] == ['RuntimeError', 'sqlite_error']
+    assert 'PRIVATE_' not in json.dumps(status(config))
+
+
 def test_concurrent_requests_never_execute_same_job_twice(config):
     entered, release = threading.Event(), threading.Event()
     calls = []
