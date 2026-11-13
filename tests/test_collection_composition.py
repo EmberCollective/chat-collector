@@ -64,3 +64,15 @@ def test_same_source_serves_two_scheduled_selection_states(config, monkeypatch, 
     assert selection.run_round(other)['emitted'] == 1
     assert run_round(other)['status'] == 'waiting_for_refresh'
     assert calls == [111]
+
+
+def test_legacy_record_without_capture_watermark_does_not_delay_required_collection(config, monkeypatch):
+    calls, clock = setup_refresh(config, monkeypatch)
+    run_round(config)
+    path = publication_path(config)
+    legacy = json.loads(path.read_text(encoding='utf-8'))
+    legacy.pop('capture_started_at')
+    path.write_text(json.dumps(legacy), encoding='utf-8')
+    clock[0] = 120
+    assert run_round(config)['status'] == 'no_enabled_rules'
+    assert calls == [111, 120]
