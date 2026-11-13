@@ -62,7 +62,7 @@ python -m automation status --config config/automation.toml
 .\tools\console\start.cmd
 ```
 
-`collector`、`processor` 和 `messaging` 可分别运行；需要统一自动运行时使用 `automation`，不要与调试台同时调度同一采集模块。`tools/automation/start.cmd` / `stop.cmd` 隐藏启动和安全停止后台服务；配置默认关闭，未安装开机任务。详细开关、重试和恢复命令见 [自动运行](docs/automation.md)。
+`collector`、`processor` 和 `messaging` 可分别运行；需要统一自动运行时使用 `automation`，不要与调试台同时调度同一采集模块。`tools/automation/start.cmd` / `stop.cmd` 隐藏启动和安全停止后台服务；启用状态以配置和调试面板为准，未安装开机任务。详细开关、重试和恢复命令见 [自动运行](docs/automation.md)。
 
 首次 QQ 取钥使用 `tools/qq-recover.cmd`，需要以管理员身份运行并保持 QQ 登录。已有合法密钥后的日常采集不需要反复扫描进程。微信媒体解码由采集提供方处理，处理层通过附件编号请求，不直接操作原始数据库。
 
@@ -77,7 +77,7 @@ python -m automation status --config config/automation.toml
 | `config/automation.toml` | 各层开关与间隔、有限重试、监听器和故障通知 |
 | `.env` | 本地凭据；参考 [.env.example](.env.example)，不要提交真实值 |
 
-消息层外部投递、所有渠道和自动化模板默认关闭。本地预览、材料整理和本地操作反馈无需填写外部凭据。准备投递时，安装 `messaging/requirements.txt`，填写目标并同时启用全局和目标，再运行 `python -m messaging once` 或 `run`。当前示例提醒间隔为 P0 一小时、P1 四小时、P2 一天、P3 一周、P4 不重复提醒；全部可改，`0` 表示不重复提醒。Notion 与 `mode="sync"` 工作流仅同步变化，不按提醒频率反复新建页面或日程。
+在调试面板的“自动整理待办”和“消息通道”配置定时任务、目标及提醒频率；启用状态以本机配置为准，只有明确启用的目标会投递。本地预览、材料整理和本地操作反馈无需填写外部凭据。准备投递时，安装 `messaging/requirements.txt`，填写目标并同时启用全局和目标，再运行 `python -m messaging once` 或 `run`。当前示例提醒间隔为 P0 一小时、P1 四小时、P2 一天、P3 一周、P4 不重复提醒；全部可改，`0` 表示不重复提醒。Notion 与 `mode="sync"` 工作流仅同步变化，不按提醒频率反复新建页面或日程。
 
 处理层仅消费已发布采集结果；采集失败不会自动阻止已有待办处理。消息层仅消费已发布正式待办，调试批次不会自动外发。更改 Markdown 规则会改变处理指纹，历史分组可能重新待处理并产生模型费用；本轮没有自动重跑模型。
 

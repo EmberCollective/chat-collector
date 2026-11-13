@@ -18,7 +18,7 @@
 
 各任务的 `interval_seconds` 是成功结束后到下一轮的间隔。`scheduler.control_interval_seconds` 控制恢复命令和到期任务的检查间隔，实际启动可能多等待这一间隔。APScheduler 的线程池、`max_instances=1`、`coalesce=true` 加上状态库原子认领防止同一个任务重叠执行；错过的周期合并为下一次，不补跑一串历史周期。
 
-配置修改后重启自动化服务生效。`resume` 无需重启服务。
+配置修改后重启自动化服务生效。面板保存时，运行中的后台会等待当前任务完成后重启；停止状态只保存，须明确点击启动。`resume` 无需重启服务。面板的“运行一轮”可以在该任务定时关闭时执行一次，不改变定时开关，仍遵守消息层投递开关与失败暂停状态；原 CLI `once` 只运行已启用任务。
 
 ## 有限重试
 
@@ -69,13 +69,19 @@ python -m automation resume --config config/automation.toml --job wechat
 python -m automation stop --config config/automation.toml
 ```
 
-本机也可使用 `tools/automation/start.cmd` / `stop.cmd`。启动器优先使用本机 Python，再使用系统 Python；后台进程用 `pythonw` 和隐藏窗口启动，日志位于 `data/automation/service.log` 与 `service-errors.log`。启动器会加入本项目 `runtime-deps`；直接使用命令行运行 QQ 时，也需要正确安装或加载对应 SQLCipher 运行库。未安装开机启动项。
+本机也可使用 `tools/automation/start.cmd` / `stop.cmd`。启动器优先使用本机 Python，再使用系统 Python；后台进程用 `pythonw` 和隐藏窗口启动；标准输出不留存，运行状态、尝试次数和安全错误码保存在 `data/automation/state.db`，通过面板或 `status` 查看。启动器会加入本项目 `runtime-deps`；直接使用命令行运行 QQ 时，也需要正确安装或加载对应 SQLCipher 运行库。未安装开机启动项。
 
 采集权限继承启动者。如果本机源数据库访问或解码需要管理员权限，应从管理员会话启动；隐藏窗口不会提高权限，自动化也不会自行弹窗提权。现有调试台定时任务不会被此启动器自动关闭，启用相同采集任务前需先停掉原调度。
 
 同一自动化状态库只允许一个服务实例。停止请求等待正在执行的任务完成；不会在解密事务、模型调用或远端写入中途强杀它们。
 
 ## 飞书长连接生命周期
+
+调试台新增自动化与通道管理入口，提供后台服务启停、各任务间隔、提醒频率、通道实例配置、运行状态和合成测试。配置保存使用版本检查；新增目标可单独启停，密钥仍只存本机环境变量或 `.env`。面板关闭不停止独立后台服务。公共管理接口与测试记录见 [通道配置与合成测试](messaging-management.md)。
+
+飞书首次配置完成后，先停止 `listen --setup` 连接检查进程，再启用消息层全局开关、目标和自动化的 listener，最后启动后台服务。后台默认监听 `feishu-assistant` 对应应用；同一应用下其他群目标按已保存的卡片 token 自动路由，并分别核对群与操作者。不同自建应用需要各自单独启动 `python -m messaging.feishu listen --config config/messaging.toml --target 目标ID`，本版后台监督器不同时管理多个应用连接。不要为同一应用的多个群重复启动连接。
+
+“发送合成测试”会实际发送明确标注的测试内容，只有已经启用的目标可用。测试按钮只写本地测试点击记录并提示成功，不创建、完成、取消或恢复正式待办。测试卡片到达、附件可打开和回调记录成功应分别检查；发送成功不能代替回调验收。
 
 长连接使用现有 `python -m messaging.feishu listen --config ... --stop-file ...`，协议和验签由飞书模块处理。首次配置需要的 `listen --setup` 操作独立执行，自动化不会替用户进入配置模式或打开投递开关。
 

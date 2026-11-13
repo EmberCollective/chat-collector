@@ -9,6 +9,7 @@
 | 调整处理与待办规则 | [处理层](processing.md)、[待办查询](task-search.md) |
 | 整理用户怎么做与参与人员 | [行动输出](actionable-tasks.md) |
 | 配置提醒、材料与成果 | [消息层契约](messaging.md)、[飞书 / Notion / Notion Calendar](messaging-channels.md) |
+| 在面板管理通道、测试发送和回调 | [通道配置与合成测试](messaging-management.md) |
 | 创建飞书应用、配置群和权限 | [飞书应用配置](feishu-setup.md) |
 | 接入完成、恢复与取消操作 | [反馈队列与公开状态 API](messaging.md#操作反馈与状态回写) |
 | 启动全链路自动化、处理失败 | [自动运行、重试与报警](automation.md) |
