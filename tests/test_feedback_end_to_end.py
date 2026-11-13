@@ -104,7 +104,7 @@ allowed_operator_ids=["ou_me"]
     assert completed['status_control']['request_id'] == queued['request_id']
     assert completed['status_control']['actor'] == {'platform': 'feishu', 'user_id': 'ou_me', 'source': 'card'}
     assert messaging.preview(config)['tasks'][0]['status'] == 'completed'
-    assert messaging.status(config)['local_state'][original['task_id']]['completed'] == 1
+    assert messaging.status(config)['local_state'][original['task_id']]['completed'] == 0
     with sqlite3.connect(config['feedback']['state_file']) as conn:
         assert conn.execute('SELECT count(*) FROM feedback_requests').fetchone()[0] == 1
         assert conn.execute('SELECT status FROM feedback_requests').fetchone()[0] == 'applied'

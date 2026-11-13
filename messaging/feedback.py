@@ -178,7 +178,8 @@ def retry_feedback(config, request_id):
 
 def _apply(config, row):
     from . import core
-    from processor import load_config, update_task_status, update_task_priority, TaskStatusConflict, UnknownTask
+    from processor import load_config
+    from processor.service import update_task_status, update_task_priority, TaskStatusConflict, UnknownTask
     request = json.loads(row['request'])
     if request['action'] == 'snooze':
         core.sync(config)
@@ -205,10 +206,9 @@ def _apply(config, row):
         imported = json.loads(task['body'])
         if imported['revision'] < result['revision']:
             raise RuntimeError('feedback_publication_not_imported')
-        completed = int(imported['status'] == 'completed')
         conn.execute('INSERT OR IGNORE INTO local_state(task_id) VALUES(?)', (row['task_id'],))
-        conn.execute('UPDATE local_state SET completed=?,snoozed_until=0,version=version+1 WHERE task_id=? AND (completed!=? OR snoozed_until!=0)',
-                     (completed, row['task_id'], completed))
+        conn.execute('UPDATE local_state SET completed=0,snoozed_until=0,version=version+1 WHERE task_id=? AND (completed!=0 OR snoozed_until!=0)',
+                     (row['task_id'],))
     return result
 
 
@@ -216,7 +216,7 @@ def process_pending(config):
     result = {'applied': 0, 'retry': 0, 'failed': 0, 'conflict': 0, 'pending': 0}
     if not config.get('feedback', {}).get('enabled', False):
         return result
-    from processor import TaskStatusBusy, TaskStatusConflict, TaskStatusExportPending, UnknownTask
+    from processor.service import TaskStatusBusy, TaskStatusConflict, TaskStatusExportPending, UnknownTask
     with InstanceLock(config['feedback']['state_file']), closing(_connect(config, True)) as conn:
         with conn:
             conn.execute("UPDATE feedback_requests SET status='retry',next_attempt=0,error='interrupted_feedback' WHERE status='applying'")

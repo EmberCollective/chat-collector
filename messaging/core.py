@@ -3,12 +3,12 @@ from __future__ import annotations
 
 from contextlib import closing
 import datetime as dt
-import hashlib
 import json
 import math
 from pathlib import Path
 import sqlite3
 import time
+import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from common.locking import InstanceLock
@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, size INTEGER, mtime INTE
 CREATE TABLE IF NOT EXISTS events(event_id TEXT PRIMARY KEY, body_hash TEXT, task_id TEXT, revision INTEGER, task_hash TEXT);
 CREATE INDEX IF NOT EXISTS event_revision ON events(task_id,revision);
 CREATE TABLE IF NOT EXISTS tasks(task_id TEXT PRIMARY KEY, revision INTEGER, body TEXT);
+CREATE TABLE IF NOT EXISTS source_cursors(source TEXT PRIMARY KEY, cursor TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS local_state(task_id TEXT PRIMARY KEY, completed INTEGER DEFAULT 0, snoozed_until REAL DEFAULT 0, version INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS task_results(task_id TEXT, asset_id TEXT, body TEXT, note TEXT, PRIMARY KEY(task_id,asset_id));
 CREATE TABLE IF NOT EXISTS deliveries(
@@ -195,53 +196,59 @@ def _attachment(value):
         raise ValueError('Attachment size_bytes must be a nonnegative integer')
 
 
-def _inputs(config, conn):
+def _inputs(config, conn, *, with_cursor=False):
     tasks = {} if conn is None else {r['task_id']: json.loads(r['body']) for r in conn.execute('SELECT * FROM tasks')}
     known = {} if conn is None else {r['path']: r for r in conn.execute('SELECT * FROM files')}
     imported, versions, files = {}, {}, []
-    root = Path(config['input']['batches_dir'])
-    for path in sorted(root.glob('*.jsonl')):
-        before = path.stat()
-        name = str(path.resolve())
-        previous = known.get(name)
-        if previous and (previous['size'], previous['mtime']) == (before.st_size, before.st_mtime_ns):
-            continue
-        raw = path.read_bytes()
-        after = path.stat()
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            raise RuntimeError('Task batch changed during import')
-        sha = hashlib.sha256(raw).hexdigest()
-        if previous and previous['sha256'] != sha:
-            raise ValueError('An imported immutable task batch was modified')
-        if not previous:
-            # JSONL separates records with LF; Unicode line separators belong to JSON strings.
-            for line in raw.decode('utf-8').split('\n'):
-                if not line.strip():
-                    continue
-                if len(line) > 16 * 1024 * 1024:
-                    raise ValueError('Task event exceeds 16 MiB')
-                event = _event(json.loads(line))
-                key, identity = event['event_id'], (event['task_id'], event['revision'])
-                body_hash, task_hash = digest(event), digest(event['task'])
-                persisted = None if conn is None else conn.execute('SELECT * FROM events WHERE event_id=?', (key,)).fetchone()
-                if (key in imported and digest(imported[key]) != body_hash) or (persisted and persisted['body_hash'] != body_hash):
-                    raise ValueError('Conflicting task event_id')
-                old_version = None if conn is None else conn.execute('SELECT task_hash FROM events WHERE task_id=? AND revision=? LIMIT 1', identity).fetchone()
-                if ((identity in versions and versions[identity] != task_hash)
-                        or (old_version and old_version['task_hash'] != task_hash)):
-                    raise ValueError('Conflicting task revision')
-                versions[identity] = task_hash
-                if not persisted:
-                    imported[key] = event
-                old = tasks.get(identity[0])
-                if old is None or identity[1] > old['revision']:
-                    tasks[identity[0]] = event['task']
-        files.append((name, after.st_size, after.st_mtime_ns, sha))
-    return tasks, imported, files
+    source = config['input'].get('processor_config')
+    next_cursor = None
+    if source:
+        from processor import load_config
+        from processor.service import read_changes
+        previous = None
+        if conn is not None and conn.execute("SELECT 1 FROM sqlite_master WHERE name='source_cursors'").fetchone():
+            previous = conn.execute('SELECT cursor FROM source_cursors WHERE source=?', (source,)).fetchone()
+        cursor = json.loads(previous[0]) if previous else None
+        settings, events = load_config(source), []
+        while True:
+            page = read_changes(settings, cursor=cursor, limit=1000)
+            events.extend(page['events'])
+            if page['has_more'] and page['next_cursor'] == cursor:
+                raise ValueError('Task change stream did not advance')
+            cursor = page['next_cursor']
+            if not page['has_more']:
+                break
+        next_cursor = (source, canonical(cursor))
+    else:
+        from processor.publication import read_batches
+        events, files = read_batches(config['input']['batches_dir'], known)
+    for value in events:
+        event = _event(value)
+        key, identity = event['event_id'], (event['task_id'], event['revision'])
+        body_hash, task_hash = digest(event), digest(event['task'])
+        persisted = None if conn is None else conn.execute('SELECT * FROM events WHERE event_id=?', (key,)).fetchone()
+        if (key in imported and digest(imported[key]) != body_hash) or (persisted and persisted['body_hash'] != body_hash):
+            raise ValueError('Conflicting task event_id')
+        old_version = None if conn is None else conn.execute('SELECT task_hash FROM events WHERE task_id=? AND revision=? LIMIT 1', identity).fetchone()
+        if ((identity in versions and versions[identity] != task_hash)
+                or (old_version and old_version['task_hash'] != task_hash)):
+            raise ValueError('Conflicting task revision')
+        versions[identity] = task_hash
+        if not persisted:
+            imported[key] = event
+        old = tasks.get(identity[0])
+        if old is None or identity[1] > old['revision']:
+            tasks[identity[0]] = event['task']
+    result = (tasks, imported, files)
+    return (*result, next_cursor) if with_cursor else result
 
 
-def _local(conn):
-    return {} if conn is None else {r['task_id']: dict(r) for r in conn.execute('SELECT * FROM local_state')}
+def _local(conn, config=None):
+    result = {} if conn is None else {r['task_id']: dict(r) for r in conn.execute('SELECT * FROM local_state')}
+    if config and config['input'].get('processor_config'):
+        for state in result.values():
+            state['completed'] = 0
+    return result
 
 
 def _effective(task, local):
@@ -253,6 +260,24 @@ def _effective(task, local):
 
 def _package(task, config, prepare=False):
     from .package import build_package
+    source = config['input'].get('processor_config')
+    if source and prepare:
+        from processor import load_config
+        from processor.service import get_material
+        settings = load_config(source)
+        task = dict(task)
+        resolved = {}
+        for field in ('materials', 'attachment_evidence'):
+            material = []
+            for item in task.get(field, []):
+                identifier = item.get('material_id') or digest([task['task_id'], item['message_key'], item['attachment_index']])
+                if identifier not in resolved:
+                    try:
+                        resolved[identifier] = get_material(settings, task['task_id'], identifier)
+                    except (OSError, ValueError):
+                        resolved[identifier] = dict(item['attachment'], status='unverified', reason='task_material_unavailable')
+                material.append(dict(item, attachment=resolved[identifier]))
+            task[field] = material
     return build_package(task, config, prepare=prepare)
 
 
@@ -280,7 +305,7 @@ def task_package(config, task_id):
         tasks, _, _ = _inputs(config, conn)
         if task_id not in tasks:
             raise ValueError('Task not found')
-        task = _effective(tasks[task_id], _local(conn).get(task_id, {}))
+        task = _effective(tasks[task_id], _local(conn, config).get(task_id, {}))
         return _with_results(_package(task, config), _results(conn).get(task_id, []))
     finally:
         if conn is not None:
@@ -293,7 +318,7 @@ def preview(config, limit=20):
     conn = _connect(config)
     try:
         tasks, events, _ = _inputs(config, conn)
-        local = _local(conn)
+        local = _local(conn, config)
         results = _results(conn)
         selected = sorted(tasks.values(), key=lambda t: (t['priority'], t['task_id']))[:limit]
         return {'enabled': config['enabled'], 'pending_events': len(events), 'total_tasks': len(tasks),
@@ -305,14 +330,19 @@ def preview(config, limit=20):
 
 
 def _sync(config, conn):
-    tasks, events, files = _inputs(config, conn)
+    tasks, events, files, cursor = _inputs(config, conn, with_cursor=True)
     with conn:
         conn.executemany('INSERT INTO files VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,sha256=excluded.sha256', files)
         for event in events.values():
             conn.execute('INSERT INTO events VALUES(?,?,?,?,?)', (event['event_id'], digest(event), event['task_id'], event['revision'], digest(event['task'])))
             conn.execute('INSERT INTO tasks VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET revision=excluded.revision,body=excluded.body WHERE excluded.revision>tasks.revision',
                          (event['task_id'], event['revision'], canonical(event['task'])))
-    local = _local(conn)
+        if config['input'].get('processor_config'):
+            # Also clear flags when migration replays events already imported from JSONL.
+            conn.execute('UPDATE local_state SET completed=0 WHERE completed!=0')
+        if cursor:
+            conn.execute('INSERT INTO source_cursors VALUES(?,?) ON CONFLICT(source) DO UPDATE SET cursor=excluded.cursor', cursor)
+    local = _local(conn, config)
     results = _results(conn)
     packages = {key: _with_results(_package(_effective(task, local.get(key, {})), config, True), results.get(key, [])) for key, task in tasks.items()}
     return tasks, local, packages, len(events)
@@ -473,7 +503,7 @@ def status(config):
                 'tasks': 0 if conn is None else conn.execute('SELECT count(*) FROM tasks').fetchone()[0],
                 'delivery_counts': {} if conn is None else dict(conn.execute('SELECT status,count(*) FROM deliveries GROUP BY status')),
                 'deliveries': [] if conn is None else [dict(r) for r in conn.execute('SELECT id,target_id,task_id,kind,status,attempts,next_attempt,error FROM deliveries ORDER BY created_at DESC,rowid DESC LIMIT 100')],
-                'local_state': _local(conn)}
+                'local_state': _local(conn, config)}
     finally:
         if conn is not None:
             conn.close()
@@ -482,6 +512,14 @@ def status(config):
 def set_task_state(config, task_id, action, *, until=None):
     if action not in {'complete', 'reopen', 'snooze'}:
         raise ValueError('action must be complete, reopen or snooze')
+    if action != 'snooze' and config['input'].get('processor_config'):
+        from processor import load_config
+        from processor.service import update_task_status
+        result = update_task_status(load_config(config['input']['processor_config']), task_id,
+            'completed' if action == 'complete' else 'open', request_id=uuid.uuid4().hex,
+            actor={'platform': 'local', 'user_id': 'local-user', 'source': 'message-console'})
+        sync(config)
+        return result
     if action == 'snooze':
         if isinstance(until, str):
             parsed = dt.datetime.fromisoformat(until)

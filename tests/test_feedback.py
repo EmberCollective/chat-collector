@@ -9,6 +9,7 @@ import pytest
 from collector.__main__ import InstanceLock
 import processor
 from processor import core as processing
+from processor import storage as task_storage
 from messaging import core, channels, feedback, load_config
 
 
@@ -124,7 +125,7 @@ def test_completed_feedback_updates_processor_published_task_and_local_state(con
     saved = processor.list_tasks(pconfig)[0]
     assert saved['status'] == 'completed' and saved['revision'] == 2
     assert core.preview(config)['tasks'][0]['status'] == 'completed'
-    assert core.status(config)['local_state']['task-one']['completed'] == 1
+    assert core.status(config)['local_state']['task-one']['completed'] == 0
     assert request_row(config, request['request_id'])['status'] == 'applied'
     assert enqueue(config, expected_revision=1) == request
     assert feedback.process_pending(config)['applied'] == 0
@@ -169,7 +170,7 @@ def test_pending_export_retries_same_api_request(config, monkeypatch):
     monkeypatch.setattr(feedback.time, 'time', lambda: 100)
     request = enqueue(config, expected_revision=1)
     with monkeypatch.context() as patch:
-        patch.setattr(processing, '_export', lambda *args: (_ for _ in ()).throw(OSError('disk unavailable')))
+        patch.setattr(task_storage, '_export', lambda *args: (_ for _ in ()).throw(OSError('disk unavailable')))
         assert feedback.process_pending(config)['retry'] == 1
     assert request_row(config, request['request_id'])['error'] == 'task_status_export_pending'
     feedback.retry_feedback(config, request['request_id'])
@@ -235,10 +236,12 @@ def test_new_feedback_arriving_after_delivery_queue_was_built_still_blocks_send(
     assert core.run_round(config, now=100)['sent'] == 0
 
 
-def test_disabled_feedback_preserves_local_completion_behavior(config):
+def test_disabling_feedback_queue_keeps_service_as_formal_status_owner(config):
     config['feedback']['enabled'] = False
     result = feedback.request_task_action(config, 'task-one', 'complete')
-    assert result['completed'] == 1
+    assert result['status'] == 'completed'
+    from processor.service import get_task
+    assert get_task(processor.load_config(config['feedback']['processor_config']), 'task-one')['status'] == 'completed'
     assert feedback.process_pending(config) == {'applied': 0, 'retry': 0, 'failed': 0, 'conflict': 0, 'pending': 0}
 
 
