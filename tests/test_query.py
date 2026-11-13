@@ -93,6 +93,16 @@ def test_third_provider_runs_unmodified_sql_and_arbitrary_bound_parameters(tmp_p
     identity = result['messages'][1]['identity']
     assert len([hit for hit in result['hits'] if hit['identity']==identity]) == 3
     assert path.read_bytes() == before
+    from selection import run_round
+    cfg.update(storage={'state_file':str(tmp_path/'selection.db'), 'output_dir':str(tmp_path/'batches')},
+               schedule={'initial_lookback_seconds':100})
+    assert run_round(cfg, 100, 111)['emitted'] == 3
+    events = [json.loads(line) for batch in (tmp_path/'batches').glob('*.jsonl')
+              for line in batch.read_text(encoding='utf-8').splitlines()]
+    trigger = next(event for event in events if event['message']['kind']=='file')
+    assert len(trigger['matched_rules']) == 3
+    assert trigger['message']['attachments'][0]['name'] == 'document'
+    assert run_round(cfg, 100, 111)['duplicates'] == 3
     cfg['filters']['rulesets'][-1]['params']['another_parameter'] = "' OR 1=1 --"
     assert len([hit for hit in query(cfg)['hits'] if hit['identity']==identity]) == 2
 

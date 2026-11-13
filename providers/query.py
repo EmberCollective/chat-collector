@@ -86,9 +86,10 @@ def query_rules(scope, window, rules):
                 for rule in rules:
                     bound = dict(rule['params'], window_start=start, window_end=end,
                                  recent_count=rule['recent_count'])
+                    cursor = db.cursor()
                     try:
                         db.set_authorizer(_read_only)
-                        cursor = db.execute(rule['sql'], bound)
+                        cursor.execute(rule['sql'], bound)
                         if [column[0] for column in cursor.description or []] != ['identity']:
                             raise ValueError('SQL must return exactly one column named identity')
                         rows = cursor.fetchall()
@@ -97,6 +98,7 @@ def query_rules(scope, window, rules):
                     except (sqlite3.Error, ValueError) as exc:
                         raise ValueError(f'Ruleset {Path(rule["file"]).name} failed: {exc}') from exc
                     finally:
+                        cursor.close()
                         db.set_authorizer(None)
                     try:
                         db.executemany('INSERT OR IGNORE INTO hits VALUES(?,?)',
@@ -112,7 +114,9 @@ def query_rules(scope, window, rules):
                         WHERE identity IN (SELECT identity FROM hits)
                         ORDER BY sent_at,local_id,database_name,message_id,identity''')
                 messages = []
-                for identity, body, previous_body in cursor:
+                selected = cursor.fetchall()
+                cursor.close()
+                for identity, body, previous_body in selected:
                     message = json.loads(body)
                     previous = json.loads(previous_body) if previous_body else None
                     message.setdefault('source', {})['selection_context'] = {
@@ -133,3 +137,8 @@ def _message_key(message):
     return digest([str(message[k]) for k in ('platform', 'account_id', 'conversation_id', 'message_id')])
 
 
+def prepare_selected(config, messages):
+    """Apply configured local archive policy only after every SQL rule succeeds."""
+    from collector.assets import AttachmentArchive
+    archive = AttachmentArchive(config, config['platform'], config['source']['account_id'])
+    return (archive.enrich(message) for message in messages)

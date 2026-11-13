@@ -1,6 +1,4 @@
 import argparse
-import datetime
-import importlib
 import json
 import logging
 from pathlib import Path
@@ -8,53 +6,10 @@ import sys
 import time
 
 from .config import load_config
-from .store import Store
-from .assets import AttachmentArchive
-from .filters import scan_filtered, load_rulesets
+from application.collection import run_round  # Legacy composition entry point.
 
 
 from common.locking import InstanceLock  # Legacy import path.
-
-
-def run_round(config, *, start=None, end=None):
-    source = config['source']
-    adapter = importlib.import_module('collector.adapters.' + config['platform'])
-    storage = config['storage']
-    with InstanceLock(storage['state_file']):
-        store = Store(storage['state_file'], config['platform'], source['account_id'])
-        try:
-            recovered = store.export(storage['output_dir'])
-            rulesets = load_rulesets(config)
-            if not rulesets:
-                return {'platform': config['platform'], 'status': 'no_enabled_rules',
-                        'matched': 0, 'emitted': 0, 'duplicates': 0, 'batches': recovered}
-            window_end = int(time.time()) if end is None else end
-            previous = store.get('window_end')
-            window_start = start if start is not None else (int(previous) if previous else window_end - config['schedule']['initial_lookback_seconds'])
-            if window_start >= window_end:
-                if start is not None:
-                    raise ValueError('start must be before end')
-                return {'platform': config['platform'], 'status': 'no_new_time_window', 'batches': recovered}
-            refresh_interval = config['schedule'].get('refresh_interval_seconds', 0)
-            if source.get('refresh', True) and start is None and end is None and previous:
-                remaining = refresh_interval - (window_end - int(previous))
-                if remaining > 0:
-                    # Never advance the message window using a deliberately stale snapshot.
-                    return {'platform': config['platform'], 'status': 'waiting_for_refresh',
-                            'retry_after_seconds': remaining, 'batches': recovered}
-            refresh_result = adapter.refresh(source) if source.get('refresh', True) else {'mode': 'decrypted_only'}
-            messages = scan_filtered(config, window_start, window_end, rulesets=rulesets)
-            archive = AttachmentArchive(config, config['platform'], source['account_id'])
-            messages = (archive.enrich(message) for message in messages)
-            result = store.ingest(messages, window_start, window_end,
-                                  datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                                  advance=start is None and end is None)
-            result.update(platform=config['platform'], start=window_start, end=window_end,
-                          intensity=archive.intensity, attachments_enabled=archive.enabled,
-                          refresh=refresh_result, batches=recovered + store.export(storage['output_dir']))
-            return result
-        finally:
-            store.close()
 
 
 def main(argv=None):
