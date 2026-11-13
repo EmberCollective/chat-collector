@@ -26,7 +26,7 @@ read_attachment(ref="f1", pages="1-3,5", query="截止")
 
 本机检查结果：PyMuPDF 2.0、python-docx 1.2、Pillow 13、LibreOffice 26.2 已安装。未发现 Tesseract、RapidOCR、EasyOCR 或 PaddleOCR；没有安装另一套 OCR，也没有手写解析器或解密算法。依赖清单位于 `processor/requirements.txt`，不加入收集层的必需依赖。
 
-扫描 PDF 和图片在 `model.vision=true` 时作为视觉图块提供。模型不支持视觉且无本地 OCR 时返回 `visual_content_requires_vision_model_or_local_ocr`，必须待复核，不能把它解释成“附件没有任务”。DOCX 的脚注、尾注或不可解码内嵌图片也明确报告限制；不执行宏、不跟随外部图片链接，不提取内嵌可执行对象。
+扫描 PDF 和图片在 `model.vision=true` 时作为视觉图块提供。模型不支持视觉且无本地 OCR 时返回 `visual_content_requires_vision_model_or_local_ocr`，表示内容未识别，不能解释成“附件没有任务”。DOCX 的脚注、尾注或不可解码内嵌图片也明确报告限制；不执行宏、不跟随外部图片链接，不提取内嵌可执行对象。
 
 ## 长文档与覆盖范围
 
@@ -51,7 +51,7 @@ read_attachment(ref="f1", pages="1-3,5", query="截止")
 }
 ```
 
-`status=ok` 只说明本次工具调用成功；是否检查全文必须看 `complete_document`。有图片但没有向视觉模型提供图片的页面不会进入累计完整读取范围。不要求模型完整读完所有附件。未选择读取、主动跳过、部分读取、读取完成和读取失败分别记录；允许输出空待办，其含义仅为已检查内容未发现待办。失败附件的相关任务标记复核，不影响其他会话保存。无关且未请求的附件不会给全部待办附加复核标记。
+`status=ok` 只说明本次工具调用成功；是否检查全文必须看 `complete_document`。有图片但没有向视觉模型提供图片的页面不会进入累计完整读取范围。不要求模型完整读完所有附件。未选择读取、主动跳过、部分读取、读取完成和读取失败分别记录；允许输出空待办，其含义仅为已检查内容未发现待办。相关附件的读取限制写入任务 `notes`，不阻止有依据的任务保存；无关附件不向所有任务附加说明。工具兼容状态 `needs_review` 是读取诊断，不建立人工复核流程。
 
 ## 配置与缓存
 
@@ -103,7 +103,7 @@ python -m pytest tests/test_processor_attachments.py -q
 
 ## 本地审计与恢复
 
-原始模型提交在来源校验前保存到处理状态库同级的 `submissions/`，包括短引用映射和附件覆盖信息，不包含 API 凭据。各会话的任务及附件审阅状态独立写入 `group_results`；即使任务为空也保留记录。自动准备的附件解析映射保存在 `attachment-cache/resolved/`，后续运行可直接校验并复用归档，避免重复解码。上述审计、草稿和来源映射均不注入 Pi 的上下文；会话和压缩继续完全由 Pi 原生 SDK 管理。
+原始模型提交保存在处理状态库同级的 `submissions/`，包括短引用映射和附件覆盖信息，不包含 API 凭据。各会话的任务及附件读取状态独立写入 `group_results`；即使任务为空也保留记录。自动准备的附件解析映射保存在 `attachment-cache/resolved/`，后续运行可直接校验并复用归档，避免重复解码。上述审计、草稿和来源映射均不注入 Pi 的上下文；会话和压缩继续完全由 Pi 原生 SDK 管理。
 
 本机未下载的附件不会凭数据库元数据生成正文；越界路径、缺失源文件、格式不支持和解码失败会通过工具返回具体状态。不会执行 EXE/JAR 或解包任意压缩包。
 

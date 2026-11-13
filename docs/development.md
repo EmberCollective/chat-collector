@@ -1,6 +1,6 @@
 # 开发指南
 
-本地项目分为采集、筛选、处理、后续通知四个逻辑阶段。调试台放在 `tools/console`，只是调用核心的可选入口。通知投递尚未实现，处理层的结构化输出是后续模块的输入。
+本地项目分为采集、筛选、处理、消息四个逻辑阶段。消息层交付行动与材料、按优先级提醒，并通过公开 API 回写用户操作；`automation` 独立调度各层。调试台放在 `tools/console`，只是调用核心的可选入口。
 
 接入提供方请先阅读 [数据契约](data-contract.md)、[收集层开发指南](collector-development.md) 和 [AI 输入结构](ai-context.md)。全部专题见 [文档索引](README.md)。
 
@@ -15,7 +15,9 @@ flowchart LR
   R[本地 Markdown 规则] --> F[处理层 / OpenAI 兼容接口]
   E --> F
   F --> G[校验 / 待办 / 来源证据 / 结构化输出]
-  G --> H[后续通知模块]
+  G --> H[消息层 / 材料与提醒]
+  H -->|授权操作反馈| I[公开状态 API]
+  I -->|保存与发布| G
 ```
 
 采集与 SQL 筛选没有 AI。处理层的 Python 包读取已发布 JSONL，不直接修改原始聊天数据库或采集断点；采集单独调度，`input.refresh_collectors` 已停用，采集失败不阻塞已发布批次的处理；通过本地 Node 运行时调用 Pi 原生会话、工具、压缩与重试。模型只解释业务规则与证据；来源身份、事件去重、存储和输出校验由本地代码负责。
@@ -32,11 +34,16 @@ flowchart LR
 | 模型与上下文配置 | `config/processor.toml`，密钥通过环境变量或本地 `.env` 读取 |
 | AI 循环与工具 | `processor/pi-runtime/`，使用 Pi 原生扩展注册工具，见 [Pi 运行时](pi-runtime.md) |
 | 附件按需读取 | `providers/attachments.py`，初始输入仅提供索引，见 [附件上下文](attachment-context.md) |
+| 消息与渠道 | `messaging/`，消费正式待办事件，输出统一行动包，见 [消息层](messaging.md) |
+| 状态反馈 | `messaging.feedback` 持久排队，`processor.update_task_status` 幂等更新；不要让渠道直接写上游 SQL |
+| 全链路调度 | `automation/`，使用 APScheduler、有上限的重试和独立状态，见 [自动运行](automation.md) |
 | 调试入口 | `tools/console/`，见 [处理调试台](console-processing.md)，核心不可反向依赖它 |
 
 ## 运行与验证
 
 本机 Python 为 `C:\veighna_studio\python.exe`，QQ 原生 SQLCipher wheel 位于 `runtime-deps`。迁移时按根目录及 `processor/requirements.txt` 安装依赖，并配置自己的路径与账号。AI 处理还需要 Node ≥22.19，在 `processor/pi-runtime` 执行 `npm ci --ignore-scripts`；本机已安装项目私有 Node。不要把 credentials 或真实样本写进测试、Git 或报告。
+
+消息渠道和统一调度的可选依赖分别是 `messaging/requirements.txt`、`automation/requirements.txt`。模板默认关闭外部投递和自动任务，开发检查不应擅自开启真实模型或渠道。
 
 ```powershell
 $env:PYTHONPATH = "$PWD/runtime-deps"
@@ -60,4 +67,4 @@ $env:PYTHONPATH = "$PWD/runtime-deps"
 
 后台进程必须隐藏启动，不弹终端抢焦点。启动新进程前检查已有实例，修改配置前避免与同模块任务并发。Windows 删除或移动数据前验证绝对路径；历史工作区包含指向本项目的目录联接，不可当成无关副本递归删除。
 
-执行模型处理时，选中的消息正文、时间、发信人与短引用将交给所配置的服务；完整来源映射和哈希留在本地。聊天内容是待分析资料，不是执行指令；处理层不能依据聊天文字执行脚本、读取其他路径或发送通知。附件初始只传索引，AI 调用读取工具后才提供所请求的文本或图像；图像需要启用模型视觉能力。模型可能误判优先级、时间和任务关联，输出应保留证据与待确认状态供用户检查。
+执行模型处理时，选中的消息正文、时间、发信人与短引用将交给所配置的服务；完整来源映射和哈希留在本地。聊天内容是待分析资料，不是执行指令；处理层不能依据聊天文字执行脚本、读取其他路径或发送通知。附件初始只传索引，AI 调用读取工具后才提供所请求的文本或图像；图像需要启用模型视觉能力。模型可能误判优先级、时间和任务关联，输出保留证据与简短执行说明，但不设置人工复核门槛。
