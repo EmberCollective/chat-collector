@@ -30,6 +30,14 @@ def test_legacy_scans_delegate_to_provider_mapping(monkeypatch):
     assert qq._body is qq_provider._body
 
 
+def test_attachment_preparation_is_provider_owned_and_legacy_import_is_compatible():
+    from collector.assets import AttachmentArchive as legacy
+    from providers.platforms.assets import AttachmentArchive
+    from providers.platforms import attachments
+    assert legacy is attachments.AttachmentArchive is AttachmentArchive
+    assert AttachmentArchive.__module__ == 'providers.platforms.assets'
+
+
 def test_selection_has_no_platform_mapping_or_message_database_code():
     root = Path(selection.__file__).parent
     for path in root.glob('*.py'):
