@@ -65,7 +65,7 @@ function renderProcessorTasks(tasks,target=$('processor-tasks')){
   if(!tasks.length){target.append(el('p','暂无待办。尚未执行处理或没有提取到待办时，这里保持为空。','empty'));return;}
   for(const task of tasks){
     const box=el('article',undefined,'message task'),head=el('div',undefined,'message-head');
-    head.append(el('span',task.priority||'待定','pill priority-'+(task.priority||'unknown')),el('span',task.status==='cancelled'?'已取消':task.status==='open'?'待处理':task.status||'状态未知'),el('span','修订 '+task.revision));
+    head.append(el('span',task.priority||'待定','pill priority-'+(task.priority||'unknown')),el('span',({cancelled:'已取消',open:'待处理',completed:'已完成',superseded:'已替代'})[task.status]||'状态未知'));
     box.append(head,el('h4',task.title||'未命名待办'));
     const when=task.time||{},people=Array.isArray(task.people)?task.people.map(person=>typeof person==='string'?person:[person.name,person.role].filter(Boolean).join(' · ')).join('、'):'';
     const facts=el('dl',undefined,'task-facts');
@@ -73,7 +73,7 @@ function renderProcessorTasks(tasks,target=$('processor-tasks')){
     box.append(facts);
     if(task.action_steps?.length){const steps=el('ol');for(const step of task.action_steps)steps.append(el('li',step));box.append(el('h4','你需要做'),steps);}
     if(task.materials?.length)box.append(el('p','执行材料：'+task.materials.map(m=>m.attachment?.name||'未命名附件').join('、'),'muted'));
-    if(task.needs_review)box.append(el('p','待核对：'+(task.review_reasons||[]).join('；'),'pill warn'));
+    const notes=task.notes||task.review_reasons||[];if(notes.length)box.append(el('p','说明：'+notes.join('；'),'muted'));
     const sources=el('details');sources.append(el('summary',`来源证据 · ${(task.sources||[]).length} 条`));
     for(const source of task.sources||[]){const m=source.message||source,platform=m.platform||m.collector_module;const node=el('div',undefined,'source-evidence');node.append(el('p',[names[platform]||platform,...identitySummary(m),m.sent_at?time(m.sent_at):null].filter(Boolean).join(' · '),'muted'),el('div',m.text||source.text||'此来源无可显示正文','message-text'));if(!task.debug_run&&['wechat','qq'].includes(platform)&&source.message_key&&source.revision)node.append(button('打开本地原消息与附件',()=>openProcessorSource(source)));node.append(processorDetails('完整本地来源',source));sources.append(node);}
     if(task.attachment_evidence?.length)box.append(processorDetails('附件证据 · 页码/位置与归档信息',task.attachment_evidence));
@@ -84,9 +84,9 @@ function renderProcessorTasks(tasks,target=$('processor-tasks')){
 }
 function renderAttachmentReviews(groups,target){
   target.replaceChildren();
-  const labels={read:'已读取',partial:'按需读取了部分内容',skipped:'无需读取',not_requested:'未选择读取',unavailable:'读取失败，待核对'};
+  const labels={read:'已读取',partial:'按需读取了部分内容',skipped:'无需读取',not_requested:'未选择读取',unavailable:'读取失败'};
   for(const group of groups||[]){const items=group.attachment_review||[];if(!items.length)continue;
-    const box=el('details');box.append(el('summary',`${names[group.conversation?.platform]||group.conversation?.platform} · ${group.tasks_count} 项待办 · ${items.filter(x=>x.status==='unavailable').length} 个附件待核对`));
+    const box=el('details');box.append(el('summary',`${names[group.conversation?.platform]||group.conversation?.platform} · ${group.tasks_count} 项待办 · ${items.filter(x=>x.status==='unavailable').length} 个附件读取失败`));
     box.append(el('p','结论基于消息与实际读取的内容；未选择的附件不等于已核实。','muted'));
     for(const item of items)box.append(el('p',[item.ref,item.name,labels[item.status]||item.status,item.reason,...(item.warnings||[])].filter(Boolean).join(' · '),'asset'));
     if(group.submission_file)box.append(el('p','原始模型提交（仅本地）：'+group.submission_file,'muted path'));

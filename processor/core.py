@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS group_results(id TEXT PRIMARY KEY, body TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS tasks(task_id TEXT PRIMARY KEY, revision INTEGER, body TEXT);
 CREATE TABLE IF NOT EXISTS outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT, exported INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS task_status_requests(request_id TEXT PRIMARY KEY, request TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL);
 '''
 
 
@@ -491,13 +492,16 @@ def _validate_response(response, group, existing, timezone):
             raise ValueError('Model task people must be an array')
         task['people'] = [{name: _text(person.get(name), 'people.' + name) for name in ('name', 'role')} for person in people]
         task['location'] = _text(item.get('location'), 'location', nullable=True)
-        if type(item.get('needs_review')) is not bool or not isinstance(item.get('review_reasons'), list):
-            raise ValueError('Model task must state review requirements')
-        task['review_reasons'] = [_text(reason, 'review reason') for reason in item['review_reasons']]
-        for missing, reason in [(not task['people'], '参与人员未明确'), (not task['time']['deadline'], '截止时间未明确')]:
-            if missing and reason not in task['review_reasons']:
-                task['review_reasons'].append(reason)
-        task['needs_review'] = item['needs_review'] or bool(task['review_reasons'])
+        if type(item.get('needs_review', False)) is not bool or not isinstance(item.get('review_reasons', []), list):
+            raise ValueError('Legacy task explanation fields are invalid')
+        notes = item.get('notes', [])
+        legacy_notes = item.get('review_reasons', [])
+        if not isinstance(notes, list) or len(notes) + len(legacy_notes) > 100:
+            raise ValueError('Model task notes must be an array of at most 100 strings')
+        task['notes'] = list(dict.fromkeys(_text(note, 'note') for note in [*notes, *legacy_notes]))
+        # Legacy fields remain readable; uncertainty is explanatory text, not an approval state.
+        task['review_reasons'] = list(task['notes'])
+        task['needs_review'] = False
         task['attachment_evidence'] = item.get('attachment_evidence', [])
         materials = item.get('materials', [])
         messages = {event['message_key']: event for event in group['messages']}
@@ -634,6 +638,10 @@ def run_round(config):
                     for index, task in enumerate(tasks):
                         previous = existing_by_id.get(task['task_id'])
                         if previous:
+                            if previous.get('status_control'):
+                                task['status_control'] = previous['status_control']
+                                if previous['status_control']['status'] in {'completed', 'cancelled'}:
+                                    task['status'] = previous['status_control']['status']
                             task['source_message_keys'] = sorted(set(task['source_message_keys']) | set(previous['source_message_keys']))
                             evidence = {canonical([e['message_key'], e['attachment_index'], e.get('locator')]): e
                                         for e in [*previous.get('attachment_evidence', []), *task.get('attachment_evidence', [])]}
@@ -662,7 +670,8 @@ def run_round(config):
                         row = conn.execute('SELECT body FROM tasks WHERE task_id=?', (identifier,)).fetchone()
                         if row:
                             old = json.loads(row[0])
-                            if old['context']['group_id'] == group['id'] and old['status'] != 'superseded':
+                            if (old['context']['group_id'] == group['id'] and old['status'] != 'superseded'
+                                    and old.get('status_control', {}).get('status') not in {'completed', 'cancelled'}):
                                 old.update(status='superseded', updated_at=now, superseded_reason='group_reprocessed')
                                 _save_task(conn, old)
                     conn.execute('INSERT INTO groups VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,task_ids=excluded.task_ids',
@@ -688,6 +697,8 @@ def run_round(config):
                         if identifier not in current_ids:
                             for body, in conn.execute("SELECT body FROM tasks WHERE json_extract(body,'$.context.group_id')=? AND json_extract(body,'$.status')!='superseded'", (identifier,)).fetchall():
                                 old = json.loads(body)
+                                if old.get('status_control', {}).get('status') in {'completed', 'cancelled'}:
+                                    continue
                                 old.update(status='superseded', updated_at=now, superseded_reason='context_regrouped')
                                 _save_task(conn, old)
                             conn.execute('DELETE FROM groups WHERE id=?', (identifier,))

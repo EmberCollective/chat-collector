@@ -53,10 +53,34 @@ def test_participants_do_not_require_an_assigned_owner():
     assert not task['needs_review'] and task['review_reasons'] == []
 
 
-def test_missing_people_identifies_participant_gap():
+def test_missing_people_does_not_add_approval_or_boilerplate():
     group = {'messages': [{'message_key': 'a'}], 'primary_message_keys': ['a']}
     task = core._validate_response(response(['a']), group, [], 'Asia/Shanghai')[0]
-    assert task['review_reasons'] == ['参与人员未明确']
+    assert task['notes'] == [] and task['needs_review'] is False
+
+
+def test_uncertainty_is_saved_as_notes_without_approval(config, monkeypatch):
+    batch(config, 'notice', event('a'))
+    result = response(['a'])
+    result['tasks'][0].update(needs_review=True, review_reasons=['入口未提供'], notes=['入口未提供', '仅有小程序卡片'])
+    monkeypatch.setattr(core, '_call_model', lambda *args: result)
+    core.run_round(config)
+    task = core.list_tasks(config)[0]
+    assert task['status'] == 'open' and task['needs_review'] is False
+    assert task['notes'] == ['入口未提供', '仅有小程序卡片']
+    assert TaskLookup(config, [], {}).find(query='report')['tasks'][0]['notes'] == task['notes']
+    from messaging.package import build_package
+    packaged = build_package(task, {})
+    assert packaged['notes'] == task['notes'] and packaged['needs_review'] is False
+
+
+def test_notes_only_submission_accepts_absent_legacy_review_fields():
+    group = {'messages': [{'message_key': 'a'}], 'primary_message_keys': ['a']}
+    result = response(['a'])
+    result['tasks'][0].pop('needs_review')
+    result['tasks'][0].pop('review_reasons')
+    result['tasks'][0]['notes'] = ['入口未提供']
+    assert core._validate_response(result, group, [], 'Asia/Shanghai')[0]['notes'] == ['入口未提供']
 
 
 @pytest.mark.skipif(not runtime_status()['installed'], reason='Pinned Pi runtime is not installed')
@@ -64,11 +88,14 @@ def test_native_pi_submission_accepts_action_steps(endpoint):
     config, payload, responder, requests = endpoint
     item = response(['a'])['tasks'][0]
     item.pop('source_message_keys')
-    item.update(sources=['m1'], action_steps=['Fill in the attached form'], material_refs=['f1'])
+    item.pop('needs_review')
+    item.pop('review_reasons')
+    item.update(sources=['m1'], action_steps=['Fill in the attached form'], material_refs=['f1'], notes=['Submission link was not provided'])
     responder.append(lambda handler, _: send_tool(handler, 'submit_tasks', {'tasks': [item]}))
     result = run_agent(config, 'Extract explicit tasks', payload, api_key='fixture-only')
     assert result['tasks'][0]['action_steps'] == item['action_steps']
     assert result['tasks'][0]['material_refs'] == ['f1']
+    assert result['tasks'][0]['notes'] == item['notes']
     assert len(requests) == 1
 
 

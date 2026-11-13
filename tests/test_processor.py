@@ -173,7 +173,7 @@ def test_incremental_context_reuses_id_and_preserves_sources(config, monkeypatch
     assert first['processed_groups'] == first['tasks_upserted'] == 1
     task = list_tasks(config)[0]
     identifier = task['task_id']
-    assert task['needs_review'] is True  # Missing owner remains explicit.
+    assert task['needs_review'] is False  # Missing fields do not create an approval workflow.
     assert task['sources'][0]['source']['table'] == 'group_msg_table'
     assert task['sources'][0]['attachments'][0]['local_path'] == 'PRIVATE/report.pdf'
     assert task['sources'][0]['matched_rules'][0]['file'].endswith('files.sql')
@@ -348,7 +348,7 @@ def test_unknown_sender_is_preserved_without_guessing_owner(config, monkeypatch)
     run_round(config)
     task = list_tasks(config)[0]
     assert task['sources'][0]['sender_id'] == ''
-    assert task['people'] == [] and task['needs_review'] is True
+    assert task['people'] == [] and task['needs_review'] is False
 
 
 def test_late_context_keeps_source_related_task_beyond_recent_limit(config, monkeypatch):

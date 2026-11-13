@@ -121,8 +121,9 @@ def build_package(task, config, *, prepare=False):
         'priority_reason', 'status', 'time', 'people', 'location', 'needs_review', 'review_reasons', 'updated_at')}
     package['time'] = {k: (task.get('time') or {}).get(k) for k in ('start', 'deadline', 'timezone', 'text')}
     package['people'] = [{k: p[k] for k in ('name', 'role')} for p in task.get('people', [])]
-    package['review_reasons'] = list(task.get('review_reasons', []))
-    package['needs_review'] = task.get('needs_review', False)
+    package['notes'] = list(dict.fromkeys([*task.get('notes', []), *task.get('review_reasons', [])]))
+    package['review_reasons'] = list(package['notes'])
+    package['needs_review'] = False
     package.update(schema_version=1, action_steps=deepcopy(task.get('action_steps', [])), resources=[], sources=[])
     selected = {(item['message_key'], item['attachment_index']): item['attachment']
                 for item in [*task.get('materials', []), *task.get('attachment_evidence', [])]

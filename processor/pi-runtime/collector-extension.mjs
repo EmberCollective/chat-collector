@@ -10,7 +10,8 @@ const taskSchema = Type.Object({
   time: Type.Object({start: nullableText, deadline: nullableText, text: nullableText,
     timezone: Type.Optional(Type.String())}),
   people: Type.Array(Type.Object({name: Type.String(), role: Type.String()})),
-  location: nullableText, needs_review: Type.Boolean(), review_reasons: Type.Array(Type.String()),
+  location: nullableText, needs_review: Type.Optional(Type.Boolean()), review_reasons: Type.Optional(Type.Array(Type.String(), {maxItems: 100})),
+  notes: Type.Optional(Type.Array(Type.String(), {maxItems: 100})),
   sources: Type.Array(Type.String(), {minItems: 1}),
 });
 
@@ -62,7 +63,7 @@ export function collectorExtension({input, state, readAttachment, findTasks, val
         account_ref: Type.Optional(Type.String()), conversation_ref: Type.Optional(Type.String()),
         people: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:200}),{minItems:1,maxItems:20})),
         person_role: Type.Optional(Type.String({minLength:1,maxLength:200})),
-        statuses: Type.Optional(Type.Array(Type.Union(['open','cancelled','superseded'].map(x=>Type.Literal(x))),{minItems:1,maxItems:20})),
+        statuses: Type.Optional(Type.Array(Type.Union(['open','completed','cancelled','superseded'].map(x=>Type.Literal(x))),{minItems:1,maxItems:20})),
         priorities: Type.Optional(Type.Array(Type.Union(['P0','P1','P2','P3','P4'].map(x=>Type.Literal(x))),{minItems:1,maxItems:20})),
         needs_review: Type.Optional(Type.Boolean()),
         time_field: Type.Optional(Type.Union(['deadline','start','updated_at','source_time'].map(x=>Type.Literal(x)))),
@@ -84,7 +85,7 @@ export function collectorExtension({input, state, readAttachment, findTasks, val
     });
     pi.registerTool({
       name: 'submit_tasks', label: 'Submit structured tasks', executionMode: 'sequential',
-      description: 'Submit structured tasks based on the selected messages and relevant content actually read. Each task must cite exactly one conversation; split tasks with sources from different conversations. sources must be supplied message IDs or read_attachment evidence refs. Add an explicit message source if attachment evidence belongs to multiple conversations. Use tasks:[] if no actionable task is found; you are not required to read every attachment. Optionally explain skipped irrelevant attachments via attachment_decisions:[{ref:"f1",reason:"not relevant to the request"}]. Mark tasks needs_review when required evidence is missing. Only a valid submission ends the Pi run; if rejected, use the returned feedback to correct and submit again.',
+      description: 'Submit structured tasks based on the selected messages and relevant content actually read. Each task must cite exactly one conversation; split tasks with sources from different conversations. sources must be supplied message IDs or read_attachment evidence refs. Add an explicit message source if attachment evidence belongs to multiple conversations. Use tasks:[] if no actionable task is found; you are not required to read every attachment. Optionally explain skipped irrelevant attachments via attachment_decisions:[{ref:"f1",reason:"not relevant to the request"}]. Tasks enter storage directly. Put concise execution-relevant gaps in notes; there is no human approval workflow. Legacy needs_review should be false. Only a valid submission ends the Pi run; if rejected, use the returned feedback to correct and submit again.',
       parameters: Type.Object({tasks: Type.Array(taskSchema, {maxItems: 100}),
         attachment_decisions: Type.Optional(Type.Array(Type.Object({ref:Type.String(), reason:Type.String({minLength:1,maxLength:500})}, {additionalProperties:false}), {maxItems:1000}))}, {additionalProperties: false}),
       async execute(_id, args, signal, _update, ctx) {

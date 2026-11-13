@@ -31,7 +31,7 @@ def search_tasks(config, *, query=None, platforms=None, account_id=None, convers
 
     platforms = values(platforms, 'platforms')
     people = values(people, 'people')
-    statuses = values(statuses, 'statuses', {'open', 'cancelled', 'superseded'})
+    statuses = values(statuses, 'statuses', {'open', 'completed', 'cancelled', 'superseded'})
     priorities = values(priorities, 'priorities', {'P0', 'P1', 'P2', 'P3', 'P4'})
     if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or not 0 <= offset <= 1000000:
         raise ValueError('invalid_search_pagination')
@@ -198,7 +198,7 @@ class TaskLookup:
                 ref = f't{len(self.tasks)+1}'
                 self.refs[task['task_id']] = ref
             self.tasks[ref] = task
-            row = {k:task.get(k) for k in ('title','event','action_steps','priority','status','time','people','location','needs_review','updated_at')}
+            row = {k:task.get(k) for k in ('title','event','action_steps', 'notes','priority','status','time','people','location','needs_review','updated_at')}
             origins = []
             for source in [task['conversation'], *task.get('sources', [])]:
                 source = dict(source, platform=source.get('platform') or source.get('collector_module'))
