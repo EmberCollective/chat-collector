@@ -101,6 +101,35 @@ def test_attachment_exception_is_redacted_before_returning_to_model(endpoint):
     assert 'fixture-secret' not in json.dumps(requests)
 
 
+@pytest.mark.parametrize('same_message', [False, True])
+def test_native_pi_selects_renamed_duplicate_material_without_changing_its_source(endpoint, tmp_path, same_message):
+    from processor import context
+    from test_processor_context import event, group
+    config, _, responder, requests = endpoint
+    archive = tmp_path/'archive'
+    archive.mkdir()
+    path = archive/'content.txt'
+    path.write_text('Submit the report tomorrow.', encoding='utf-8')
+    config.update(storage={'state_file': str(tmp_path/'state.db')}, context={'timezone': 'Asia/Shanghai'},
+                  processing={'max_input_chars': 100000},
+                  attachments={'archive_roots': [str(archive)], 'cache_dir': str(tmp_path/'cache')})
+    first = {'name': 'template.txt', 'archive_path': str(path)}
+    second = dict(first, name='renamed-deliverable.txt')
+    records = ([event('a', attachments=[first, second])] if same_message else
+               [event('a', attachments=[first]), event('b', attachments=[second])])
+    source = 'm1' if same_message else 'm2'
+    responder.append(lambda h, n: send_tool(h, 'read_attachment', {'ref': 'f2'}) if n == 1 else
+                     send_tool(h, 'submit_tasks', {'tasks': [dict(task([source, 'f2:b1']), material_refs=['f2'])]}))
+    result = context.process_batch(config, {'text': 'Extract explicit tasks.'}, [group(*records)], [])
+    selected = result['group-id']['tasks'][0]['materials']
+    assert len(selected) == 1 and selected[0]['attachment']['name'] == second['name']
+    assert selected[0]['message_key'] == records[-1]['message_key']
+    assert selected[0]['attachment_index'] == (1 if same_message else 0)
+    prompt = json.loads(requests[0]['messages'][-1]['content'][0]['text'])
+    assert [(item['ref'], item['name']) for item in prompt['attachments']] == [
+        ('f1', first['name']), ('f2', second['name'])]
+
+
 def test_unknown_source_rejected_across_python_node_protocol(endpoint):
     config, payload, responder, _requests = endpoint
     responder.append(lambda handler, n: send_tool(handler, 'submit_tasks', {'tasks': [task(['invented'])]}))
