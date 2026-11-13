@@ -15,6 +15,7 @@ from contracts import validate_event as _validate_event
 
 
 from .storage import SCHEMA, _connect, _save_task, _export
+from . import service
 from .task_validation import _text, _validate_response, _source
 
 
@@ -448,104 +449,38 @@ def _run_batches(config, rules, groups, conn):
 def run_round(config):
     if not _model_info(config)['configured']:
         raise ValueError('Configure model.base_url, model.model and a local API key before processing; preview remains available')
-    with InstanceLock(config['storage']['state_file']):
+    with InstanceLock(config['storage']['state_file'] + '.round'):
         refreshes = []
         warnings = (['input.refresh_collectors 已停用；处理只读取已发布批次，请单独运行采集。']
                     if config['input'].get('refresh_collectors') else [])
-        conn = _connect(config, write=True)
+        batches = service._export_pending(config)
+        conn = _connect(config)
         try:
-            batches = _export(config, conn)
             rules, messages, files, events, groups, pending = _snapshot(config, conn)
-            with conn:
-                conn.executemany('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+            with service._task_connection(config) as writer, writer:
+                writer.executemany('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                                  [('pending_groups', str(len(pending))), ('snapshot_at', dt.datetime.now(dt.timezone.utc).isoformat())])
-                conn.executemany('INSERT INTO files VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,sha256=excluded.sha256', files)
-                conn.executemany('INSERT INTO events VALUES(?,?)', [(key, digest(event)) for key, event in events.items()])
+                writer.executemany('INSERT INTO files VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,sha256=excluded.sha256', files)
+                writer.executemany('INSERT INTO events VALUES(?,?)', [(key, digest(event)) for key, event in events.items()])
                 for event in events.values():
-                    conn.execute('INSERT INTO messages VALUES(?,?,?) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,body=excluded.body WHERE excluded.revision>messages.revision',
+                    writer.execute('INSERT INTO messages VALUES(?,?,?) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,body=excluded.body WHERE excluded.revision>messages.revision',
                                  (event['message_key'], event['revision'], canonical(event)))
             processed = updated = 0
             outcomes = []
             for group, existing, previous_ids, response in _run_batches(config, rules, pending[:config['processing']['max_groups_per_round']], conn):
                 existing = list({task['task_id']:task for task in [*existing, *response.get('_existing_tasks', [])]}.values())
-                tasks = _validate_response(response, group, existing, config['context']['timezone'])
-                now = dt.datetime.now(dt.timezone.utc).isoformat()
-                existing_by_id = {task['task_id']: task for task in existing}
-                ids = []
-                with conn:
-                    for index, task in enumerate(tasks):
-                        previous = existing_by_id.get(task['task_id'])
-                        if previous:
-                            if previous.get('priority_control'):
-                                task['priority_control'] = previous['priority_control']
-                                task['priority'] = previous['priority_control']['priority']
-                                task['priority_reason'] = previous['priority_reason']
-                            if previous.get('status_control'):
-                                task['status_control'] = previous['status_control']
-                                if previous['status_control']['status'] in {'completed', 'cancelled'}:
-                                    task['status'] = previous['status_control']['status']
-                            task['source_message_keys'] = sorted(set(task['source_message_keys']) | set(previous['source_message_keys']))
-                            evidence = {canonical([e['message_key'], e['attachment_index'], e.get('locator')]): e
-                                        for e in [*previous.get('attachment_evidence', []), *task.get('attachment_evidence', [])]}
-                            task['attachment_evidence'] = list(evidence.values())
-                            materials = {(item['message_key'], item['attachment_index']): item
-                                         for item in [*previous.get('materials', []), *task.get('materials', [])]}
-                            task['materials'] = list(materials.values())
-                        task['task_id'] = task['task_id'] or digest([group['id'], group['fingerprint'], index])
-                        task.update(schema_version=1, updated_at=now,
-                            conversation=previous['conversation'] if previous else {key: group[key] for key in ('platform', 'account_id', 'conversation_id')},
-                            sources=list({source['message_key']:source for source in [
-                                *(previous.get('sources', []) if previous else []),
-                                *[_source(config, messages[key]) for key in task['source_message_keys'] if key in messages]]}.values()),
-                            context={'group_id': group['id'], 'continuity': group['continuity'],
-                                     'original_conversation_complete': False,
-                                     'primary_message_keys': group['primary_message_keys'], 'history_message_keys': group['history_message_keys']},
-                            processing={'rules_sha256': rules['sha256'], 'rules_file': rules['path'],
-                                        'model': config['model']['model'], 'base_url': config['model']['base_url'],
-                                        'input_sha256': group['fingerprint'], 'processed_at': now,
-                                        'agent_runtime': response.get('_agent', {})})
-                        _save_task(conn, task)
-                        ids.append(task['task_id'])
-                        updated += 1
-                    # A full re-extraction replaces this group's earlier result, never deletes history.
-                    for identifier in previous_ids - set(ids):
-                        row = conn.execute('SELECT body FROM tasks WHERE task_id=?', (identifier,)).fetchone()
-                        if row:
-                            old = json.loads(row[0])
-                            if (old['context']['group_id'] == group['id'] and old['status'] != 'superseded'
-                                    and old.get('status_control', {}).get('status') not in {'completed', 'cancelled'}):
-                                old.update(status='superseded', updated_at=now, superseded_reason='group_reprocessed')
-                                _save_task(conn, old)
-                    conn.execute('INSERT INTO groups VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,task_ids=excluded.task_ids',
-                                 (group['id'], group['fingerprint'], canonical(ids)))
-                    outcome = {'group_id':group['id'],'updated_at':now,'tasks_count':len(ids),
-                        'conversation':{k:group[k] for k in ('platform','account_id','conversation_id')},
-                        'attachment_review':response.get('attachment_review', []),
-                        'review_required':response.get('review_required', False),
-                        'submission_file':response.get('submission_file'),
-                        'scope':'selected_messages_and_requested_attachment_content'}
-                    conn.execute('INSERT OR REPLACE INTO group_results VALUES(?,?)', (group['id'],canonical(outcome)))
-                    conn.execute("UPDATE settings SET value=? WHERE key='pending_groups'", (str(len(pending) - processed - 1),))
+                result = service.apply_extraction(config, response,
+                    request_id='extraction:' + digest([group['id'], group['fingerprint'],
+                        [(task['task_id'], task['revision']) for task in existing]]),
+                    context={'group': group, 'existing': existing, 'previous_ids': sorted(previous_ids),
+                             'messages': messages, 'rules': rules, 'pending_groups': len(pending) - processed - 1})
                 processed += 1
-                outcomes.append(outcome)
-                batches.extend(_export(config, conn))
-            # Late messages can change chunk boundaries. Retire obsolete group outputs only
-            # after every current group has succeeded, so API failure cannot discard valid tasks.
+                updated += result['tasks_upserted']
+                outcomes.append(result['outcome'])
+                batches.extend(result['batches'])
+            # Retire regrouped outputs only after every current group succeeds.
             if processed == len(pending):
-                current_ids = {g['id'] for g in groups}
-                now = dt.datetime.now(dt.timezone.utc).isoformat()
-                with conn:
-                    for identifier, in conn.execute('SELECT id FROM groups').fetchall():
-                        if identifier not in current_ids:
-                            for body, in conn.execute("SELECT body FROM tasks WHERE json_extract(body,'$.context.group_id')=? AND json_extract(body,'$.status')!='superseded'", (identifier,)).fetchall():
-                                old = json.loads(body)
-                                if old.get('status_control', {}).get('status') in {'completed', 'cancelled'}:
-                                    continue
-                                old.update(status='superseded', updated_at=now, superseded_reason='context_regrouped')
-                                _save_task(conn, old)
-                            conn.execute('DELETE FROM groups WHERE id=?', (identifier,))
-                            conn.execute('DELETE FROM group_results WHERE id=?', (identifier,))
-                batches.extend(_export(config, conn))
+                batches.extend(service._retire_groups(config, {group['id'] for group in groups}))
             return {'status': 'succeeded', 'imported_events': len(events), 'processed_groups': processed,
                     'pending_groups': len(pending) - processed, 'tasks_upserted': updated, 'batches': batches,
                     'group_results':outcomes, 'review_groups':sum(item['review_required'] for item in outcomes),

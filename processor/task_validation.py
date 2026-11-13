@@ -76,6 +76,17 @@ def _validate_response(response, group, existing, timezone):
         task['attachment_evidence'] = item.get('attachment_evidence', [])
         materials = item.get('materials', [])
         messages = {event['message_key']: event for event in group['messages']}
+        if not isinstance(task['attachment_evidence'], list) or len(task['attachment_evidence']) > 1000:
+            raise ValueError('Task attachment evidence must be a bounded array')
+        for proof in task['attachment_evidence']:
+            if (not isinstance(proof, dict) or proof.get('message_key') not in task['source_message_keys']
+                    or type(proof.get('attachment_index')) is not int
+                    or not 0 <= proof['attachment_index'] < len(messages[proof['message_key']]['message'].get('attachments', []))
+                    or not isinstance(proof.get('attachment'), dict)
+                    or not isinstance(proof.get('locator'), dict)
+                    or set(proof['locator']) - {'page', 'block'}
+                    or any(type(value) is not int or value < 1 for value in proof['locator'].values())):
+                raise ValueError('Task attachment evidence must map to cited source attachments and valid locators')
         if not isinstance(materials, list) or len(materials) > 1000:
             raise ValueError('Task materials must be a bounded array of mapped attachments')
         task['materials'] = []
@@ -86,7 +97,7 @@ def _validate_response(response, group, existing, timezone):
                     or not 0 <= material['attachment_index'] < len(messages[material['message_key']]['message'].get('attachments', []))
                     or not isinstance(material['attachment'], dict)):
                 raise ValueError('Task materials must map to cited source attachment indices')
-            task['materials'].append(material)
+            task['materials'].append(dict(material))
         signature = digest([task['title'], task['event'], task['source_message_keys']])
         if signature in signatures:
             raise ValueError('Model returned duplicate tasks in one response')

@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from processor import load_config, preview, run_round, status, list_tasks
-from processor import core
+from processor import core, storage
 
 
 @pytest.fixture
@@ -295,15 +295,15 @@ def test_export_failure_recovers_without_calling_model_twice(config, monkeypatch
     batch(config, 'one', event('a'))
     calls = []
     monkeypatch.setattr(core, '_call_model', lambda *args: calls.append(1) or response(['a']))
-    export = core._export
+    export = storage._export
     def fail_after_commit(cfg, conn):
         if conn.execute('SELECT count(*) FROM tasks').fetchone()[0]:
             raise OSError('fixture disk full')
         return export(cfg, conn)
-    monkeypatch.setattr(core, '_export', fail_after_commit)
+    monkeypatch.setattr(storage, '_export', fail_after_commit)
     with pytest.raises(OSError):
         run_round(config)
-    monkeypatch.setattr(core, '_export', export)
+    monkeypatch.setattr(storage, '_export', export)
     result = run_round(config)
     assert result['processed_groups'] == 0 and len(result['batches']) == 1
     assert calls == [1]
