@@ -1,5 +1,6 @@
 """A partly committed WeChat refresh cannot become a readable source generation."""
 from contextlib import closing
+import gc
 import json
 from pathlib import Path
 import shutil
@@ -17,6 +18,7 @@ from test_filters import config as source_fixture, register
 @pytest.fixture
 def source(tmp_path, monkeypatch):
     cfg = source_fixture.__wrapped__(SimpleNamespace(param='wechat'), tmp_path)
+    gc.collect()  # The shared fixture's SQLite context managers commit but do not close handles.
     encrypted = tmp_path/'encrypted'/'message'
     encrypted.mkdir(parents=True)
     for path in Path(cfg['source']['decrypted_dir']).glob('*.db'):
@@ -90,4 +92,32 @@ def test_unchanged_failed_refresh_keeps_the_published_view_readable(source):
         collect_once(cfg)
     with source_snapshot(cfg) as snapshot:
         assert snapshot['snapshot_id'] == old['snapshot_id']
+    assert selection.run_round(cfg, 100, 111)['emitted'] > 0
+
+
+def test_native_incremental_group_retry_does_not_rewrite_the_committed_shard(source, monkeypatch):
+    from collector import incremental
+    if not (Path(__file__).parents[1]/'runtime-deps/native/sqlcipher-pages.dll').exists():
+        pytest.skip('Build the official SQLCipher page interface first')
+    cfg, _ = source
+    cfg['source']['snapshot_mode'] = 'incremental'
+    collect_once(cfg)
+    change_first_shard(cfg)
+    implementation = incremental.refresh_database
+
+    def interrupt_second(database, *args, **kwargs):
+        if database.name == 'message_1.db':
+            raise RuntimeError('interrupted between shard commits')
+        return implementation(database, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(incremental, 'refresh_database', interrupt_second)
+        with pytest.raises(RuntimeError, match='between shard commits'):
+            collect_once(cfg)
+    with pytest.raises(RuntimeError, match='complete collection publication'):
+        selection.run_round(cfg, 100, 111)
+    retried = collect_once(cfg)['refresh']['validation']
+    assert retried[0]['changed'] is False
+    assert retried[0]['pages_written'] == retried[0]['cipher_bytes_written'] == 0
+    assert retried[1]['mode'] == 'incremental' and retried[1]['changed'] is True
     assert selection.run_round(cfg, 100, 111)['emitted'] > 0
