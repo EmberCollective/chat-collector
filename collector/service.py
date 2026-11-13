@@ -109,7 +109,8 @@ def collect_once(config, *, force=True):
             interval = config.get('schedule', {}).get('refresh_interval_seconds', 0)
             if (saved is not None and not _pending_path(config).exists()
                     and saved.get('snapshot_id') == _metadata(config, _fingerprint(config))['snapshot_id']
-                    and type(saved.get('collected_at')) is int):
+                    and type(saved.get('collected_at')) is int
+                    and type(saved.get('capture_started_at')) is int):
                 remaining = interval - (capture_started_at - saved['collected_at'])
                 if remaining > 0:
                     return dict(saved, status='waiting_for_refresh', retry_after_seconds=remaining)
