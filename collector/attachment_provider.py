@@ -37,7 +37,8 @@ class CollectorAttachmentProvider:
             try:
                 saved = json.loads(cache.read_text(encoding='utf-8'))
                 path = Path(saved['archive_path']).resolve()
-                if path.is_relative_to(Path(config['attachments']['archive_dir']).resolve()) and path.is_file():
+                if (all(original.get(k) is None or original[k] == saved.get(k) for k in ('type','name','md5','size_bytes'))
+                        and path.is_relative_to(Path(config['attachments']['archive_dir']).resolve()) and path.is_file()):
                     with path.open('rb') as stream:
                         if hashlib.file_digest(stream,'sha256').hexdigest() == saved['sha256']:
                             return saved

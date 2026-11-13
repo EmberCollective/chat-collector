@@ -39,6 +39,20 @@ def image_bytes():
     return buf.getvalue()
 
 
+def test_wechat_resource_locator_does_not_replace_message_identity(tmp_path, monkeypatch):
+    archive = AttachmentArchive(config(tmp_path), 'wechat', 'account')
+    original_hash, resource_hash = 'a'*32, 'b'*32
+    monkeypatch.setattr(archive, '_md5', lambda *args: resource_hash)
+    def image(message, attachment, locator):
+        assert locator == resource_hash
+        return dict(archive._publish(data=image_bytes(), suffix='.jpg'), status='archived')
+    monkeypatch.setattr(archive, '_image', image)
+    result = archive.enrich(message('image', md5=original_hash))['attachments'][0]
+    assert result['md5'] == original_hash
+    assert result['resource_md5'] == resource_hash
+    assert Path(result['archive_path']).read_bytes() == image_bytes()
+
+
 def test_copy_is_content_addressed_verified_and_preserves_source(tmp_path):
     cfg = config(tmp_path)
     path = Path(cfg["source"]["media_dir"]) / "example.pdf"

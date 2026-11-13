@@ -48,6 +48,10 @@ class MyProvider:
 
 保留原附件的 `name/md5/size_bytes`，不要把其他文件冒充请求附件；插件结果中的已知身份字段会再次核对。文件内容与消息的语义归属最终仍需提供方保证，文件摘要不能证明两个业务对象相同。
 
+微信图片的资源定位摘要可能与消息中声明的 MD5 不同。内置提供方将定位值另存为本地 `resource_md5`，保留原 `md5`，解码后仍用 `sha256` 验证归档内容。缓存复用也核对原附件身份，旧错误缓存会重新解析，不能跳过身份校验。
+
+`local_source_not_found` 表示配置允许的本地位置没有对应文件；工具不会凭消息中的文件名生成正文，也不会自动从 QQ/微信云端下载。先在客户端下载需要的原附件，再重新运行调试。语音和视频目前没有转写/理解能力，会明确返回 `audio_video_understanding_unavailable`，不再误报为普通文件找不到。
+
 内置实现是 `collector.attachment_provider.CollectorAttachmentProvider`，保留账号校验、锁等待、已有归档复用和完整强度按需解码。公共 PDF、Office、图片读取在 `providers/` 中复用成熟依赖。新增平台通常只实现准备函数，文件解析、证据页码和 Pi 响应格式继续共用。
 
 ## 可运行的本地文件示例
@@ -76,6 +80,6 @@ notice = "../data/assets/demo-notice.pdf"
 
 `message.extensions.<platform>` 保存私有字段，默认不进入 AI；`message.context_notes` 只放契约允许的简短事实，类型和长度见 [数据契约](data-contract.md)。人物仍由提供方查询，且只包含选中消息涉及的人。处理层只分配短引用，不补查新平台联系人。
 
-外部提供方自行运行采集、筛选和日程；`input.refresh_collectors` 与面板模块卡片仍只管理内置 QQ、微信。附件注册不会执行定时扫描。外部消息可在通用处理预览中查看，任务来源仍保留平台、账号、会话和原消息证据。
+外部提供方自行运行采集、筛选和日程；面板采集卡片只管理内置 QQ、微信，`input.refresh_collectors` 已停用，处理不隐式启动采集。附件注册不会执行定时扫描。外部消息可在通用处理预览中查看，任务来源仍保留平台、账号、会话和原消息证据。
 
 验证：`tests/test_contracts.py` 覆盖发布、并发重试和处理去重；`tests/test_providers.py` 使用第三平台示例验证按需读取、账号隔离及目录约束。没有模拟新平台的真实密码算法。

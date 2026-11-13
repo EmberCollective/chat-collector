@@ -78,6 +78,32 @@ def test_account_mismatch_fails_without_scanning_other_account(setup):
     assert not scans
 
 
+def test_cached_attachment_identity_is_checked_before_reuse(setup):
+    config, event, path, config_path, scans = setup
+    assert AttachmentContext([event], config).read_attachment('f1')['details']['status'] == 'ok'
+    cached = next((Path(config['attachments']['cache_dir'])/'resolved').glob('*.json'))
+    saved = json.loads(cached.read_text(encoding='utf-8'))
+    saved['name'] = 'different-attachment.pdf'
+    cached.write_text(json.dumps(saved), encoding='utf-8')
+    assert AttachmentContext([event], config).read_attachment('f1')['details']['status'] == 'ok'
+    assert len(scans) == 2
+    assert json.loads(cached.read_text(encoding='utf-8'))['name'] == 'notice.pdf'
+
+
+def test_audio_capability_is_reported_without_false_missing_file_error(setup, monkeypatch):
+    config, event, path, config_path, scans = setup
+    event['message']['attachments'] = [{'type': 'voice'}]
+    reader = AttachmentContext([event], config)
+    def forbidden(*args):
+        raise AssertionError('Unsupported audio must not attempt document resolution')
+    monkeypatch.setattr(reader.resolver, 'resolve', forbidden)
+    assert reader.catalog()[0]['status'] == 'needs_review'
+    result = reader.read_attachment('f1')['details']
+    assert result['warnings'] == ['audio_video_understanding_unavailable']
+    assert 'transcription' in result['next_action']
+    assert result['evidence'] == []
+
+
 def test_missing_local_file_reports_action_without_inventing_content(setup):
     config,event,path,config_path,scans=setup
     path.unlink()

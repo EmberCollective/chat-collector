@@ -130,6 +130,8 @@ class AttachmentContext:
                 try:
                     if not self.enabled:
                         raise ValueError('attachment_context_disabled')
+                    if attachment.get('type') in {'voice', 'audio', 'video'}:
+                        raise ValueError('audio_video_understanding_unavailable')
                     source = attachment.get('archive_path')
                     if not isinstance(source, str) or not source:
                         raise ValueError('attachment_not_archived')
@@ -304,6 +306,10 @@ class AttachmentContext:
 
     @staticmethod
     def _failure(reason, ref=None):
+        actions = {
+            'local_source_not_found': 'No matching file is present in the configured local source or archive locations. Ask the user to download the original attachment in the chat client if it is needed. Use message text for now; never invent file contents.',
+            'audio_video_understanding_unavailable': 'This tool does not provide audio transcription or video understanding. Use the accompanying message text; mark missing spoken or video details for review when necessary.',
+        }
         details = {'status': 'needs_review', 'attachment_ref': ref, 'warnings': [reason], 'evidence': [], 'complete_document': False,
-                   'next_action': 'Use available message evidence; report this attachment as unavailable if needed for the task. Do not retry the same unavailable file or invent its contents.'}
+                   'next_action': actions.get(reason, 'Use available message evidence; report this attachment as unavailable if needed for the task. Do not retry the same unavailable file or invent its contents.')}
         return {'content': [{'type': 'text', 'text': json.dumps(details, ensure_ascii=False)}], 'details': details}

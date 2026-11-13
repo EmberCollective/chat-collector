@@ -324,7 +324,11 @@ class AttachmentArchive:
             try:
                 md5 = self._md5(message, attachment)
                 if md5:
-                    attachment["md5"] = md5
+                    if attachment.get('md5') and attachment['md5'].casefold() != md5.casefold():
+                        # WCDB's resource locator may differ from the original message content hash.
+                        attachment['resource_md5'] = md5
+                    elif not attachment.get('md5'):
+                        attachment['md5'] = md5
                 if self.platform == "wechat" and attachment.get("type") == "image":
                     attachment.update(self._image(message, attachment, md5))
                 elif self.platform == "qq" and attachment.get("type") == "image":
