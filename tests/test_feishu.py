@@ -490,6 +490,78 @@ max_attempts=2
     return config
 
 
+@pytest.mark.parametrize('partial', [False, True])
+def test_digest_retry_refreshes_prepared_card_or_patches_card_with_failed_material(case, monkeypatch, tmp_path, partial):
+    from messaging import core
+    from messaging.package import build_package
+    config = delivery_config(case, tmp_path, monkeypatch)
+    slot = core.dt.datetime(2026, 12, 1, 8, tzinfo=core.ZoneInfo('Asia/Shanghai')).timestamp()
+    config['daily_digest']['enabled'] = True
+    config['initial_notifications']['P1'] = False
+    monkeypatch.setattr(core, '_package', lambda task, config, prepare=False:
+                        build_package(task, config, prepare=prepare))
+    count = 30 if partial else 1
+    def batch(name, revision, status):
+        events = []
+        for index in range(count):
+            task = dict(case[2]['task'], task_id=f't{index}', revision=revision, status=status,
+                        title=f'Stale task {index}')
+            events.append(dict(schema_version=1, operation='upsert', event_id=f'e{index}-{revision}',
+                               task_id=task['task_id'], revision=revision, task=task))
+        (Path(config['input']['batches_dir']) / name).write_text('\n'.join(json.dumps(e) for e in events), encoding='utf-8')
+    (Path(config['input']['batches_dir']) / 'batch.jsonl').unlink()
+    batch('first.jsonl', 1, 'open')
+    calls = fake_client(monkeypatch)
+    if partial:
+        monkeypatch.setattr(feishu, '_file_delivery', lambda *a: {'status': 'failed', 'error': 'temporary'})
+    else:
+        def rejected(req):
+            calls.append(('rejected', req.request_body))
+            return NS(success=lambda: False, code=999, data=None)
+        original_client = feishu._client(config['targets'][0], config)
+        original_create = original_client.im.v1.message.create
+        original_client.im.v1.message.create = rejected
+    assert core.run_round(config, now=slot)['retry'] == 1
+    with feishu._state(config) as conn:
+        before = dict(conn.execute('SELECT * FROM feishu_cards').fetchone())
+    assert before['status'] == ('sent' if partial else 'prepared')
+    batch('completed.jsonl', 2, 'completed')
+    if not partial:
+        original_client.im.v1.message.create = original_create
+    assert core.run_round(config, now=slot + 61)['sent'] == 1
+    with feishu._state(config) as conn:
+        after = dict(conn.execute('SELECT * FROM feishu_cards').fetchone())
+    assert after['delivery_id'] == before['delivery_id'] and after['status'] == 'sent'
+    assert 'Stale task' not in json.dumps(json.loads(after['card']), ensure_ascii=False)
+    if partial:
+        assert after['message_id'] == before['message_id']
+        assert [kind for kind, _ in calls] == ['create', 'patch']
+        assert json.loads(calls[-1][1].request_body.content) == json.loads(after['card'])
+    else:
+        assert [kind for kind, _ in calls] == ['rejected', 'create']
+        assert calls[0][1].uuid == calls[1][1].uuid
+        assert json.loads(calls[-1][1].content) == json.loads(after['card'])
+    assert core.run_round(config, now=slot + 62)['sent'] == 0
+
+
+def test_digest_unknown_card_cache_is_not_refreshed_or_resent(case, monkeypatch):
+    from messaging.channels import deliver
+    config, target, envelope = case
+    envelope.update(kind='daily_digest', digest={'date': '2026-12-01', 'timezone': 'Asia/Shanghai',
+                    'generated_at': '2026-12-01T08:00:00+08:00', 'items': []})
+    calls = fake_client(monkeypatch, fail_send=True)
+    with pytest.raises(DeliveryUncertain):
+        deliver(target, envelope, config)
+    with feishu._state(config) as conn:
+        before = dict(conn.execute('SELECT * FROM feishu_cards').fetchone())
+    envelope['digest']['generated_at'] = '2026-12-01T08:01:00+08:00'
+    with pytest.raises(DeliveryUncertain, match='prior_outcome_unknown'):
+        deliver(target, envelope, config)
+    with feishu._state(config) as conn:
+        assert dict(conn.execute('SELECT * FROM feishu_cards').fetchone()) == before
+    assert len(calls) == 1
+
+
 def test_partial_file_failure_retries_only_missing_file_and_keeps_receipt(case, monkeypatch, tmp_path):
     from messaging import core
     add_file(case)
