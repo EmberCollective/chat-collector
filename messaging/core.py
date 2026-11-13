@@ -455,7 +455,10 @@ def run_round(config, *, now=None):
         rows = conn.execute("SELECT * FROM deliveries WHERE status IN ('pending','retry') AND next_attempt<=? ORDER BY created_at,rowid", (now,)).fetchall()
         attempted = 0
         for row in rows:
-            if row['task_id'] in blocked_task_ids(config):
+            blocked = blocked_task_ids(config)
+            envelope = json.loads(row['body'])
+            if row['task_id'] in blocked or (row['kind'] == 'daily_digest' and any(
+                    item['task_id'] in blocked for item in envelope['digest']['items'])):
                 continue
             target = targets.get(row['target_id'])
             if target is None or _target_hash(target) != row['target_hash']:
@@ -469,7 +472,7 @@ def run_round(config, *, now=None):
             with conn:
                 conn.execute("UPDATE deliveries SET status='sending',attempts=?,transport_started_at=?,transport_finished_at=NULL WHERE id=?", (attempts, time.time(), row['id']))
             try:
-                receipt = deliver(target, json.loads(row['body']), config, previous=json.loads(previous['receipt']) if previous else None)
+                receipt = deliver(target, envelope, config, previous=json.loads(previous['receipt']) if previous else None)
                 if not isinstance(receipt, dict):
                     raise ValueError('Invalid delivery receipt')
                 encoded = canonical(receipt)

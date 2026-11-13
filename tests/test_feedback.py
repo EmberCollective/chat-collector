@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import datetime as dt
 import json
 from pathlib import Path
 import sqlite3
@@ -263,6 +264,38 @@ def test_new_feedback_arriving_after_delivery_queue_was_built_still_blocks_send(
         enqueue(config)
     monkeypatch.setattr(core, '_queue', queue_then_click)
     assert core.run_round(config, now=100)['sent'] == 0
+
+
+def test_feedback_arriving_during_delivery_defers_digest_until_formal_status_refresh(config, monkeypatch):
+    now = 1_800_000_000
+    config['daily_digest'].update(enabled=True, timezone='UTC', catch_up_minutes=60,
+                                 time=dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime('%H:%M'))
+    sent = []
+
+    def deliver(target, envelope, settings, **kwargs):
+        sent.append(envelope)
+        if envelope['kind'] == 'upsert' and envelope['task']['status'] == 'open':
+            enqueue(settings, expected_revision=1)
+        return {'remote_id': 'mock'}
+
+    monkeypatch.setattr(channels, 'deliver', deliver)
+    assert core.run_round(config, now=now)['sent'] == 1
+    assert feedback.blocked_task_ids(config) == {'task-one'}
+    assert [item['kind'] for item in sent] == ['upsert']
+    with core._connect(config) as conn:
+        pending = dict(conn.execute("SELECT * FROM deliveries WHERE kind='daily_digest'").fetchone())
+    assert pending['status'] == 'pending' and pending['attempts'] == 0
+    assert pending['next_attempt'] == 0 and pending['transport_started_at'] is None
+    assert [item['task_id'] for item in json.loads(pending['body'])['digest']['items']] == ['task-one']
+
+    assert feedback.process_pending(config)['applied'] == 1
+    core.run_round(config, now=now + 1)
+    digests = [item for item in sent if item['kind'] == 'daily_digest']
+    assert len(digests) == 1 and digests[0]['digest']['items'] == []
+    with core._connect(config) as conn:
+        finished = dict(conn.execute('SELECT * FROM deliveries WHERE id=?', (pending['id'],)).fetchone())
+    assert finished['status'] == 'sent' and finished['attempts'] == 1
+    assert json.loads(finished['body'])['digest']['items'] == []
 
 
 def test_disabling_feedback_queue_keeps_service_as_formal_status_owner(config):
