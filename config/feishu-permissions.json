@@ -1,0 +1,11 @@
+{
+  "scopes": {
+    "tenant": [
+      "im:message:send_as_bot",
+      "im:resource",
+      "im:chat:read",
+      "im:chat.members:read"
+    ],
+    "user": []
+  }
+}

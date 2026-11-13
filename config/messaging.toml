@@ -2,6 +2,13 @@
 enabled = false
 env_file = "../.env"
 
+[feedback]
+enabled = true
+processor_config = "processor.toml"
+state_file = "../data/messaging/feedback.db"
+max_attempts = 5
+retry_base_seconds = 15
+
 [input]
 batches_dir = "../data/todos"
 
@@ -26,6 +33,19 @@ P1 = 14400
 P2 = 86400
 P3 = 604800
 P4 = 0
+
+[[targets]]
+id = "feishu-assistant"
+kind = "feishu_app"
+enabled = false
+app_id_env = "CHAT_FEISHU_APP_ID"
+app_secret_env = "CHAT_FEISHU_APP_SECRET"
+recipient_id = "oc_56ba9627a178629482da7f61878fb087"
+receive_id_type = "chat_id"
+allowed_operator_ids = ["ou_b04f81cf2f2da113a59044c27618ef96"]
+snooze_seconds = 3600
+upload_files = true
+timeout_seconds = 30
 
 [[targets]]
 id = "feishu-personal"

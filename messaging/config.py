@@ -30,6 +30,22 @@ def load_config(path):
     if not isinstance(roots, list) or any(not isinstance(p, str) or not p for p in roots):
         raise ValueError('attachments.allowed_roots must be an array of paths')
     config['attachments']['allowed_roots'] = [str((path.parent / p).resolve()) for p in roots]
+    feedback = config.setdefault('feedback', {})
+    if type(feedback.setdefault('enabled', False)) is not bool:
+        raise ValueError('feedback.enabled must be a boolean')
+    for key, default, maximum in [('retry_base_seconds', 60, 86400), ('max_attempts', 5, 20)]:
+        value = feedback.setdefault(key, default)
+        if type(value) is not int or not 1 <= value <= maximum:
+            raise ValueError('feedback.' + key + ' is outside its allowed range')
+    for key, default in [('state_file', '../data/messaging/feedback.db'), ('processor_config', 'processor.toml')]:
+        value = feedback.setdefault(key, default)
+        if not isinstance(value, str) or not value:
+            raise ValueError('feedback.' + key + ' must be a path')
+        feedback[key] = str((path.parent / value).resolve())
+    feedback_state = Path(feedback['state_file'])
+    if (feedback_state in {state, path, Path(config['env_file']), Path(feedback['processor_config'])}
+            or any(feedback_state == root or root in feedback_state.parents for root in (incoming, assets))):
+        raise ValueError('Feedback state must be separate from message state, input, assets and configuration')
     for section, key, default, minimum, maximum in [
             ('schedule', 'interval_seconds', 60, 1, 86400),
             ('schedule', 'retry_base_seconds', 60, 1, 86400),
@@ -53,5 +69,8 @@ def load_config(path):
         timeout = target.setdefault('timeout_seconds', 30)
         if type(timeout) is not int or not 1 <= timeout <= 300:
             raise ValueError('Target timeout_seconds must be between 1 and 300')
+        snooze = target.setdefault('snooze_seconds', 3600)
+        if type(snooze) is not int or not 1 <= snooze <= 31536000:
+            raise ValueError('Target snooze_seconds must be between 1 and 31536000')
     config['_config_path'] = str(path)
     return config

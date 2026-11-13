@@ -16,9 +16,10 @@ import httpx
 
 
 class DeliveryError(RuntimeError):
-    def __init__(self, code, *, uncertain=False):
+    def __init__(self, code, *, uncertain=False, receipt=None):
         super().__init__(code)
         self.code, self.uncertain = code, uncertain
+        self.receipt = receipt
 
 
 class DeliveryRejected(DeliveryError):
@@ -26,8 +27,8 @@ class DeliveryRejected(DeliveryError):
 
 
 class DeliveryUncertain(DeliveryError):
-    def __init__(self, code):
-        super().__init__(code, uncertain=True)
+    def __init__(self, code, *, receipt=None):
+        super().__init__(code, uncertain=True, receipt=receipt)
 
 
 def _secret(target, field, config, *, required=True):
@@ -84,7 +85,7 @@ def public_envelope(envelope):
     if any(not isinstance(task.get(field, []), list) for field in ('people', 'sources', 'resources')):
         raise DeliveryRejected('invalid_delivery_payload')
     result['people'] = [_text_fields(p, ('name', 'role')) for p in task.get('people', [])]
-    for field in ('review_reasons', 'action_steps'):
+    for field in ('review_reasons', 'notes', 'action_steps'):
         if field in task:
             result[field] = _text_list(task[field])
     result['sources'] = [_text_fields(s, ('ref', 'platform', 'conversation', 'sender', 'time'))
@@ -123,8 +124,9 @@ def _instructions(task, *, material_destination='见材料附件'):
             lines.append('成果说明：' + r['note'])
     for source in task.get('sources', []):
         lines.append('来源：' + ' · '.join(str(source[k]) for k in ('platform', 'conversation', 'sender', 'time') if source.get(k)))
-    if task.get('needs_review'):
-        lines.append('需要确认：' + '；'.join(task.get('review_reasons', [])))
+    notes = task.get('notes') or task.get('review_reasons', [])
+    if notes:
+        lines.append('说明：' + '；'.join(notes))
     return '\n'.join(lines)
 
 
@@ -311,6 +313,9 @@ def deliver(target, envelope, config, previous=None):
         raise DeliveryRejected('delivery_disabled')
     public_envelope(envelope)
     kind = target.get('kind')
+    if kind == 'feishu_app':
+        from .feishu import deliver_app
+        return deliver_app(target, envelope, config, previous)
     if kind == 'feishu':
         return _feishu(target, envelope, config)
     if kind == 'notion':

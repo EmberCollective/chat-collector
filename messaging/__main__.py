@@ -3,12 +3,13 @@ import json
 import sys
 import time
 
-from . import add_result, load_config, preview, resolve_delivery, run_round, set_task_state, status, sync
+from . import add_result, load_config, preview, resolve_delivery, run_round, status, sync
+from . import feedback_status, process_pending, request_task_action, retry_feedback
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Independent task delivery, local preview and reminders.')
-    parser.add_argument('mode', choices=['preview', 'sync', 'once', 'run', 'status', 'complete', 'reopen', 'snooze', 'resolve-delivery', 'attach-result'])
+    parser.add_argument('mode', choices=['preview', 'sync', 'once', 'run', 'status', 'complete', 'reopen', 'cancel', 'snooze', 'resolve-delivery', 'attach-result', 'feedback-status', 'retry-feedback'])
     parser.add_argument('--config', default='config/messaging.toml')
     parser.add_argument('--task-id')
     parser.add_argument('--until', help='Snooze until an ISO timestamp with timezone offset')
@@ -16,6 +17,9 @@ def main(argv=None):
     parser.add_argument('--resolution', choices=['retry', 'delivered'])
     parser.add_argument('--file')
     parser.add_argument('--note', default='')
+    parser.add_argument('--request-id')
+    parser.add_argument('--event-id')
+    parser.add_argument('--expected-revision', type=int)
     args = parser.parse_args(argv)
     try:
         while True:
@@ -23,14 +27,23 @@ def main(argv=None):
             try:
                 config = load_config(args.config)
                 interval = config['schedule']['interval_seconds']
-                if args.mode in {'complete', 'reopen', 'snooze'}:
-                    result = set_task_state(config, args.task_id, args.mode, until=args.until)
+                if args.mode in {'complete', 'reopen', 'cancel', 'snooze'}:
+                    result = request_task_action(config, args.task_id, args.mode, until=args.until,
+                        event_id=args.event_id, expected_revision=args.expected_revision,
+                        actor={'platform': 'local', 'user_id': 'local-user', 'source': 'cli'})
+                elif args.mode == 'feedback-status':
+                    result = feedback_status(config)
+                elif args.mode == 'retry-feedback':
+                    result = retry_feedback(config, args.request_id)
                 elif args.mode == 'resolve-delivery':
                     result = resolve_delivery(config, args.delivery_id, args.resolution)
                 elif args.mode == 'attach-result':
                     result = add_result(config, args.task_id, args.file, note=args.note)
                 else:
+                    feedback = process_pending(config) if args.mode in {'once', 'run'} else None
                     result = {'preview': preview, 'sync': sync, 'status': status}.get(args.mode, run_round)(config)
+                    if feedback is not None:
+                        result['feedback'] = feedback
                 print(json.dumps(result, ensure_ascii=False), flush=True)
                 code = 0
             except Exception as exc:

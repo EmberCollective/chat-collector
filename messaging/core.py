@@ -73,6 +73,7 @@ def _event(value):
     if 'needs_review' in task and type(task['needs_review']) is not bool:
         raise ValueError('Task needs_review must be boolean')
     _strings(task.get('review_reasons', []), 'review_reasons', 100, 20000)
+    _strings(task.get('notes', []), 'notes', 100, 20000)
     _strings(task.get('action_steps', []), 'action_steps', 50, 2000)
     if 'time' in task:
         value_time = task['time']
@@ -333,12 +334,16 @@ def _package_hash(package):
 
 
 def _queue(config, conn, tasks, local, packages, now):
+    from .feedback import blocked_task_ids
+    blocked = blocked_task_ids(config)
     for target in config['targets']:
         if not target['enabled']:
             continue
         fingerprint = _target_hash(target)
         sync_only = target['kind'] == 'notion' or target.get('mode') == 'sync'
         for key, task in tasks.items():
+            if key in blocked:
+                continue
             state = local.get(key, {})
             version = state.get('version', 0)
             package_hash = _package_hash(packages[key])
@@ -381,11 +386,14 @@ def run_round(config, *, now=None):
         if not config['enabled']:
             return result
         from .channels import DeliveryError, deliver
+        from .feedback import blocked_task_ids
         _queue(config, conn, tasks, local, packages, now)
         targets = {t['id']: t for t in config['targets'] if t['enabled']}
         rows = conn.execute("SELECT * FROM deliveries WHERE status IN ('pending','retry') AND next_attempt<=? ORDER BY created_at,rowid", (now,)).fetchall()
         attempted = 0
         for row in rows:
+            if row['task_id'] in blocked_task_ids(config):
+                continue
             target = targets.get(row['target_id'])
             if target is None or _target_hash(target) != row['target_hash']:
                 continue
@@ -410,8 +418,10 @@ def run_round(config, *, now=None):
                 delivery_status = 'unknown' if uncertain else ('failed' if attempts >= config['schedule']['max_attempts'] else 'retry')
                 error = exc.code if isinstance(exc, DeliveryError) else 'delivery_outcome_unknown'
                 delay = min(config['schedule']['retry_base_seconds'] * 2 ** (attempts - 1), 86400)
+                partial = canonical(exc.receipt) if isinstance(exc, DeliveryError) and isinstance(exc.receipt, dict) else None
                 with conn:
-                    conn.execute('UPDATE deliveries SET status=?,error=?,next_attempt=? WHERE id=?', (delivery_status, error, now + delay, row['id']))
+                    conn.execute('UPDATE deliveries SET status=?,error=?,next_attempt=?,receipt=COALESCE(?,receipt) WHERE id=?',
+                                 (delivery_status, error, now + delay, partial, row['id']))
                 result[delivery_status] += 1
         return result
 
@@ -488,7 +498,12 @@ def resolve_delivery(config, delivery_id, action):
         target = next((t for t in config['targets'] if t['id'] == row['target_id']), {})
         if action == 'delivered' and target.get('kind') == 'notion':
             raise ValueError('Notion requires a page receipt; retry lets the adapter reconcile by task ID')
+        receipt = None
+        if target.get('kind') == 'feishu_app':
+            from .feishu import reconcile_delivery
+            receipt = reconcile_delivery(target, json.loads(row['body']), config, action)
         with conn:
-            conn.execute('UPDATE deliveries SET status=?,next_attempt=0,error=NULL,attempts=0,finished_at=? WHERE id=?',
-                         ('pending' if action == 'retry' else 'sent', time.time() if action == 'delivered' else None, delivery_id))
+            conn.execute('UPDATE deliveries SET status=?,next_attempt=0,error=NULL,attempts=0,finished_at=?,receipt=COALESCE(?,receipt) WHERE id=?',
+                         ('pending' if action == 'retry' else 'sent', time.time() if action == 'delivered' else None,
+                          canonical(receipt) if receipt is not None else None, delivery_id))
         return {'delivery_id': delivery_id, 'status': 'pending' if action == 'retry' else 'sent'}
