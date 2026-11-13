@@ -137,11 +137,24 @@ def _message_key(message):
     return digest([str(message[k]) for k in ('platform', 'account_id', 'conversation_id', 'message_id')])
 
 
-def prepare_selected(config, messages):
+def selection_window_end(scope, requested_end):
+    """Ask the provider how far its published snapshot safely covers the window."""
+    with query_snapshot(scope) as snapshot:
+        limit = getattr(snapshot, 'selection_window_end', None)
+        return limit(requested_end) if limit else requested_end
+
+
+def prepare_selected(config, messages, *, snapshot_id, end_exclusive=None):
     """Apply configured local archive policy only after every SQL rule succeeds."""
     from collector.assets import AttachmentArchive
-    from collector.service import source_snapshot
     messages = list(messages)
     archive = AttachmentArchive(config, config['platform'], config['source']['account_id'])
-    with source_snapshot(config):
+    scope = dict(provider_id=config.get('provider_id', config['platform']), platform=config['platform'],
+                 account_id=config['source']['account_id'], config=config)
+    with query_snapshot(scope) as snapshot:
+        if snapshot.snapshot_id != snapshot_id:
+            raise RuntimeError('Source snapshot changed after query; retry the same window')
+        limit = getattr(snapshot, 'selection_window_end', None)
+        if end_exclusive is not None and limit and limit(end_exclusive) < end_exclusive:
+            raise RuntimeError('Source collection watermark changed after query; retry the same window')
         return [archive.enrich(message) for message in messages]

@@ -88,3 +88,84 @@ def test_archive_enrichment_rejects_changed_source_before_publication(config, mo
     with sqlite3.connect(config['storage']['state_file']) as db:
         assert db.execute('SELECT count(*) FROM outbox').fetchone()[0] == 0
         assert db.execute("SELECT value FROM settings WHERE key='window_end'").fetchone() is None
+
+
+def test_refresh_between_query_and_archive_retries_without_publication(config, monkeypatch):
+    register(config, 'files.sql')
+    original = selection.query_rules
+    def query_then_change(*args):
+        result = original(*args)
+        (Path(config['source']['decrypted_dir'])/'contact.db').write_bytes(b'new generation')
+        return result
+    monkeypatch.setattr(selection, 'query_rules', query_then_change)
+    with pytest.raises(RuntimeError, match='changed after query'):
+        selection.run_round(config, 100, 111)
+    with sqlite3.connect(config['storage']['state_file']) as db:
+        assert db.execute('SELECT count(*) FROM outbox').fetchone()[0] == 0
+        assert db.execute("SELECT value FROM settings WHERE key='window_end'").fetchone() is None
+
+
+def test_scheduled_selection_requires_managed_source_watermark_but_replay_works(config):
+    config['source']['refresh'] = True
+    register(config, 'files.sql')
+    with pytest.raises(RuntimeError, match='watermark'):
+        selection.run_round(config)
+    assert selection.run_round(config, 100, 111)['emitted'] == 1
+
+
+def test_watermark_is_rechecked_with_query_generation_before_commit(config, monkeypatch):
+    from collector.service import collect_once
+    register(config, 'files.sql')
+    monkeypatch.setattr(selection.time, 'time', lambda: 111)
+    collect_once(config)
+    original = selection.query_rules
+    def query_then_lower_watermark(*args):
+        result = original(*args)
+        path = Path(config['storage']['state_file']+'.collection.json')
+        saved = json.loads(path.read_text(encoding='utf-8'))
+        saved['capture_started_at'] = 100
+        path.write_text(json.dumps(saved), encoding='utf-8')
+        return result
+    monkeypatch.setattr(selection, 'query_rules', query_then_lower_watermark)
+    with pytest.raises(RuntimeError, match='watermark changed'):
+        selection.run_round(config)
+    with sqlite3.connect(config['storage']['state_file']) as db:
+        assert db.execute('SELECT count(*) FROM outbox').fetchone()[0] == 0
+        assert db.execute("SELECT value FROM settings WHERE key='window_end'").fetchone() is None
+
+
+def test_scheduled_selection_stops_at_capture_start_and_keeps_later_arrivals(config, monkeypatch):
+    import importlib
+    from collector.service import collect_once
+    register(config, 'files.sql')
+    config['source']['refresh'] = True
+    adapter = importlib.import_module('collector.adapters.'+config['platform'])
+    clock = [100]
+    monkeypatch.setattr(selection.time, 'time', lambda: clock[0])
+    def refresh(source):
+        if clock[0] == 140:
+            folder = Path(source['decrypted_dir'])
+            if config['platform'] == 'qq':
+                with sqlite3.connect(folder/'nt_msg.db') as db:
+                    db.execute('''INSERT INTO group_msg_table SELECT
+                        99,105,"40030","40021","40033","40020","40011","40800"
+                        FROM group_msg_table WHERE "40001"=3''')
+            else:
+                with sqlite3.connect(folder/'message_0.db') as db:
+                    table = db.execute("SELECT name FROM sqlite_master WHERE name LIKE 'Msg_%' ORDER BY name").fetchall()
+                    table = next(row[0] for row in table if db.execute(f'SELECT count(*) FROM "{row[0]}" WHERE local_id=3').fetchone()[0])
+                    db.execute(f'''INSERT INTO "{table}" SELECT 99,1099,local_type,real_sender_id,
+                        105,source,message_content,compress_content FROM "{table}" WHERE local_id=3''')
+        clock[0] += 30
+        return {'mode':'fixture'}
+    monkeypatch.setattr(adapter, 'refresh', refresh)
+    first = collect_once(config)
+    assert first['capture_started_at'] == 100 and first['collected_at'] == 130
+    assert selection.run_round(config)['end'] == 100
+    clock[0] = 140
+    second = collect_once(config)
+    assert second['capture_started_at'] == 140 and second['collected_at'] == 170
+    assert selection.run_round(config)['end'] == 140
+    events = [json.loads(line) for batch in Path(config['storage']['output_dir']).glob('*.jsonl')
+              for line in batch.read_text(encoding='utf-8').splitlines()]
+    assert any(int(event['message']['source']['local_id']) == 99 for event in events)

@@ -103,6 +103,8 @@ def test_third_provider_runs_unmodified_sql_and_arbitrary_bound_parameters(tmp_p
     assert len(trigger['matched_rules']) == 3
     assert trigger['message']['attachments'][0]['name'] == 'document'
     assert run_round(cfg, 100, 111)['duplicates'] == 3
+    monkeypatch.setattr(SyntheticSnapshot, 'selection_window_end', lambda self, end: min(end,111), raising=False)
+    assert run_round(cfg)['end'] == 111  # External adapters can supply their own freshness boundary.
     cfg['filters']['rulesets'][-1]['params']['another_parameter'] = "' OR 1=1 --"
     assert len([hit for hit in query(cfg)['hits'] if hit['identity']==identity]) == 2
 

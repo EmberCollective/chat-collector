@@ -1,6 +1,7 @@
 """Refresh source snapshots independently of selection and its checkpoint."""
 from contextlib import contextmanager
 import importlib
+import json
 import os
 from pathlib import Path
 import time
@@ -15,6 +16,9 @@ def _paths(config):
     paths = set(folder.glob('*.db')) if source.get('decrypted_dir') else set()
     if source.get('database'):
         paths.add(Path(source['database']).resolve())
+    if source.get('resource_db'):
+        resource = Path(source['resource_db']).resolve()
+        paths.update((resource, resource.parent / 'hardlink.db'))
     return sorted(paths)
 
 
@@ -49,7 +53,15 @@ def source_snapshot(config):
     """Block refresh while reading; fail closed if another writer changes any DB."""
     with InstanceLock(_lock_path(config), timeout=45):
         before = _fingerprint(config)
-        yield _metadata(config, before)
+        metadata = _metadata(config, before)
+        published = Path(config['storage']['state_file'] + '.collection.json') if config.get('storage') else None
+        metadata['capture_managed'] = config['source'].get('refresh', True)
+        if published is not None and published.is_file():
+            saved = json.loads(published.read_text(encoding='utf-8'))
+            metadata['capture_managed'] = True
+            if saved.get('snapshot_id') == metadata['snapshot_id']:
+                metadata['capture_started_at'] = saved.get('capture_started_at')
+        yield metadata
         if before != _fingerprint(config):
             raise RuntimeError('Source snapshot changed during query; retry the same window')
 
@@ -57,11 +69,12 @@ def source_snapshot(config):
 def collect_once(config):
     """Publish collection metadata only after the native refresh has succeeded."""
     with InstanceLock(_lock_path(config), timeout=45):
+        capture_started_at = int(time.time())
         adapter = importlib.import_module('collector.adapters.' + config['platform'])
         refresh = (adapter.refresh(config['source']) if config['source'].get('refresh', True)
                    else {'mode': 'decrypted_only'})
         result = dict(_metadata(config, _fingerprint(config)), refresh=refresh,
-                      collected_at=int(time.time()))
+                      collected_at=int(time.time()), capture_started_at=capture_started_at)
         path = Path(config['storage']['state_file'] + '.collection.json')
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix('.json.tmp')

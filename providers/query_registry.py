@@ -8,6 +8,7 @@ class _LocalSnapshot:
         from .identities import IdentityContext
         self.config = scope['config']
         self.snapshot_id = metadata['snapshot_id']
+        self.metadata = metadata
         self.adapter = importlib.import_module('providers.platforms.' + scope['platform'])
         self.identities = IdentityContext(self.config)
 
@@ -16,6 +17,14 @@ class _LocalSnapshot:
 
     def enrich(self, message):
         return self.identities.enrich(message)
+
+    def selection_window_end(self, requested_end):
+        if not self.metadata['capture_managed']:
+            return requested_end
+        captured = self.metadata.get('capture_started_at')
+        if type(captured) is not int:
+            raise RuntimeError('Source collection watermark unavailable or stale; collect before selection')
+        return min(requested_end, captured)
 
 
 @contextmanager
@@ -37,7 +46,7 @@ QUERY_PROVIDERS = {'wechat': _local_snapshot, 'qq': _local_snapshot}
 
 
 def register_query_provider(provider_id, snapshot_factory):
-    """Register a context manager yielding snapshot_id, scan(), and enrich()."""
+    """Yield snapshot_id/scan/enrich; optional selection_window_end bounds scheduled scans."""
     if not isinstance(provider_id, str) or not provider_id or not callable(snapshot_factory):
         raise ValueError('Query provider needs a nonempty id and a snapshot factory')
     if provider_id in QUERY_PROVIDERS:

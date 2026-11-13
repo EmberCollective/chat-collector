@@ -41,3 +41,17 @@ def test_snapshot_rejects_external_identity_database_change(tmp_path):
     with pytest.raises(RuntimeError, match='changed'):
         with source_snapshot(cfg):
             contact.write_bytes(b'new contact data')
+
+
+@pytest.mark.parametrize('name', ['resource.db', 'hardlink.db'])
+def test_snapshot_tracks_external_resource_databases(tmp_path, name):
+    cfg = config(tmp_path)
+    external = tmp_path / 'external'
+    external.mkdir()
+    cfg['source']['resource_db'] = str(external/'resource.db')
+    target = external / name
+    target.write_bytes(b'old')
+    with pytest.raises(RuntimeError, match='changed'):
+        with source_snapshot(cfg) as metadata:
+            assert str(target.resolve()) in [row[0] for row in metadata['files']]
+            target.write_bytes(b'changed resource')
