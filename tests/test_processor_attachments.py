@@ -172,6 +172,23 @@ def test_duplicate_content_keeps_all_origin_indexes(tmp_path):
         {'message_key':'b','attachment_index':0}]
 
 
+def test_identical_content_with_different_names_keeps_refs_and_shares_parse_cache(tmp_path, monkeypatch):
+    from providers import attachments
+    path = pdf(tmp_path, ['same contents'])
+    config = {'storage': {'state_file': str(tmp_path/'state.db')},
+              'attachments': {'archive_roots': [str(path.parent)], 'cache_dir': str(tmp_path/'cache')}}
+    reader = AttachmentContext([{'message_key': 'a', 'message': {'attachments': [
+        {'name': 'original.pdf', 'archive_path': str(path)},
+        {'name': 'renamed.pdf', 'archive_path': str(path)}]}}], config)
+    assert [(item['ref'], item['name']) for item in reader.catalog()] == [
+        ('f1', 'original.pdf'), ('f2', 'renamed.pdf')]
+    assert reader.read_attachment('f1')['details']['status'] == 'ok'
+    monkeypatch.setattr(attachments, '_run_worker', lambda *args: pytest.fail('parse cache was not reused'))
+    assert reader.read_attachment('f2')['details']['status'] == 'ok'
+    assert reader.evidence['f2:p1']['origins'] == [{'message_key': 'a', 'attachment_index': 1}]
+    assert reader.export_attachment('f2')['name'] == 'renamed.pdf'
+
+
 def test_invalid_page_or_unknown_ref_does_not_read_other_files(tmp_path):
     path = pdf(tmp_path, ['text'])
     reader = context(tmp_path, path)

@@ -188,8 +188,9 @@ class AttachmentContext:
                     sha = hashlib.sha256(raw).hexdigest()
                     if attachment.get('sha256') and attachment['sha256'].lower() != sha:
                         raise ValueError('attachment_archive_hash_mismatch')
-                    if sha in by_content:
-                        previous = self.files[by_content[sha]]['catalog']
+                    identity = (sha, name)
+                    if identity in by_content:
+                        previous = self.files[by_content[identity]]['catalog']
                         if event['message_key'] not in previous['message_keys']:
                             previous['message_keys'].append(event['message_key'])
                         origin = {'message_key': event['message_key'], 'attachment_index': attachment_index}
@@ -211,7 +212,7 @@ class AttachmentContext:
                         temporary.replace(target)
                     entry.update(type=kind, sha256=sha, byte_size=len(raw))
                     self.files[ref].update(path=target, folder=folder)
-                    by_content[sha] = ref
+                    by_content[identity] = ref
                 except (OSError, ValueError, TypeError, AttributeError) as exc:
                     reason = str(exc) if isinstance(exc, ValueError) else 'attachment_unavailable'
                     entry.update(status='needs_review', content_status='unavailable', needs_review=True, warnings=[reason])
