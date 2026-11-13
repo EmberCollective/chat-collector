@@ -25,7 +25,7 @@ def _source_archive(sources, config, prepare):
             original = Path(temporary) / 'sources.txt'
             original.write_bytes(data)
             _store(original, config, sha)
-    item = {'id': sha, 'name': '来源原文.txt', 'type': 'file', 'role': 'input',
+    item = {'id': _id(sha + ':来源原文.txt'), 'name': '来源原文.txt', 'type': 'file', 'role': 'input',
             'purpose': '完整来源原文', 'source_refs': [s['ref'] for s in sources],
             'sha256': sha, 'size_bytes': len(data), 'status': 'unavailable'}
     if path.exists():
@@ -100,7 +100,7 @@ def archive_result(file_path, config):
     if not path.is_file() or path.name.startswith('.env') or 'secrets' in {p.lower() for p in path.parts} or path.suffix.lower() in {'.db', '.sqlite', '.sqlite3', '.key', '.pem'}:
         raise ValueError('result_file_not_allowed')
     dest, sha, size = _store(path, config)
-    return {'id': sha, 'name': path.name, 'type': 'file', 'status': 'ready', 'role': 'result',
+    return {'id': _id(sha + ':' + path.name), 'name': path.name, 'type': 'file', 'status': 'ready', 'role': 'result',
             'sha256': sha, 'size_bytes': size, 'local_path': str(dest)}
 
 
@@ -141,7 +141,7 @@ def _material(attachment, source_key, index, config, prepare):
         size = path.stat().st_size
         if prepare:
             path, sha, size = _store(path, config, sha)
-        resource.update(id=sha, sha256=sha, size_bytes=size, local_path=str(path), status='ready')
+        resource.update(id=_id(sha + ':' + resource['name']), sha256=sha, size_bytes=size, local_path=str(path), status='ready')
         if attachment.get('status') == 'thumbnail_only':
             resource['warnings'].append('thumbnail_only')
     except (OSError, ValueError) as exc:
