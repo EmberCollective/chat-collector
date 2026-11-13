@@ -245,8 +245,20 @@ def _file_delivery(client, target, task, resource, config, scope):
     from lark_oapi.api.im.v1 import CreateFileRequest, CreateFileRequestBody
     from .package import material_path
     key = (scope, task['task_id'], resource['id'])
-    with closing(_state(config)) as conn:
+    with closing(_state(config)) as conn, conn:
         row = conn.execute('SELECT * FROM feishu_files WHERE scope=? AND task_id=? AND asset_id=?', key).fetchone()
+        if row is None and resource.get('sha256') != resource['id']:
+            legacy = conn.execute('SELECT * FROM feishu_files WHERE scope=? AND task_id=? AND asset_id=?',
+                                  (scope, task['task_id'], resource.get('sha256'))).fetchone()
+            first = next((item for item in task.get('resources', []) if item.get('sha256') == resource.get('sha256')), None)
+            # shortcut: nameless legacy sends cover the first matching content until historical filenames are verified.
+            if legacy and (legacy['status'] in {'unknown', 'sending'} or legacy['file_name'] == resource['name']
+                           or (legacy['file_name'] is None and first is resource)):
+                # Old receipts keep their key for reconciliation; reuse recorded sends without re-uploading.
+                conn.execute('INSERT INTO feishu_files VALUES(?,?,?,?,?,?,?,?)',
+                             (*key, legacy['file_key'], legacy['message_id'], legacy['status'], legacy['error'],
+                              legacy['file_name'] or resource['name']))
+                row = conn.execute('SELECT * FROM feishu_files WHERE scope=? AND task_id=? AND asset_id=?', key).fetchone()
         if row and (row['status'] in {'unknown', 'sending'} or row['status'] == 'sent' and row['file_name'] == resource['name']):
             return {'id': resource['id'], 'status': 'sent' if row['status'] == 'sent' else 'unknown',
                     'message_id': row['message_id']}

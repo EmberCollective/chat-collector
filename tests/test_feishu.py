@@ -281,6 +281,27 @@ def test_legacy_file_cache_migration_and_unknown_outcome_not_bypassed(case, monk
     assert len([c for c in calls if c[0] == 'upload']) == 1
 
 
+@pytest.mark.parametrize('state', ['unknown', 'sending'])
+@pytest.mark.parametrize('name', ['report.pdf', 'renamed.pdf'])
+def test_named_resource_migration_keeps_unknown_legacy_send_protection(case, monkeypatch, state, name):
+    config, target, envelope = case
+    add_file(case)
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    resource = envelope['task']['resources'][0]
+    legacy_id = resource['id']
+    with feishu._state(config) as conn:
+        conn.execute('UPDATE feishu_files SET status=?', (state,))
+    resource.update(id=hashlib.sha256((legacy_id+':'+name).encode()).hexdigest(), name=name)
+    envelope['delivery_id'] = 'named-resource-migration'
+    with pytest.raises(DeliveryUncertain, match='material_delivery_unknown'):
+        feishu.deliver_app(target, envelope, config)
+    assert len([call for call in calls if call[0] == 'upload']) == 1
+    with feishu._state(config) as conn:
+        rows = list(conn.execute('SELECT asset_id,status FROM feishu_files'))
+        assert {row['asset_id']: row['status'] for row in rows} == {legacy_id: state, resource['id']: state}
+
+
 def test_file_failure_preserves_successful_card_and_marks_material(case, monkeypatch):
     config, target, envelope = case
     add_file(case)
