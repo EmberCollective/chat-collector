@@ -49,6 +49,10 @@ def _connect(config, *, write=False):
     if write:
         conn.execute(f'PRAGMA application_id={APPLICATION_ID}')
         conn.executescript(SCHEMA)
+        columns = {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}
+        for column in ('wake_seq', 'wake_consumed'):
+            if column not in columns:
+                conn.execute(f'ALTER TABLE jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
         with conn:
             conn.executemany("INSERT OR IGNORE INTO jobs(name,state) VALUES(?,'idle')", [(name,) for name in JOBS])
             conn.execute('INSERT OR IGNORE INTO listener(id) VALUES(1)')
@@ -206,6 +210,16 @@ class SchedulerService:
         self.stop_event = threading.Event()
         self.lock = None
         self.listener = None
+        self.wakeup = None
+        self.schedule_lock = threading.RLock()
+
+    def request_wakeup(self, name):
+        if name not in {'feedback', 'messaging'} or not self.config['enabled'] or not self.config['jobs'][name]['enabled']:
+            return
+        with closing(_connect(self.config, write=True)) as conn, conn:
+            conn.execute("UPDATE jobs SET wake_seq=wake_seq+1,next_run=CASE WHEN state='idle' THEN ? ELSE next_run END WHERE name=?",
+                         (self.clock(), name))
+        self._reconcile()
 
     def _alert(self, name, kind, code):
         now = self.clock()
@@ -270,8 +284,9 @@ class SchedulerService:
             attention = any(summary.get(key, 0) > 0 for key in ('failed', 'conflict', 'unknown', 'unresolved_deliveries'))
             code = 'downstream_attention' if attention else None
             with closing(_connect(self.config, write=True)) as conn, conn:
-                conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=?,last_success=?,error=?,active_error=?,result=? WHERE name=?",
-                             (self.clock() + self.config['jobs'][name]['interval_seconds'], self.clock(), code, code, canonical(summary), name))
+                conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=CASE WHEN wake_seq>? THEN ? ELSE ? END,wake_consumed=?,last_success=?,error=?,active_error=?,result=? WHERE name=?",
+                             (row['wake_seq'], self.clock(), self.clock() + self.config['jobs'][name]['interval_seconds'],
+                              row['wake_seq'], self.clock(), code, code, canonical(summary), name))
             if attention:
                 self._alert(name, 'failure', code)
             elif row['active_error']:
@@ -286,6 +301,12 @@ class SchedulerService:
             return result
 
     def _reconcile(self):
+        with self.schedule_lock:
+            self._reconcile_jobs()
+
+    def _reconcile_jobs(self):
+        if self.scheduler is None:
+            return
         if self.stop_event.is_set():
             return
         with closing(_connect(self.config)) as conn:
@@ -340,9 +361,25 @@ class SchedulerService:
                 self.scheduler.add_job(self.listener.poll, 'interval', id='_listener',
                     seconds=self.config['listener']['check_interval_seconds'], max_instances=1, coalesce=True)
             self.scheduler.start()
+            # APScheduler releases the job slot before these events; follow-up work
+            # received during a running job can now be scheduled without being lost.
+            if hasattr(self.scheduler, 'add_listener'):
+                from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
+                self.scheduler.add_listener(lambda event: self._reconcile(), EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+            from .wakeup import WakeupListener
+            routes = {}
+            for name in ('feedback', 'messaging'):
+                routes.setdefault(self.config['jobs'][name]['config'], set()).add(name)
+            routes.setdefault(self.config['jobs']['processor']['config'], set()).add('messaging')
+            try:
+                self.wakeup = WakeupListener(routes, self.request_wakeup).start()
+            except OSError:
+                self.wakeup = None
             self._reconcile()
         except Exception:
             try:
+                if self.wakeup:
+                    self.wakeup.close()
                 if self.scheduler is not None and getattr(self.scheduler, 'running', False):
                     self.scheduler.shutdown(wait=True)
                 with closing(_connect(self.config, write=True)) as conn, conn:
@@ -356,6 +393,8 @@ class SchedulerService:
     def stop(self):
         self.stop_event.set()
         try:
+            if self.wakeup:
+                self.wakeup.close()
             if self.scheduler:
                 self.scheduler.shutdown(wait=True)
             if self.listener:

@@ -40,6 +40,31 @@ def event(identifier='one', revision=1, *, priority='P0', task_status='open', ti
                      'title': title, 'event': 'Submit the report', 'sources': []}}
 
 
+def test_delivery_records_actual_completion_and_begins_retry_after_failure(config, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(core.time, 'time', lambda: clock[0])
+    batch(config, 'one', event())
+    def deliver(*args, **kwargs):
+        clock[0] = 112.0
+        return {'remote_id': 'sent'}
+    monkeypatch.setattr(channels, 'deliver', deliver)
+    assert run_round(config)['sent'] == 1
+    with core._connect(config) as conn:
+        row = conn.execute('SELECT * FROM deliveries').fetchone()
+        assert row['transport_started_at'] == 100
+        assert row['transport_finished_at'] == row['finished_at'] == 112
+    clock[0] = 200.0
+    def fail(*args, **kwargs):
+        clock[0] = 210.0
+        raise channels.DeliveryError('test_failure', uncertain=False)
+    monkeypatch.setattr(channels, 'deliver', fail)
+    assert run_round(config)['retry'] == 1
+    with core._connect(config) as conn:
+        row = conn.execute("SELECT * FROM deliveries WHERE status='retry'").fetchone()
+        assert row['transport_finished_at'] == 210
+        assert row['next_attempt'] == 210 + config['schedule']['retry_base_seconds']
+
+
 def batch(config, name, *events):
     path = Path(config['input']['batches_dir']) / f'{name}.jsonl'
     path.write_text(''.join(json.dumps(e) + '\n' for e in events), encoding='utf-8')

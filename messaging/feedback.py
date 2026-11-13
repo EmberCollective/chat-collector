@@ -63,7 +63,14 @@ def _until(value):
     return float(value)
 
 
-def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision=None, *, until=None, priority=None):
+def _enqueue(config, *args, **kwargs):
+    result = _persist(config, *args, **kwargs)
+    from automation.wakeup import notify
+    notify(config.get('_config_path'), 'feedback')
+    return result
+
+
+def _persist(config, target_id, event_id, task_id, action, actor, expected_revision=None, *, until=None, priority=None):
     if not config.get('feedback', {}).get('enabled', False):
         raise ValueError('feedback_disabled')
     target_id = _text(target_id, 'target_id')
@@ -164,6 +171,8 @@ def retry_feedback(config, request_id):
             raise ValueError('feedback_request_not_retryable')
         conn.execute("UPDATE feedback_requests SET status='queued',attempts=0,next_attempt=0,error=NULL,updated_at=? WHERE request_id=?",
                      (time.time(), request_id))
+    from automation.wakeup import notify
+    notify(config.get('_config_path'), 'feedback')
     return {'request_id': request_id, 'status': 'queued'}
 
 
@@ -250,4 +259,7 @@ def process_pending(config):
         counts = dict(conn.execute('SELECT status,count(*) FROM feedback_requests GROUP BY status'))
         result.update(retry=counts.get('retry', 0), failed=counts.get('failed', 0), conflict=counts.get('conflict', 0),
                       pending=sum(counts.get(state, 0) for state in ('queued', 'retry', 'applying')))
+    if result['applied']:
+        from automation.wakeup import notify
+        notify(config.get('_config_path'), 'messaging')
     return result

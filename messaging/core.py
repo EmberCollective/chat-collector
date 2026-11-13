@@ -50,6 +50,10 @@ def _connect(config, write=False):
         conn.executescript(SCHEMA)
         if 'package_hash' not in {row[1] for row in conn.execute('PRAGMA table_info(deliveries)')}:
             conn.execute("ALTER TABLE deliveries ADD COLUMN package_hash TEXT NOT NULL DEFAULT ''")
+        columns = {row[1] for row in conn.execute('PRAGMA table_info(deliveries)')}
+        for column in ('transport_started_at', 'transport_finished_at'):
+            if column not in columns:
+                conn.execute(f'ALTER TABLE deliveries ADD COLUMN {column} REAL')
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -403,6 +407,7 @@ def _queue(config, conn, tasks, local, packages, now):
 
 
 def run_round(config, *, now=None):
+    live_clock = now is None
     now = time.time() if now is None else float(now)
     with InstanceLock(config['storage']['state_file']), closing(_connect(config, True)) as conn:
         tasks, local, packages, imported = _sync(config, conn)
@@ -432,14 +437,15 @@ def run_round(config, *, now=None):
                                     (row['target_id'], row['target_hash'], row['task_id'])).fetchone()
             attempts = row['attempts'] + 1
             with conn:
-                conn.execute("UPDATE deliveries SET status='sending',attempts=? WHERE id=?", (attempts, row['id']))
+                conn.execute("UPDATE deliveries SET status='sending',attempts=?,transport_started_at=?,transport_finished_at=NULL WHERE id=?", (attempts, time.time(), row['id']))
             try:
                 receipt = deliver(target, json.loads(row['body']), config, previous=json.loads(previous['receipt']) if previous else None)
                 if not isinstance(receipt, dict):
                     raise ValueError('Invalid delivery receipt')
                 encoded = canonical(receipt)
                 with conn:
-                    conn.execute("UPDATE deliveries SET status='sent',finished_at=?,receipt=?,error=NULL WHERE id=?", (now, encoded, row['id']))
+                    finished = time.time()
+                    conn.execute("UPDATE deliveries SET status='sent',finished_at=?,transport_finished_at=?,receipt=?,error=NULL WHERE id=?", (finished if live_clock else now, finished, encoded, row['id']))
                 result['sent'] += 1
             except Exception as exc:
                 uncertain = not isinstance(exc, DeliveryError) or exc.uncertain
@@ -448,8 +454,9 @@ def run_round(config, *, now=None):
                 delay = min(config['schedule']['retry_base_seconds'] * 2 ** (attempts - 1), 86400)
                 partial = canonical(exc.receipt) if isinstance(exc, DeliveryError) and isinstance(exc.receipt, dict) else None
                 with conn:
-                    conn.execute('UPDATE deliveries SET status=?,error=?,next_attempt=?,receipt=COALESCE(?,receipt) WHERE id=?',
-                                 (delivery_status, error, now + delay, partial, row['id']))
+                    finished = time.time()
+                    conn.execute('UPDATE deliveries SET status=?,error=?,next_attempt=?,transport_finished_at=?,receipt=COALESCE(?,receipt) WHERE id=?',
+                                 (delivery_status, error, (finished if live_clock else now) + delay, finished, partial, row['id']))
                 result[delivery_status] += 1
         return result
 
