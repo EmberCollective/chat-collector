@@ -11,7 +11,7 @@ import pymupdf
 from docx import Document
 from PIL import Image
 
-from processor.attachments import AttachmentContext
+from providers.attachments import AttachmentContext
 
 
 def context(tmp_path, path, *, vision=False, settings=None, attachment=None):
@@ -36,7 +36,7 @@ def pdf(tmp_path, texts):
 
 
 def test_catalog_is_index_only_until_model_explicitly_reads(tmp_path, monkeypatch):
-    from processor import attachments
+    from providers import attachments
     path = pdf(tmp_path, ['Private document body'])
     def forbidden(*args):
         raise AssertionError('catalog must not invoke a content parser')
@@ -65,7 +65,7 @@ def test_pdf_all_pages_are_addressable_and_coverage_is_explicit(tmp_path):
 
 
 def test_search_finds_later_page_and_cache_is_reused(tmp_path, monkeypatch):
-    from processor import attachments
+    from providers import attachments
     path = pdf(tmp_path, ['one', 'two', 'three', 'deadline Friday'])
     reader = context(tmp_path, path)
     found = reader.read_attachment('f1', query='deadline')
@@ -200,7 +200,7 @@ def test_legacy_doc_uses_installed_libreoffice(tmp_path):
 @pytest.mark.parametrize('budget', ['time', 'memory'])
 def test_worker_budget_kills_only_its_process_tree(tmp_path, monkeypatch, budget):
     from types import SimpleNamespace
-    from processor import attachments
+    from providers import attachments
     killed = []
     class Process:
         pid = 99999

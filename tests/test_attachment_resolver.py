@@ -7,7 +7,7 @@ import pymupdf
 import pytest
 import tomlkit
 
-from processor.attachments import AttachmentContext
+from providers.attachments import AttachmentContext
 
 
 @pytest.fixture(params=['qq','wechat'])

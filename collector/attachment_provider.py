@@ -13,19 +13,16 @@ from collector.__main__ import InstanceLock
 from collector.store import digest
 
 
-class AttachmentResolver:
-    def __init__(self, config):
-        self.paths = config.get('attachments', {}).get('collector_configs', {})
+class CollectorAttachmentProvider:
+    def __init__(self, config_path, cache_dir):
+        self.path = config_path
         self.archives = {}
-        self.cache = Path(config.get('attachments', {}).get('cache_dir') or Path(config['storage']['state_file']).parent/'attachment-cache')/'resolved'
+        self.cache = Path(cache_dir)/'resolved'
 
-    def resolve(self, event, index):
+    def prepare_attachment(self, event, index):
         message = event['message']
         platform = message.get('platform')
-        path = self.paths.get(platform)
-        if not path:
-            raise ValueError('attachment_collector_not_configured')
-        config = load_config(path)
+        config = load_config(self.path)
         if config['platform'] != platform or str(config['source']['account_id']) != message.get('account_id'):
             raise ValueError('attachment_account_mismatch')
         if not config.get('attachments', {}).get('enabled', False):

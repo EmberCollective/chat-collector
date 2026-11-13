@@ -35,7 +35,7 @@ def project_identities(groups):
             if not any(p['id'] == message['sender_id'] for p in supplied):
                 supplied.append({'id':identifier})
             sender = next((p for p in supplied if p['id']==identifier), {})
-            senders[event['message_key']] = {'ref':ref,'label':sender.get('label') or sender.get('display_name') or '名称未获取'}
+            senders[event['message_key']] = {'ref':ref,'label':message.get('sender') or sender.get('label') or sender.get('display_name') or '名称未获取'}
             for person in supplied:
                 p_ref = person_ref(account_key,person['id'])
                 row = {k:person.get(k) for k in ('display_name','nickname','remark','group_nickname')}

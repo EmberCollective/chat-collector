@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from collector.__main__ import InstanceLock
 from collector.store import canonical, digest
+from contracts import validate_event as _validate_event
 
 
 SCHEMA = '''
@@ -91,6 +92,8 @@ def load_config(path):
     if not isinstance(collectors, dict) or set(collectors) - {'qq', 'wechat'} or any(not isinstance(p, str) or not p for p in collectors.values()):
         raise ValueError('attachments.collector_configs must map qq/wechat to local configuration files')
     attachments['collector_configs'] = {k: str((path.parent / p).resolve()) for k, p in collectors.items()}
+    from providers.registry import configure_providers
+    configure_providers(attachments, path.parent)
     roots = attachments.setdefault('archive_roots', ['../data/assets'])
     if not isinstance(roots, list) or any(not isinstance(p, str) or not p for p in roots):
         raise ValueError('attachments.archive_roots must be an array of paths')
@@ -174,29 +177,6 @@ def _connect(config, *, write=False):
     if not path.exists():
         return None
     return sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)
-
-
-def _validate_event(event):
-    if not isinstance(event, dict) or event.get('schema_version') != 1 or event.get('operation') != 'upsert':
-        raise ValueError('Unsupported collector event schema')
-    for key in ('event_id', 'message_key'):
-        if not isinstance(event.get(key), str) or not event[key]:
-            raise ValueError(f'Collector event lacks {key}')
-    if type(event.get('revision')) is not int or event['revision'] < 1:
-        raise ValueError('Collector revision must be a positive integer')
-    message = event.get('message')
-    if not isinstance(message, dict):
-        raise ValueError('Collector event lacks message')
-    for key in ('platform', 'account_id', 'conversation_id', 'message_id'):
-        if not isinstance(message.get(key), str) or not message[key]:
-            raise ValueError(f'Collector message lacks {key}')
-    if not isinstance(message.get('sender_id'), str):
-        raise ValueError('Collector sender_id must be text; empty means unknown')
-    if type(message.get('sent_at')) is not int or not isinstance(message.get('text'), str):
-        raise ValueError('Collector message needs a Unix timestamp and text')
-    if not isinstance(message.get('attachments', []), list) or not isinstance(event.get('matched_rules', []), list):
-        raise ValueError('Invalid collector attachments or matched_rules')
-    return event
 
 
 def _read_inputs(config, conn):
@@ -534,7 +514,9 @@ def _source(config, event):
             'sent_at_local': dt.datetime.fromtimestamp(message['sent_at'], ZoneInfo(config['context']['timezone'])).isoformat(),
             'collected_at': event.get('collected_at'), 'text': message['text'],
             'attachments': message.get('attachments', []), 'source': message.get('source', {}),
-            'identity': message.get('identity', {}),
+            'identity': message.get('identity', {}), 'sender': message.get('sender'),
+            'kind': message.get('kind'), 'mentions_all': message.get('mentions_all', False),
+            'context_notes': message.get('context_notes', []),
             'matched_rules': event.get('matched_rules', []), 'window': event.get('window')}
 
 
