@@ -21,6 +21,8 @@ QQ/微信消息读取与字段映射在 `providers/platforms/`；原 `collector.
 
 旧导入 `collector.filters`、`collector.store`、`collector.identities`、`collector.attachment_provider`、`processor.actions` 继续可用；新开发使用上表入口，不在兼容包装里新增业务。
 
+组合 CLI 和后台入口先独立采集，再加载 SQL；没有规则或 SQL 文件失效都不停止来源维护。`refresh_interval_seconds` 按来源的最近采集完成时间节流，和各筛选断点分开；规则恢复后，在采集等待期间也能消费已经发布但尚未筛选的窗口。显式重放仍强制采集，并更新实际采集时间。
+
 ## SQL 与消息契约
 
 ```python
