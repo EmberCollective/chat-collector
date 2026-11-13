@@ -20,6 +20,7 @@ from .config import JOBS
 
 
 APPLICATION_ID = 0x43434131
+SCHEMA_VERSION = 1
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS jobs(name TEXT PRIMARY KEY,state TEXT NOT NULL,attempts INTEGER DEFAULT 0,
  next_run REAL DEFAULT 0,last_start REAL,last_success REAL,error TEXT,active_error TEXT,result TEXT);
@@ -42,20 +43,28 @@ def _connect(config, *, write=False):
         conn = sqlite3.connect(path, timeout=10)
     else:
         conn = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=10)
-    owner = conn.execute('PRAGMA application_id').fetchone()[0]
-    if owner != APPLICATION_ID and (owner or conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()):
+    try:
+        owner = conn.execute('PRAGMA application_id').fetchone()[0]
+        if owner != APPLICATION_ID and (owner or conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()):
+            raise ValueError('Automation requires its own state database')
+        if write and conn.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
+            with InstanceLock(str(path) + '.schema', timeout=10):
+                if conn.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
+                    # Status polling must not wait for another task's metadata write.
+                    conn.execute('PRAGMA journal_mode=WAL')
+                    with conn:
+                        conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA)
+                        columns = {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}
+                        for column in ('wake_seq', 'wake_consumed'):
+                            if column not in columns:
+                                conn.execute(f'ALTER TABLE jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
+                        conn.executemany("INSERT OR IGNORE INTO jobs(name,state) VALUES(?,'idle')", [(name,) for name in JOBS])
+                        conn.execute('INSERT OR IGNORE INTO listener(id) VALUES(1)')
+                        conn.execute(f'PRAGMA application_id={APPLICATION_ID}')
+                        conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+    except BaseException:
         conn.close()
-        raise ValueError('Automation requires its own state database')
-    if write:
-        conn.execute(f'PRAGMA application_id={APPLICATION_ID}')
-        conn.executescript(SCHEMA)
-        columns = {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}
-        for column in ('wake_seq', 'wake_consumed'):
-            if column not in columns:
-                conn.execute(f'ALTER TABLE jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
-        with conn:
-            conn.executemany("INSERT OR IGNORE INTO jobs(name,state) VALUES(?,'idle')", [(name,) for name in JOBS])
-            conn.execute('INSERT OR IGNORE INTO listener(id) VALUES(1)')
+        raise
     conn.row_factory = sqlite3.Row
     return conn
 

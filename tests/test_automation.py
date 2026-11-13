@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -148,6 +149,38 @@ def test_diagnostics_explain_wrapped_failure_without_sql_or_exception_text(confi
     details = status(config)['service']['last_failure:wechat']
     assert [item['code'] for item in details['failures']] == ['RuntimeError', 'sqlite_error']
     assert 'PRIVATE_' not in json.dumps(status(config))
+
+
+def test_status_reads_last_commit_during_another_worker_write(config):
+    with closing(core._connect(config, write=True)) as writer:
+        assert writer.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
+        writer.execute('BEGIN EXCLUSIVE')
+        writer.execute("UPDATE jobs SET error='uncommitted' WHERE name='wechat'")
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(status, config)
+            try:
+                snapshot = future.result(timeout=2)
+                assert next(row for row in snapshot['jobs'] if row['name'] == 'wechat')['error'] is None
+            finally:
+                writer.rollback()
+
+
+def test_legacy_automation_migration_preserves_state_and_serializes_initializers(config):
+    path = config['storage']['state_file']
+    with sqlite3.connect(path) as conn:
+        conn.executescript(core.SCHEMA)
+        conn.execute(f'PRAGMA application_id={core.APPLICATION_ID}')
+        conn.execute("INSERT INTO jobs(name,state,attempts) VALUES('wechat','paused',3)")
+        conn.execute("INSERT INTO settings VALUES('retained','true')")
+    def initialize(_):
+        with closing(core._connect(config, write=True)) as conn:
+            return tuple(conn.execute("SELECT state,attempts FROM jobs WHERE name='wechat'").fetchone())
+    with ThreadPoolExecutor(8) as pool:
+        assert list(pool.map(initialize, range(16))) == [('paused', 3)] * 16
+    assert status(config)['service']['retained'] is True
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == core.SCHEMA_VERSION
+        assert conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
 
 
 def test_concurrent_requests_never_execute_same_job_twice(config):
