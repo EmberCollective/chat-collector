@@ -2,7 +2,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const node = (tag, text, cls) => {const el = document.createElement(tag); if (text != null) el.textContent = text; if (cls) el.className = cls; return el;};
   const byId = id => document.getElementById('ops-' + id);
-  const jobNames = {processor: '自动处理', messaging: '自动投递', feedback: '状态回写', listener: '飞书按钮监听'};
+  const jobNames = {wechat: '微信消息采集', qq: 'QQ 消息采集', processor: '待办生成（AI）', messaging: '消息投递', feedback: '待办状态回写', listener: '飞书按钮监听'};
   const kindNames = {feishu_app: '飞书应用（交互卡片）', feishu: '飞书群机器人', notion: 'Notion / Notion Calendar', webhook: '通用 Webhook'};
   const labels = {enabled: '启用', interval_seconds: '间隔（秒）', max_attempts: '失败尝试上限', backoff_seconds: '首次重试等待（秒）', max_backoff_seconds: '最长重试等待（秒）', retry_base_seconds: '重试等待基数（秒）', max_deliveries_per_round: '每轮最多投递数', timeout_seconds: '请求超时（秒）', app_id_env: '应用 ID 环境变量名', app_secret_env: '应用密钥环境变量名', recipient_id: '目标群 chat_id', receive_id_type: '目标类型', allowed_operator_ids: '可操作人员 open_id（每行一个）', snooze_seconds: '稍后提醒等待（秒）', upload_files: '上传本地附件', max_file_bytes: '附件上传上限（字节）', url_env: 'Webhook 地址环境变量名', secret_env: '签名密钥环境变量名（可空）', token_env: '访问令牌环境变量名', data_source_id: 'Notion 数据源 ID', mode: '投递模式', purpose: '用途说明', title: '标题', task_id: '待办编号', priority: '优先级', status: '状态', date: '日期', instructions: '行动说明', files: '附件'};
   let config = null, dirty = false, busy = false, polling = false;
@@ -50,7 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function jobFields(parent, name) {
     const settings = config.automation.jobs[name];
-    parent.append(node('h4', jobNames[name])); const main = grid(parent);
+    parent = details(parent, jobNames[name]);
+    const descriptions = {wechat: '增量刷新微信数据库，按已注册 SQL 规则筛选并输出消息。', qq: '增量刷新 QQ 数据库，按已注册 SQL 规则筛选并输出消息。', processor: '读取新增候选消息，由 Pi 调用模型整理待办；没有新增内容时不调用模型。', messaging: '根据优先级、截止时间和通知计划，将待办交给启用的渠道。', feedback: '把卡片中的完成、改级等操作写回待办数据库。'};
+    parent.append(node('p', descriptions[name], 'muted')); const main = grid(parent);
     field(main, settings, 'enabled', 'boolean', {label: '定时运行' + jobNames[name]}); field(main, settings, 'interval_seconds', 'integer');
     const advanced = grid(details(parent, '失败重试设置'));
     for (const key of ['max_attempts', 'backoff_seconds', 'max_backoff_seconds']) field(advanced, settings, key, 'integer', {max: key === 'max_attempts' ? 20 : 86400});
@@ -94,14 +96,12 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const id of ['processor-fields', 'delivery-fields', 'targets']) byId(id).replaceChildren();
     const processor = byId('processor-fields'), delivery = byId('delivery-fields');
     field(grid(processor), config.automation, 'enabled', 'boolean', {label: '启用自动运行服务'});
-    jobFields(processor, 'processor');
+    for (const name of ['wechat', 'qq', 'processor', 'messaging', 'feedback']) jobFields(processor, name);
     const globals = grid(delivery);
     field(globals, config.messaging, 'enabled', 'boolean', {label: '允许外部投递'});
     field(globals, config.messaging, 'feedback_enabled', 'boolean', {label: '允许操作结果回写处理层'});
-    jobFields(delivery, 'messaging'); jobFields(delivery, 'feedback');
-    field(grid(delivery), config.automation.listener, 'enabled', 'boolean', {label: '启用飞书按钮监听（长连接）'});
-    delivery.append(node('p', '保存监听开关后，启动或重新启动后台服务生效。', 'muted'));
-    const listenerActions = node('div', null, 'actions'); delivery.append(listenerActions);
+    field(grid(processor), config.automation.listener, 'enabled', 'boolean', {label: '启用飞书按钮监听（长连接）'});
+    const listenerActions = node('div', null, 'actions'); processor.append(listenerActions);
     button(listenerActions, '恢复按钮监听重试', () => operate('/jobs/listener/resume', '已恢复按钮监听。'));
     if (config.messaging.deadline_reminders) {
       const section = details(delivery, '按截止日期提醒（提前分钟；0 为截止时）');
@@ -127,14 +127,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const reminders = grid(details(delivery, '无截止时间时的间隔提醒（秒；0 表示不重复）'));
     for (const key of ['P0', 'P1', 'P2', 'P3', 'P4']) field(reminders, config.messaging.reminders, key, 'integer', {min: 0, max: 31536000});
-    const retry = details(delivery, '投递与状态回写的重试上限');
-    retry.append(node('p', '自动运行间隔控制上方服务；以下间隔也供独立运行消息层时使用。', 'muted'));
+    const retry = details(processor, '单条投递与状态回写的重试上限');
+    retry.append(node('p', '以上设置控制整轮任务失败重试；以下设置控制单条消息或回写请求的失败重试。', 'muted'));
     for (const section of ['schedule', 'feedback']) {
       retry.append(node('h4', section === 'schedule' ? '消息投递' : '操作回写'));
       const area = grid(retry);
-      for (const key of Object.keys(config.messaging[section])) field(area, config.messaging[section], key, 'integer', {max: key === 'max_attempts' ? 20 : key === 'max_deliveries_per_round' ? 1000 : 86400});
+      for (const key of Object.keys(config.messaging[section]).filter(key => key !== 'interval_seconds')) field(area, config.messaging[section], key, 'integer', {max: key === 'max_attempts' ? 20 : key === 'max_deliveries_per_round' ? 1000 : 86400});
     }
-    const alerts = grid(details(delivery, '运行失败通知'));
+    const alerts = grid(details(processor, '运行失败通知'));
     field(alerts, config.automation.alerts, 'enabled', 'boolean', {label: '启用运行失败通知'});
     field(alerts, config.automation.alerts, 'target_id', 'string', {label: '接收通知的通道编号'});
     field(alerts, config.automation.alerts, 'cooldown_seconds', 'integer', {label: '重复故障通知间隔（秒）', max: 2592000});
@@ -194,8 +194,9 @@ document.addEventListener('DOMContentLoaded', () => {
     byId('service-status').textContent = `后台服务：${active ? states[service.state] || '运行中' : states[service.state] || service.state || '未运行'}${service.pid ? ' · PID ' + service.pid : ''}${service.config_changed ? ' · 配置已变化，请重新启动' : ''}`;
     const jobs = byId('jobs'); jobs.replaceChildren();
     const checks = snapshot.checks || {};
-    const warnings = {'Disable matching console schedules before enabling automation collectors.': '启用后台采集时，请关闭采集台对应的定时任务，避免重复调度。', 'Configuration changes require restarting automation; check performs no live API validation.': '配置变更需重新启动后台服务；配置检查不验证外部服务连接。'};
-    if (checks.warnings?.length) jobs.append(node('p', checks.warnings.map(text => warnings[text] || text).join(' '), 'scope'));
+    const warnings = {'Configuration changes require restarting automation; check performs no live API validation.': '保存设置会重新启动已运行的后台服务；配置检查不验证外部服务连接。'};
+    const visibleWarnings = (checks.warnings || []).filter(text => text !== 'Disable matching console schedules before enabling automation collectors.');
+    if (visibleWarnings.length) jobs.append(node('p', visibleWarnings.map(text => warnings[text] || text).join(' '), 'scope'));
     const entries = [...(snapshot.automation?.jobs || [])];
     if (snapshot.automation?.listener) entries.push({...snapshot.automation.listener, name: 'listener', enabled: checks.jobs?.listener?.enabled});
     table(jobs, ['任务', '状态', '失败尝试次数', '下次运行', '上次成功', '最近故障 / 配置检查'], entries.map(job => {

@@ -37,7 +37,7 @@ class AlertSettings(StrictModel):
 
 class AutomationSettings(StrictModel):
     enabled: bool
-    jobs: dict[Literal['processor', 'messaging', 'feedback'], JobSettings]
+    jobs: dict[Literal['wechat', 'qq', 'processor', 'messaging', 'feedback'], JobSettings]
     listener: ListenerSettings
     alerts: AlertSettings
 
@@ -102,7 +102,7 @@ def register_operations_routes(app, bridge, authenticate):
         msg = read_settings(msg_path)
         auto = {'enabled': cfg['enabled'],
                 'jobs': {name: {key: cfg['jobs'][name][key] for key in JobSettings.model_fields}
-                         for name in ('processor', 'messaging', 'feedback')},
+                         for name in ('wechat', 'qq', 'processor', 'messaging', 'feedback')},
                 'listener': {'enabled': cfg['listener']['enabled']},
                 'alerts': {key: cfg['alerts'][key] for key in AlertSettings.model_fields}}
         return {'version': {'automation': _hash(raw), 'messaging': msg.pop('version')},
@@ -184,7 +184,7 @@ def register_operations_routes(app, bridge, authenticate):
             return getattr(control, action)(load_config(paths()[0]))
 
     @app.post('/api/operations/jobs/{name}/{action}', dependencies=[Depends(authenticate)])
-    def job(name: Literal['processor', 'messaging', 'feedback', 'listener'], action: Literal['once', 'resume']):
+    def job(name: Literal['wechat', 'qq', 'processor', 'messaging', 'feedback', 'listener'], action: Literal['once', 'resume']):
         from automation import load_config, resume, control
         with errors():
             cfg = load_config(paths()[0])

@@ -187,19 +187,19 @@ def test_config_backup_revision_validation_and_busy_guard(console):
         assert client.patch(url,json=patch).status_code==409
 
 
-def test_scheduler_resume_pause_and_window_validation(console):
+def test_console_has_no_timer_and_rejects_legacy_schedule(console):
     client,app,root,now=console
-    assert not client.get('/api/status').json()['modules']['qq']['scheduler_enabled']
+    assert not hasattr(app.state.jobs, 'scheduler')
+    assert not hasattr(app.state.jobs, 'enabled')
+    assert 'scheduler_enabled' not in client.get('/api/status').json()['modules']['qq']
     assert client.post('/api/modules/qq/preview',json={'start':now,'end':now-1}).status_code==422
     assert client.post('/api/modules/qq/preview',json={'start':0,'end':8*86400}).status_code==422
-    client.post('/api/modules/qq/schedule',json={'enabled':True})
-    until=time.monotonic()+5
-    while not app.state.jobs.jobs and time.monotonic()<until:time.sleep(.1)
-    identifier=next(iter(app.state.jobs.jobs))
-    client.post('/api/modules/qq/schedule',json={'enabled':False})
-    wait_job(client,identifier)
-    assert app.state.jobs.jobs[identifier]['origin']=='schedule'
-    assert not client.get('/api/status').json()['modules']['qq']['scheduler_enabled']
+    for enabled in (True, False):
+        assert client.post('/api/modules/qq/schedule',json={'enabled':enabled}).status_code==410
+    assert not app.state.jobs.jobs
+    job=client.post('/api/modules/qq/collect').json()
+    assert wait_job(client,job['id'])['status']=='succeeded'
+    assert app.state.jobs.jobs[job['id']]['origin']=='manual'
 
 
 @pytest.mark.parametrize('module', ['wechat', 'qq'])
@@ -282,7 +282,7 @@ def test_assets_require_message_reference_and_archive_root(console):
     assert client.get('/api/modules/wechat/messages').json()['messages'][0]['message']['message_id']=='file1'
 
 
-def test_recorded_external_runner_blocks_double_schedule_and_ignores_reused_pid(console,monkeypatch):
+def test_recorded_external_runner_ignores_reused_pid(console,monkeypatch):
     import datetime
     import psutil
     client,app,root,now=console
@@ -299,7 +299,7 @@ def test_recorded_external_runner_blocks_double_schedule_and_ignores_reused_pid(
     process=Process()
     monkeypatch.setattr(psutil,'Process',lambda pid:process)
     assert bridge.external_runner()['verified'] is True
-    assert client.post('/api/modules/qq/schedule',json={'enabled':True}).status_code==409
+    assert client.post('/api/modules/qq/schedule',json={'enabled':True}).status_code==410
     process.created=now+100
     assert bridge.external_runner() is None
 

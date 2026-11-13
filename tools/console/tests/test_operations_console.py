@@ -125,7 +125,10 @@ def test_controls_are_authenticated_explicit_and_delegate_to_core(console, monke
     assert client.post('/api/operations/jobs/processor/once').json()['state'] == 'queued'
     assert client.post('/api/operations/targets/test/test').json()['synthetic']
     assert calls == ['start','processor','test']
-    assert client.post('/api/operations/jobs/wechat/once').status_code == 422
+    assert client.post('/api/operations/jobs/wechat/once').json()['state'] == 'queued'
+    assert client.post('/api/operations/jobs/qq/once').json()['state'] == 'queued'
+    assert calls[-2:] == ['wechat', 'qq']
+    assert client.post('/api/operations/jobs/arbitrary/once').status_code == 422
     assert client.post('/api/operations/service/arbitrary').status_code == 422
 
 
@@ -154,3 +157,22 @@ def test_processor_panel_recognizes_automatic_work_without_fake_console_job(cons
     result = client.get('/api/processor/status').json()
     assert result['automation_running'] is True
     assert result['running_job'] is None
+
+
+def test_collector_schedules_are_saved_only_in_automation(console, monkeypatch):
+    client, root, path = configured(console, monkeypatch)
+    original = {name: file.read_bytes() for name, file in console[1].state.bridge.paths.items()}
+    body = client.get('/api/operations/config').json()
+    assert set(body['automation']['jobs']) == {'wechat', 'qq', 'processor', 'messaging', 'feedback'}
+    body['automation']['enabled'] = True
+    for name, interval in [('wechat', 120), ('qq', 300)]:
+        body['automation']['jobs'][name].update(enabled=True, interval_seconds=interval, max_attempts=4)
+    result = client.put('/api/operations/config', json=body)
+    assert result.status_code == 200, result.text
+    from automation import load_config
+    cfg = load_config(path)
+    assert cfg['jobs']['wechat']['interval_seconds'] == 120
+    assert cfg['jobs']['qq']['interval_seconds'] == 300
+    assert cfg['jobs']['qq']['max_attempts'] == 4
+    assert original == {name: file.read_bytes() for name, file in console[1].state.bridge.paths.items()}
+    assert not hasattr(console[1].state.jobs, 'scheduler')

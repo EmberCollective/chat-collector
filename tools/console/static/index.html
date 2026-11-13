@@ -6,7 +6,15 @@
 <main>
 <div id="notice" role="status" aria-live="polite" hidden></div>
 <section class="module-grid" aria-label="模块状态" id="modules"></section>
-<p class="scope">本页的暂停只控制本控制台定时任务；独立运行的命令行采集不受影响。暂停后，正在执行的任务会继续完成。</p>
+<p class="scope">以上为手动采集入口；自动采集与后续处理统一在下方“自动任务”中配置。</p>
+<section class="workspace" id="automation-panel" aria-labelledby="automation-title"><div class="workspace-title"><div><span class="eyebrow">AUTOMATION</span><h2 id="automation-title">自动任务</h2><p class="muted">采集 → 筛选 → AI 整理待办 → 消息投递 → 操作回写。所有定时任务由独立后台统一运行。</p></div></div>
+<p class="scope">在此统一配置各任务的启用状态、轮后等待间隔、失败重试和报警。调试台没有定时器；关闭网页或调试台不影响后台任务。调试时间范围不影响正式自动处理。</p>
+<p id="ops-service-status" role="status">正在读取后台服务状态…</p>
+<div class="scope"><strong>开机自启</strong><p>当前用户登录 Windows 后，隐藏启动已配置的采集、处理、消息服务及调试台；不会自动打开浏览器。关闭此项不停止当前服务。</p><p id="ops-startup-status" role="status">正在读取启动项…</p><div class="actions"><button id="ops-startup-enable" class="secondary" data-ops-action="true">开启开机自启</button><button id="ops-startup-disable" class="secondary" data-ops-action="true">关闭开机自启</button></div></div>
+<div class="actions"><button id="ops-start" data-ops-action="true">启动后台服务</button><button id="ops-stop" class="secondary" data-ops-action="true">停止后台服务</button><button id="ops-restart" class="secondary" data-ops-action="true">重新启动</button><button id="ops-refresh" class="secondary">刷新运行状态</button></div>
+<p id="ops-status-error" role="status"></p><div id="ops-jobs"></div><div id="ops-processor-fields"></div>
+<div class="actions"><button id="ops-save" data-ops-action="true">保存运行与通道设置</button><button id="ops-reload" class="secondary" data-ops-action="true">重新加载设置</button></div><p id="ops-notice" role="status" aria-live="polite"></p>
+</section>
 <section class="workspace">
 <div class="workspace-title"><div><span class="eyebrow">WORKSPACE</span><h2 id="workspace-title">微信 · 调试工作区</h2></div><label>当前模块<select id="module"><option value="wechat">微信</option><option value="qq">QQ</option></select></label></div>
 <div class="tabs" role="tablist" aria-label="调试功能"><button role="tab" id="tab-query" aria-selected="true" aria-controls="query" data-tab="query">筛选与重放</button><button role="tab" id="tab-messages" aria-selected="false" aria-controls="messages" data-tab="messages">消息与附件</button><button role="tab" id="tab-settings" aria-selected="false" aria-controls="settings" data-tab="settings">配置</button></div>
@@ -23,7 +31,7 @@
 <div id="preview-output" class="output" aria-live="polite"><p class="empty">选择时间和条件后，先预览，再决定是否正式执行。</p></div>
 </section>
 <section id="messages" role="tabpanel" aria-labelledby="tab-messages" hidden><div class="actions search"><label>消息关键词<input id="message-keyword" placeholder="在已采集正文中搜索"></label><label>会话 / 群 ID<input id="message-conversation" placeholder="精确匹配，可留空"></label><button id="load-messages">查看最近 20 条</button></div><p class="muted">这里显示已采集消息的最新修订；未采集的数据请到“筛选与重放”查询快照。</p><div id="message-output"><p class="empty">点击“查看最近 20 条”读取消息。</p></div></section>
-<section id="settings" role="tabpanel" aria-labelledby="tab-settings" hidden><div class="settings-header"><div><h3>模块配置</h3><p id="config-file" class="muted path"></p></div><button id="reload-config" class="secondary">重新加载</button></div><p class="scope">保存后影响后续轮次，不回看历史。更改存储目录不会移动已有数据；账号和状态库在此只读。</p><p class="scope" id="processing-help">扫描间隔是每轮结束后的等待时间。数据库刷新间隔由你填写，0 表示每轮；未到刷新时间会暂缓整轮，不推进消息断点，手动重放立即刷新。轻量只保留附件元数据；标准归档本地文件、微信密文并复用可读图片缓存；完整额外尝试微信图片解密与转换。三档均保留全部匹配消息。关闭“保存附件”时不执行归档或解码。降低强度后重放可能使最新修订只剩元数据；历史批次和已存文件仍保留，需用完整档重放补齐。</p><div id="config-fields" class="settings-grid"></div><div class="actions"><button id="save-config">校验并保存配置…</button><span class="muted">同时保存“筛选与重放”中的条件。旧配置自动备份。</span></div><details><summary>查看完整配置（不包含密钥值）</summary><pre id="raw-config"></pre></details></section>
+<section id="settings" role="tabpanel" aria-labelledby="tab-settings" hidden><div class="settings-header"><div><h3>模块配置</h3><p id="config-file" class="muted path"></p></div><button id="reload-config" class="secondary">重新加载</button></div><p class="scope">保存后影响后续轮次，不回看历史。更改存储目录不会移动已有数据；账号和状态库在此只读。</p><p class="scope" id="processing-help">采集间隔请在“自动任务”中设置。数据库刷新间隔由你填写，0 表示每轮；未到刷新时间会暂缓整轮，不推进消息断点，手动重放立即刷新。轻量只保留附件元数据；标准归档本地文件、微信密文并复用可读图片缓存；完整额外尝试微信图片解密与转换。三档均保留全部匹配消息。关闭“保存附件”时不执行归档或解码。降低强度后重放可能使最新修订只剩元数据；历史批次和已存文件仍保留，需用完整档重放补齐。</p><div id="config-fields" class="settings-grid"></div><div class="actions"><button id="save-config">校验并保存配置…</button><span class="muted">同时保存“筛选与重放”中的条件。旧配置自动备份。</span></div><details><summary>查看完整配置（不包含密钥值）</summary><pre id="raw-config"></pre></details></section>
 </section>
 <section class="workspace processor" aria-labelledby="processor-title">
 <div class="workspace-title"><div><span class="eyebrow">PROCESSING / 02</span><h2 id="processor-title">从聊天整理待办</h2><p class="muted">先预览上下文，再按自己的规则提取。每条待办保留来源证据。</p></div><span id="processor-state" class="pill warn">正在读取</span></div>
@@ -31,16 +39,9 @@
 <div class="settings-grid"><label for="processor-preview-start">调试开始时间（含）<input id="processor-preview-start" type="datetime-local" step="1"></label><label for="processor-preview-end">调试结束时间（不含）<input id="processor-preview-end" type="datetime-local" step="1"></label></div>
 <p id="processor-preview-scope" class="scope">默认增量：起止时间留空，沿用已保存的处理起点。手动时间用于预览和调试处理（最多 7 天，浏览器本地时间）；调试结果独立保存，不改变默认值。</p>
 <div class="actions"><button id="processor-preview">预览待处理上下文</button><button id="processor-preview-reset" class="secondary">恢复默认增量</button><button id="processor-run" class="secondary" disabled>执行一轮处理…</button><button id="processor-reload" class="secondary">刷新状态与待办</button></div>
-<p class="scope">预览仅在本机读取。执行处理会把聊天片段和规则发送给你配置的模型服务，并由 Pi Agent 按需读取附件文字或图片；可手动执行，也可在下方启用自动处理。</p>
-<details id="ops-processing"><summary>自动处理 · 后台运行</summary>
-<p class="scope">自动处理读取正式增量消息；上方调试时间不影响自动运行。保存运行设置后，启动后台服务即可持续运行，关闭本页面不停止服务。</p>
-<p id="ops-service-status" role="status">正在读取后台服务状态…</p>
-<div class="scope"><strong>开机自启</strong><p>当前用户登录 Windows 后，隐藏启动已配置的采集、处理、消息服务及调试台；不会自动打开浏览器。关闭此项不停止当前服务。</p><p id="ops-startup-status" role="status">正在读取启动项…</p><div class="actions"><button id="ops-startup-enable" class="secondary" data-ops-action="true">开启开机自启</button><button id="ops-startup-disable" class="secondary" data-ops-action="true">关闭开机自启</button></div></div>
-<div class="actions"><button id="ops-start" data-ops-action="true">启动后台服务</button><button id="ops-stop" class="secondary" data-ops-action="true">停止后台服务</button><button id="ops-restart" class="secondary" data-ops-action="true">重新启动</button><button id="ops-refresh" class="secondary">刷新运行状态</button></div>
-<p id="ops-status-error" role="status"></p><div id="ops-jobs"></div><div id="ops-processor-fields"></div>
-<div class="actions"><button id="ops-save" data-ops-action="true">保存运行与通道设置</button><button id="ops-reload" class="secondary" data-ops-action="true">重新加载设置</button></div><p id="ops-notice" role="status" aria-live="polite"></p>
-</details>
-<details id="processor-settings"><summary>模型连接与上下文设置</summary><p id="processor-config-file" class="muted path"></p><div id="processor-config-fields" class="settings-grid"></div><p class="scope">单会话字符预算由你设置。自动合批保留群聊/会话边界，超过初始批次预算时优先按会话拆分；关联片段不会按条数硬切。单个关联片段过大时明确报错，请调高预算或检查原消息，不会静默截断。</p><p id="processor-key-file" class="muted path"></p><p class="scope">这里只填写密钥环境变量的名称，不填写密钥；也支持项目本地 .env 文件。也可在提示的本机密钥文件中保存密钥原文，已有环境变量优先。地址与模型留空时可以预览，但不能执行处理；保存间隔只供独立命令行定时处理使用。</p><div class="actions"><button id="processor-save-config">保存处理配置</button><button id="processor-load-config" class="secondary">重新加载配置</button></div></details>
+<p class="scope">预览仅在本机读取。执行处理会把聊天片段和规则发送给你配置的模型服务，并由 Pi Agent 按需读取附件文字或图片；可手动执行，也可在“自动任务”区域启用待办生成。</p>
+
+<details id="processor-settings"><summary>模型连接与上下文设置</summary><p id="processor-config-file" class="muted path"></p><div id="processor-config-fields" class="settings-grid"></div><p class="scope">单会话字符预算由你设置。自动合批保留群聊/会话边界，超过初始批次预算时优先按会话拆分；关联片段不会按条数硬切。单个关联片段过大时明确报错，请调高预算或检查原消息，不会静默截断。</p><p id="processor-key-file" class="muted path"></p><p class="scope">这里只填写密钥环境变量的名称，不填写密钥；也支持项目本地 .env 文件。也可在提示的本机密钥文件中保存密钥原文，已有环境变量优先。地址与模型留空时可以预览，但不能执行处理；自动处理间隔统一在“自动任务”中设置。</p><div class="actions"><button id="processor-save-config">保存处理配置</button><button id="processor-load-config" class="secondary">重新加载配置</button></div></details>
 <details id="processor-rules"><summary>编辑处理规则 · Markdown</summary><p id="processor-rules-file" class="muted path"></p><label for="processor-rules-text">规则正文</label><textarea id="processor-rules-text" rows="14" spellcheck="false" maxlength="1048576"></textarea><div class="actions"><button id="processor-save-rules">保存规则并备份</button><button id="processor-load-rules" class="secondary">重新加载规则</button></div><p class="scope">只修改配置指定的本地文件。保存时校验版本；冲突不会覆盖你的编辑内容。规则改变后，下一轮按新规则重新处理相关上下文。</p></details>
 <div class="processor-results"><section aria-labelledby="processor-context-title"><h3 id="processor-context-title">上下文预览</h3><div id="processor-preview-output"><p class="empty">预览会展示最多 5 批消息，不调用模型，也不推进处理状态。</p></div></section><section aria-labelledby="processor-tasks-title"><div id="processor-debug-output"></div><h3 id="processor-tasks-title">待办结果</h3><div id="processor-review-output"></div><div id="processor-tasks"><p class="empty">尚未读取处理结果。</p></div></section></div>
 </section>
@@ -50,7 +51,7 @@
 <div class="actions"><button id="messaging-preview">预览行动与材料</button><button id="messaging-sync" class="secondary">导入并保存本地材料</button></div>
 <details id="ops-delivery"><summary>通道与自动投递</summary>
 <p class="scope">先配置并保存通道，再选择自动投递与提醒频率。此处只填写本机 .env 中的变量名，不填写密钥值。通道编号与类型创建后不更改，可通过取消启用停用。</p>
-<p class="muted">后台按钮监听默认连接 feishu-assistant 所属应用，同一应用的其他群可共用监听；不同应用需独立启动监听程序。</p>
+<p class="muted">飞书按钮监听在“自动任务”中配置；同一应用的多个群共用连接，自动监听只支持一个应用。</p>
 <div id="ops-delivery-fields"></div><h3>投递通道</h3><div id="ops-targets"></div>
 <div class="settings-grid"><label>新通道编号<input id="ops-new-id" maxlength="100" placeholder="例如 notion-tasks"></label><label>通道类型<select id="ops-new-kind"></select></label></div>
 <div class="actions"><button id="ops-add-target" class="secondary" data-ops-action="true">添加通道</button><button id="ops-delivery-save" data-ops-action="true">保存运行与通道设置</button><button id="ops-delivery-reload" class="secondary" data-ops-action="true">重新加载设置</button></div>

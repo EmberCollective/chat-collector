@@ -21,7 +21,6 @@ const processorFields = [
   ['context','max_messages','辅助消息条数软限（不切断关联片段）','number'],
   ['context','history_messages','每段附带的历史消息数','number'],
   ['context','timezone','解释时间时使用的时区','text'],
-  ['schedule','interval_seconds','独立处理程序轮后等待（秒）','number'],
   ['source_descriptions','wechat','微信本地来源描述','textarea'],
   ['source_descriptions','qq','QQ 本地来源描述','textarea']
 ];
