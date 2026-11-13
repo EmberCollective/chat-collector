@@ -17,6 +17,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS seen(message_key TEXT PRIMARY KEY, payload_hash TEXT NOT NULL,
                 revision INTEGER NOT NULL, rules_hash TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL, exported INTEGER NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS outbox_event_id ON outbox(json_extract(body,'$.event_id'));
         ''')
         identity = canonical([platform, str(account)])
         stored = self.get('identity')
@@ -66,11 +67,22 @@ class Store:
                             return [stable_profile(v) for v in value]
                         return value
                     semantic['identity'] = stable_profile(semantic['identity'])
+                legacy_hash = digest(semantic)
+                continuity = message.get('source', {}).get('selection_context')
+                if continuity is not None:
+                    semantic['source'] = {'selection_context': continuity}
                 payload_hash = digest(semantic)
                 previous = self.db.execute('SELECT payload_hash,revision,rules_hash FROM seen WHERE message_key=?', (message_key,)).fetchone()
                 matched += 1
                 if previous and previous[0] == payload_hash and previous[2] == rules_hash:
                     continue
+                if previous and previous[0] == legacy_hash and previous[2] == rules_hash:
+                    old = self.db.execute("SELECT body FROM outbox WHERE json_extract(body,'$.event_id')=?",
+                                          (digest([message_key, previous[1]]),)).fetchone()
+                    if old and json.loads(old[0])['message'].get('source', {}).get('selection_context') == continuity:
+                        # Adopt the new digest without republishing unchanged pre-upgrade events.
+                        self.db.execute('UPDATE seen SET payload_hash=? WHERE message_key=?', (payload_hash, message_key))
+                        continue
                 revision = previous[1] + 1 if previous else 1
                 event = {'schema_version': 1, 'event_id': digest([message_key, revision]),
                          'message_key': message_key, 'revision': revision, 'operation': 'upsert',

@@ -1,4 +1,5 @@
 import ast
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -52,6 +53,41 @@ def test_selection_can_replay_without_collecting(config, monkeypatch):
     assert selection.run_round(config, 100, 111)['duplicates'] == 1
     with sqlite3.connect(config['storage']['state_file']) as db:
         assert db.execute("SELECT value FROM settings WHERE key='window_end'").fetchone() is None
+
+
+def test_replay_publishes_changed_continuity_after_an_unselected_late_row(config):
+    register(config, 'keyword.sql', keyword='plain')
+    folder = Path(config['source']['decrypted_dir'])
+    if config['platform'] == 'qq':
+        path, table, column = folder/'nt_msg.db', 'group_msg_table', '40001'
+    else:
+        path, column = folder/'message_0.db', 'local_id'
+        with closing(sqlite3.connect(path)) as db:
+            table = next(row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE name LIKE 'Msg_%'")
+                         if db.execute(f'SELECT count(*) FROM "{row[0]}" WHERE local_id=3').fetchone()[0])
+    with closing(sqlite3.connect(path)) as db, db:
+        late = db.execute(f'SELECT * FROM "{table}" WHERE "{column}"=3').fetchone()
+        db.execute(f'DELETE FROM "{table}" WHERE "{column}"=3')
+    assert selection.run_round(config, 100, 102)['emitted'] == 2
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(f'INSERT INTO "{table}" VALUES({",".join("?" for _ in late)})', late)
+    replay = selection.run_round(config, 100, 102)
+    assert replay['emitted'] == replay['duplicates'] == 1
+    events = [json.loads(line) for batch in Path(config['storage']['output_dir']).glob('*.jsonl')
+              for line in batch.read_text(encoding='utf-8').splitlines()]
+    revisions = sorted((event for event in events if int(event['message']['source']['local_id']) == 4),
+                       key=lambda event: event['revision'])
+    assert [event['revision'] for event in revisions] == [1, 2]
+    assert revisions[0]['message']['source']['selection_context'] != revisions[1]['message']['source']['selection_context']
+    from processor.core import _sql_groups
+    latest = {event['message_key']: event for event in sorted(events, key=lambda event: event['revision'])}
+    processor = dict(input={'start_at': 0}, context={'max_messages': 20, 'max_conversation_chars': 10000},
+                     source_descriptions={}, model={'base_url': '', 'model': 'fake', 'vision': False})
+    first = events[0]['message']
+    groups = _sql_groups(tuple(first[key] for key in ('platform', 'account_id', 'conversation_id')),
+                         list(latest.values()), processor, {'sha256': 'fixture'})
+    assert len(groups) == 1 and [len(segment) for segment in groups[0]['segments']] == [1, 1]
+    assert selection.run_round(config, 100, 102)['emitted'] == 0
 
 
 def test_publication_failure_recovers_committed_window_without_query(config, monkeypatch):
