@@ -64,3 +64,17 @@ def test_publication_failure_recovers_committed_window_without_query(config, mon
     assert result['status'] == 'no_new_time_window'
     assert len(result['batches']) == 1
     assert json.loads(Path(result['batches'][0]).read_text(encoding='utf-8')) == json.loads(before)
+
+
+def test_archive_enrichment_rejects_changed_source_before_publication(config, monkeypatch):
+    from collector.assets import AttachmentArchive
+    register(config, 'files.sql')
+    def enrich(self, message):
+        (Path(config['source']['decrypted_dir'])/'contact.db').write_bytes(b'external modification')
+        return message
+    monkeypatch.setattr(AttachmentArchive, 'enrich', enrich)
+    with pytest.raises(RuntimeError, match='changed'):
+        selection.run_round(config, 100, 111)
+    with sqlite3.connect(config['storage']['state_file']) as db:
+        assert db.execute('SELECT count(*) FROM outbox').fetchone()[0] == 0
+        assert db.execute("SELECT value FROM settings WHERE key='window_end'").fetchone() is None

@@ -140,5 +140,8 @@ def _message_key(message):
 def prepare_selected(config, messages):
     """Apply configured local archive policy only after every SQL rule succeeds."""
     from collector.assets import AttachmentArchive
+    from collector.service import source_snapshot
+    messages = list(messages)
     archive = AttachmentArchive(config, config['platform'], config['source']['account_id'])
-    return (archive.enrich(message) for message in messages)
+    with source_snapshot(config):
+        return [archive.enrich(message) for message in messages]

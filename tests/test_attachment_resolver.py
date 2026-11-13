@@ -156,7 +156,7 @@ def test_on_demand_read_waits_for_active_collector(setup):
     import threading
     from collector.__main__ import InstanceLock
     config,event,path,config_path,scans=setup
-    lock=InstanceLock(config_path.parent/'collector.db')
+    lock=InstanceLock(config_path.parent/'plain'/'.collection')
     lock.__enter__()
     release=threading.Timer(.15,lock.__exit__)
     release.start()

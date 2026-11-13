@@ -9,7 +9,7 @@ from pathlib import Path
 
 from collector.assets import AttachmentArchive
 from collector.config import load_config
-from common.locking import InstanceLock
+from collector.service import source_snapshot
 from common.codec import digest
 
 
@@ -47,7 +47,7 @@ class CollectorAttachmentProvider:
         if platform not in self.archives:
             self.archives[platform] = AttachmentArchive(config, platform, message['account_id'])
         archive = self.archives[platform]
-        with InstanceLock(config['storage']['state_file'], timeout=45):
+        with source_snapshot(config):
             # Prefer the fresh row's attachment paths, but only for the same message and asset.
             refreshed = original
             adapter = importlib.import_module('collector.adapters.' + platform)
