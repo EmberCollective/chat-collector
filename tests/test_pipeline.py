@@ -69,6 +69,29 @@ def test_legacy_state_migrates_without_rewriting_old_events(tmp_path):
         store.close()
 
 
+def test_continuity_digest_upgrade_does_not_republish_unchanged_events(tmp_path):
+    from common.codec import digest
+    record = message()
+    record['source']['selection_context'] = {'previous_message_key': 'before', 'previous_known': True}
+    path = tmp_path/'legacy.db'
+    store = Store(path, 'wechat', 'account')
+    try:
+        store.ingest([record], 0, 200, 'now')
+        old = store.db.execute('SELECT body FROM outbox').fetchone()[0]
+        # The former version excluded all source facts from its digest.
+        with store.db:
+            store.db.execute('UPDATE seen SET payload_hash=?',
+                             (digest({k: v for k, v in record.items() if k != 'source'}),))
+        assert store.ingest([record], 0, 200, 'later')['emitted'] == 0
+        assert store.db.execute('SELECT body FROM outbox').fetchone()[0] == old
+        record['source']['database'] = 'relocated.db'
+        assert store.ingest([record], 0, 200, 'later')['emitted'] == 0
+        record['source']['selection_context']['previous_message_key'] = 'late-unselected-row'
+        assert store.ingest([record], 0, 200, 'later')['emitted'] == 1
+    finally:
+        store.close()
+
+
 def test_identical_text_in_another_conversation_is_preserved(tmp_path):
     store = Store(tmp_path / 'state.db', 'wechat', 'account')
     try:
