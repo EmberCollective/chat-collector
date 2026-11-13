@@ -230,7 +230,7 @@ def recover_key(root, platform):
     if Path(config['source']['key_file']).is_file():
         return
     script = root / ('tools/qq_recover.py' if platform == 'qq' else 'tools/install/recover_wechat.py')
-    print('请保持对应客户端登录。取钥只保存本机；微信原生 Hook 需要重启登录。')
+    print('请保持对应客户端登录。取钥只保存本机。' + ('微信原生 Hook 需要重启登录。' if platform == 'wechat' else 'QQ 只读取钥，无需重启。'))
     if not ctypes.windll.shell32.IsUserAnAdmin():
         # Elevate this explicit, interactive key-recovery step only; never unattended workers.
         command = "$p=Start-Process -FilePath $env:CC_PYTHON -ArgumentList ('\"'+$env:CC_RECOVER+'\"') -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
@@ -239,6 +239,8 @@ def recover_key(root, platform):
                                 creationflags=subprocess.CREATE_NO_WINDOW)
     else:
         result = subprocess.run([sys.executable, str(script)])
+    if platform == 'qq' and result.returncode == 2:
+        raise RuntimeError('QQ 正在重写数据库，凭据尚未验证；请保持 QQ 登录，稍后重新运行 Configure.cmd 选择继续。已完成步骤不会重做。')
     if result.returncode or not Path(config['source']['key_file']).is_file():
         raise RuntimeError('取钥未完成；请确认管理员授权、登录状态及客户端版本，重新运行 Configure.cmd。')
 
