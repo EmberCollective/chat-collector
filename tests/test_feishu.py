@@ -34,8 +34,9 @@ def fake_client(monkeypatch, *, fail_send=False, fail_file=False):
             raise TimeoutError('SECRET endpoint')
         return NS(success=lambda: True, data=NS(message_id='om_' + str(len(calls))))
     def patch(req):
+        from lark_oapi.api.im.v1 import PatchMessageResponse
         calls.append(('patch', req))
-        return NS(success=lambda: True, data=None)
+        return PatchMessageResponse({'code': 0})
     def upload(req):
         calls.append(('upload', req.request_body))
         if fail_file:
@@ -201,7 +202,7 @@ def test_card_escape_and_layout(case):
     card = feishu.card_content(task, {'complete': 'opaque', 'snooze': 'other'})
     assert card['schema'] == '2.0' and not card['config']['enable_forward']
     assert '<at ' not in json.dumps(card)
-    assert 2 <= len(card['body']['elements']) <= 5
+    assert card['body']['elements'][-1]['tag'] == 'column_set'
 
 
 def test_notes_are_displayed_without_a_review_gate(case):
@@ -211,6 +212,73 @@ def test_notes_are_displayed_without_a_review_gate(case):
     encoded = json.dumps(card, ensure_ascii=False)
     assert '说明：负责人未说明' in encoded and '旧字段内容' not in encoded
     assert '需要确认' not in encoded and 'opaque' in encoded
+
+
+def test_sources_collapsed_grouped_and_escaped_without_losing_entries(case):
+    task = case[2]['task']
+    task.update(notes=['<at id=all></at> 补充说明'],
+                sources=[{'ref': 'm1', 'platform': 'wechat', 'conversation': '项目群', 'sender': '<at id=all>', 'time': '2026-11-13T10:20:31+08:00'},
+                         {'ref': 'm2', 'platform': 'wechat', 'conversation': '项目群', 'sender': '李四', 'time': '2026-11-13T10:21:00+08:00'},
+                         {'ref': 'm3', 'platform': 'qq', 'conversation': '**伪造群**', 'sender': '王五'}])
+    card = feishu.card_content(task, {'complete': 'opaque', 'snooze': 'other'})
+    panels = [e for e in card['body']['elements'] if e['tag'] == 'collapsible_panel']
+    assert len(panels) == 2 and all(p['expanded'] is False for p in panels)
+    assert panels[1]['header']['title']['content'] == '信息来源 · 3 条'
+    text = panels[1]['elements'][0]['content']
+    assert text.count('项目群') == 1 and all(name in text for name in ('李四', '王五'))
+    assert all(ref not in text for ref in ('m1', 'm2', 'm3'))
+    assert '微信' in text and 'QQ' in text
+    assert '<at ' not in json.dumps(card, ensure_ascii=False) and '**伪造群**' not in text
+    assert '2026-11-13 10:20:31（UTC+08:00）' in text
+    assert '2026-11-13 10:21（UTC+08:00）' in text
+    assert card['body']['elements'][-1]['columns'][0]['elements'][0]['behaviors'][0]['value'] == {'token': 'opaque'}
+
+
+@pytest.mark.parametrize(('raw', 'expected'), [
+    ('2026-11-13T10:20:00-05:00', '2026-11-13 10:20（UTC-05:00）'),
+    ('2026-11-13T10:20:00Z', '2026-11-13 10:20（UTC+00:00）'),
+    ('2026-11-13T10:20:00', '2026-11-13 10:20'),
+    ('2026-11-13', '2026-11-13'), ('下周一', '下周一'),
+])
+def test_display_time_preserves_offset_without_guessing(raw, expected):
+    assert feishu._display_time(raw) == expected
+
+
+@pytest.mark.parametrize(('status', 'label'), [('open', '待办'), ('completed', '已完成'), ('cancelled', '已取消'), ('superseded', '已替代')])
+def test_card_main_details_localized_and_all_steps_preserved(case, status, label):
+    task = case[2]['task']
+    task['status'] = status
+    task['time'] = {'start': '2026-11-13T09:00:00+08:00', 'deadline': '2026-11-13T12:00:00+08:00'}
+    card = feishu.card_content(task, {})
+    main = card['body']['elements'][0]['content']
+    sections = card['body']['elements']
+    details = [item['content'] for item in sections[1:] if item['tag'] == 'markdown']
+    assert all(step in main for step in task['action_steps'])
+    assert '**状态**\n' + label in details
+    assert any(item.startswith('**开始**\n2026-11-13 09:00') for item in details)
+    assert any(item.startswith('**截止**\n2026-11-13 12:00') for item in details)
+    assert 'background_style' not in json.dumps(card)
+    for index, item in enumerate(sections[1:], 1):
+        if item['tag'] == 'markdown':
+            assert sections[index - 1]['tag'] == 'hr'
+
+
+@pytest.mark.parametrize(('priority', 'color'), [('P0', 'red'), ('P1', 'orange'), ('P2', 'blue'), ('P3', 'green'), ('P4', 'grey'), ('unexpected', 'grey')])
+def test_priority_header_colors(case, priority, color):
+    task = case[2]['task']
+    task['priority'] = priority
+    assert feishu.card_content(task, {})['header']['template'] == color
+
+
+@pytest.mark.parametrize(('state', 'color', 'prefix'), [(None, 'red', 'ERROR'), ('failure', 'red', 'ERROR'), ('recovery', 'green', '已恢复')])
+def test_alert_header_distinguishes_failure_and_recovery(case, state, color, prefix):
+    task = case[2]['task']
+    if state:
+        task['alert_state'] = state
+    card = feishu.card_content(task, {'complete': 'must-not-display'}, alert=True)
+    assert card['header']['template'] == color
+    assert card['header']['title']['content'].startswith('[' + prefix + ']')
+    assert 'must-not-display' not in json.dumps(card)
 
 
 def test_check_is_local_and_never_returns_credentials(case, monkeypatch):

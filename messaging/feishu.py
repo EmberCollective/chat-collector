@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from contextlib import closing
+from datetime import datetime
 import hashlib
 import html
 import importlib.metadata
@@ -78,7 +79,7 @@ def _call(function, request):
         raise DeliveryUncertain('feishu_app_request_outcome_unknown') from None
     if not response.success():
         raise DeliveryRejected('feishu_app_request_rejected_' + str(response.code))
-    return response.data
+    return getattr(response, 'data', None)
 
 
 def _plain(text):
@@ -86,23 +87,57 @@ def _plain(text):
     return ''.join(f'&#{ord(c)};' if c in '*~<>[]()#_`' else html.escape(c) for c in str(text))
 
 
+def _display_time(value):
+    """Keep the source offset; never interpret a naive chat time as system-local."""
+    value = str(value)
+    try:
+        if len(value) == 10:
+            return datetime.strptime(value, '%Y-%m-%d').strftime('%Y-%m-%d')
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        label = parsed.strftime('%Y-%m-%d %H:%M')
+        if parsed.second or parsed.microsecond:
+            label += parsed.strftime(':%S')
+            if parsed.microsecond:
+                label += ('.%06d' % parsed.microsecond).rstrip('0')
+        offset = parsed.strftime('%z')
+        if offset:
+            label += '（UTC' + offset[:3] + ':' + offset[3:] + '）'
+        return label
+    except ValueError:
+        return value
+
+
+def _collapsed(title, content):
+    return {'tag': 'collapsible_panel', 'expanded': False,
+            'header': {'title': {'tag': 'plain_text', 'content': title}},
+            'elements': [{'tag': 'markdown', 'content': content}]}
+
+
 def card_content(task, tokens, *, alert=False, upload_files=True):
-    done = task.get('status') in {'completed', 'done'}
-    color = 'red' if alert or task['priority'] == 'P0' else 'green' if done else 'blue'
+    recovered = alert and task.get('alert_state') == 'recovery'
+    color = ('green' if recovered else 'red') if alert else {
+        'P0': 'red', 'P1': 'orange', 'P2': 'blue', 'P3': 'green', 'P4': 'grey',
+    }.get(task.get('priority'), 'grey')
     steps = task.get('action_steps') or [task['event']]
     main = '\n'.join(f'{i}. {_plain(step)}' for i, step in enumerate(steps, 1))
-    details = [f"**状态** {_plain(task.get('status', 'open'))}"]
-    deadline = task.get('time', {}).get('deadline')
-    if deadline:
-        details.append('**截止** ' + _plain(deadline))
+    status = task.get('status', 'open')
+    status = {'open': '待办', 'completed': '已完成', 'done': '已完成', 'cancelled': '已取消',
+              'superseded': '已替代', 'in_progress': '进行中'}.get(status, status)
+    details = []
+    timing = task.get('time', {})
+    for key, label in [('start', '开始'), ('deadline', '截止')]:
+        if timing.get(key):
+            details.append('**' + label + '**\n' + _plain(_display_time(timing[key])))
+    if timing.get('text') and not timing.get('start') and not timing.get('deadline'):
+        details.append('**时间**\n' + _plain(timing['text']))
     if task.get('location'):
-        details.append('**地点** ' + _plain(task['location']))
+        details.append('**地点**\n' + _plain(task['location']))
     if task.get('people'):
-        details.append('**参与人员** ' + '；'.join(_plain(f"{p['name']}（{p['role']}）") for p in task['people']))
-    elements = [{'tag': 'markdown', 'content': ('**故障说明**\n' if alert else '**你需要做**\n') + main},
-        {'tag': 'column_set', 'flex_mode': 'none', 'background_style': 'grey-50', 'columns': [
-            {'tag': 'column', 'width': 'weighted', 'weight': 1, 'elements': [
-                {'tag': 'markdown', 'content': '\n'.join(details)}]}]}]
+        details.append('**参与人员**\n' + '；'.join(_plain(f"{p['name']}（{p['role']}）") for p in task['people']))
+    details.append('**状态**\n' + _plain(status))
+    elements = [{'tag': 'markdown', 'content': ('**恢复说明**\n' if recovered else '**故障说明**\n' if alert else '**你需要做**\n') + main}]
+    for detail in details:
+        elements.extend([{'tag': 'hr'}, {'tag': 'markdown', 'content': detail}])
     materials = []
     for r in task.get('resources', []):
         label = '成果' if r.get('role') == 'result' else '材料'
@@ -115,15 +150,25 @@ def card_content(task, tokens, *, alert=False, upload_files=True):
             line += '；' + _plain(r['note'])
         materials.append(line)
     if materials:
+        elements.append({'tag': 'hr'})
         elements.append({'tag': 'markdown', 'content': '**相关资料**\n' + '\n'.join(materials)})
-    notes = []
     explanations = task.get('notes') or task.get('review_reasons', [])
     if explanations:
-        notes.append('说明：' + '；'.join(explanations))
+        elements.append(_collapsed('补充说明', _plain('说明：' + '\n'.join(explanations))))
+    source_groups = {}
     for source in task.get('sources', []):
-        notes.append('来源：' + ' · '.join(str(source[k]) for k in ('platform', 'conversation', 'sender', 'time') if source.get(k)))
-    if notes:
-        elements.append({'tag': 'markdown', 'content': _plain('\n'.join(notes)), 'text_size': 'notation'})
+        group = (source.get('platform', ''), source.get('conversation', ''))
+        parts = [str(source['sender'])] if source.get('sender') else []
+        if source.get('time'):
+            parts.append(_display_time(source['time']))
+        source_groups.setdefault(group, []).append(' · '.join(parts) or '未提供消息明细')
+    if source_groups:
+        lines = []
+        for (platform, conversation), sources in source_groups.items():
+            platform = {'wechat': '微信', 'weixin': '微信', 'qq': 'QQ'}.get(str(platform).lower(), platform)
+            heading = ' · '.join(str(v) for v in (platform, conversation) if v) or '来源未注明'
+            lines.append('**' + _plain(heading) + '**\n' + '\n'.join(_plain(s) for s in sources))
+        elements.append(_collapsed(f"信息来源 · {len(task.get('sources', []))} 条", '\n\n'.join(lines)))
     if tokens and not alert:
         labels = {'complete': '完成待办', 'reopen': '恢复待办', 'snooze': '稍后提醒'}
         buttons = [{'tag': 'column', 'width': 'weighted', 'weight': 1, 'elements': [{
@@ -132,8 +177,9 @@ def card_content(task, tokens, *, alert=False, upload_files=True):
             'behaviors': [{'type': 'callback', 'value': {'token': token}}]}]}
             for i, (action, token) in enumerate(tokens.items())]
         elements.append({'tag': 'column_set', 'flex_mode': 'none', 'columns': buttons})
+    prefix = '已恢复' if recovered else 'ERROR' if alert else task['priority']
     card = {'schema': '2.0', 'config': {'update_multi': True, 'width_mode': 'default', 'enable_forward': False},
-            'header': {'title': {'tag': 'plain_text', 'content': f"[{task['priority']}] {task['title']}"},
+            'header': {'title': {'tag': 'plain_text', 'content': f"[{prefix}] {task['title']}"},
                        'template': color, 'icon': {'tag': 'standard_icon', 'token': 'todo_colorful'}},
             'body': {'direction': 'vertical', 'vertical_spacing': '12px', 'elements': elements}}
     encoded = json.dumps(card, ensure_ascii=False)

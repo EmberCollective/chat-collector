@@ -190,6 +190,7 @@ def _send_alert(config, record):
         raise ValueError('Dedicated Feishu alert target is not configured')
     restored = record['kind'] == 'recovery'
     task = {'task_id': 'automation:' + record['job'], 'revision': record['id'],
+            'alert_state': 'recovery' if restored else 'failure',
             'title': ('自动任务恢复：' if restored else '自动任务需要检查：') + record['job'],
             'event': ('本轮执行成功。' if restored else '检查本地自动化状态；重试耗尽后需手动恢复。') + ' 代码：' + record['code'],
             'priority': 'P3' if restored else 'P1', 'status': 'open', 'time': {}, 'people': [], 'resources': [], 'sources': []}
