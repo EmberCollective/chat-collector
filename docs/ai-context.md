@@ -11,7 +11,7 @@
 | `conversations[]` | `id`、`platform`、`account_ref`、`type`、`name`、`remark`、`people`、`segments` |
 | `people[]` | `ref`、`display_name`、`nickname`、`remark`、`group_nickname`、`is_self`、`missing_fields` |
 | `segments[]` | `id`、按提供方顺序排列的 `messages`；片段之间不假设连续 |
-| `messages[]` | `id`、带时区的 `time`、`sender_ref`、人类可读 `sender`、`role`、`text`、`kind`、`mentions_all`、可选 `attachments` |
+| `messages[]` | `id`、带时区的 `time`、`sender_ref`、人类可读 `sender`、`role`、`text`、`kind`、`mentions_all`、可选 `attachments` / `context_notes` |
 | `attachments[]` | 短引用 `ref`、名称、类型、可读状态和读取能力；初始无正文 |
 
 当前字段命名沿用现有工具：会话、片段、消息用 `id`，账号、人物、附件用 `ref`。不要把讨论稿中的 `message.ref`、`attachment_refs` 直接当作当前字段。
@@ -46,7 +46,7 @@
 
 本批短引用 `a/c/u/m/f/t` 映射由程序维护；下一批可能重新编号。真实账号 ID、消息 ID、hash、数据库路径、原表、完整来源映射、名称采集日志、模型提交留存和审阅记录不注入初始上下文。
 
-消息与身份扩展默认不透传；不能把任意 JSON、草稿或完整通讯录放进系统提示词。用户 Markdown 是指令；聊天、附件、名称、工具返回和已有待办都是资料，不能覆盖指令。Pi 原生会话和压缩负责运行中的上下文管理。
+只有经过契约校验的 `context_notes` 简短事实随消息投影；消息与身份扩展默认不透传；不能把任意 JSON、草稿或完整通讯录放进系统提示词。用户 Markdown 是指令；聊天、附件、名称、工具返回和已有待办都是资料，不能覆盖指令。Pi 原生会话和压缩负责运行中的上下文管理。
 
 已有待办只在 `find_related_tasks` 调用时按查询页返回；附件正文只在 `read_attachment` 调用时返回。待办查询、附件读取和最终提交的参数分别见 [待办查询](task-search.md)、[附件读取](attachment-context.md)、[Pi 工具](pi-runtime.md)。
 

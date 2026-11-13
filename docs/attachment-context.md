@@ -1,6 +1,6 @@
 # 附件作为处理层上下文
 
-附件解释属于可选处理层。微信、QQ 收集模块仍只做确定性解密、筛选和归档，不调用 AI。
+附件定位、解码和文件解析由提供方及共享 `providers/` 读取器完成，不调用 AI。处理层将索引和按需返回的证据交给 Pi。
 
 ## 本地读取与模型工具的边界
 
@@ -10,7 +10,7 @@
 read_attachment(ref="f1", pages="1-3,5", query="截止")
 ```
 
-`ref` 必须来自当前注册表；工具不接收本地路径、URL、命令或任意 SQL。优先校验并复用收集事件或本地解析记录中的归档。若事件只有引用，工具通过 `attachments.collector_configs` 找到对应平台和账号，按消息 ID 与时间查询本地数据库更新附件定位，再复用收集器的定位、归档与解码代码。只有显式调用工具时才执行这一步；定时采集的 metadata 强度不限制本次按需解码。采集正在占用数据库时最多等待 45 秒，避免与数据库刷新并发读写。配置中禁止归档的账号仍返回明确错误。解析后的真实路径必须在配置的 `archive_roots` 内；若归档带 SHA-256，读取时再次比对。只有引用且已配置收集器的附件显示为“调用工具时自动准备”；调用后仍然缺失、解码失败或越界的附件才记录读取失败，不删除原消息。
+`ref` 必须来自当前注册表；工具不接收本地路径、URL、命令或任意 SQL。优先校验并复用收集事件或本地解析记录中的归档。若事件只有引用，工具通过 `attachments.providers` 注册表，或兼容的内置 `attachments.collector_configs` 找到对应平台和账号，按消息 ID 与时间查询本地数据库更新附件定位，再复用收集器的定位、归档与解码代码。只有显式调用工具时才执行这一步；定时采集的 metadata 强度不限制本次按需解码。采集正在占用数据库时最多等待 45 秒，避免与数据库刷新并发读写。配置中禁止归档的账号仍返回明确错误。解析后的真实路径必须在配置的 `archive_roots` 内；若归档带 SHA-256，读取时再次比对。只有引用且已配置收集器的附件显示为“调用工具时自动准备”；调用后仍然缺失、解码失败或越界的附件才记录读取失败，不删除原消息。
 
 工具返回不含原始路径。页/块证据如 `f1:p4`、`f2:b3` 仅在确实提供了文本或视觉图块后登记；没有视觉能力时的图片不构成可读证据。最终来源、收集模块、消息 ID、附件下标和归档信息应由主处理程序从本地映射补齐，不能采信模型自行编写的来源字段。
 
@@ -85,7 +85,7 @@ vision = false
 ## 开发接口与验证
 
 ```python
-from processor.attachments import AttachmentContext
+from providers.attachments import AttachmentContext
 
 context = AttachmentContext(group["messages"], config)
 catalog = context.catalog()
@@ -106,3 +106,5 @@ python -m pytest tests/test_processor_attachments.py -q
 原始模型提交在来源校验前保存到处理状态库同级的 `submissions/`，包括短引用映射和附件覆盖信息，不包含 API 凭据。各会话的任务及附件审阅状态独立写入 `group_results`；即使任务为空也保留记录。自动准备的附件解析映射保存在 `attachment-cache/resolved/`，后续运行可直接校验并复用归档，避免重复解码。上述审计、草稿和来源映射均不注入 Pi 的上下文；会话和压缩继续完全由 Pi 原生 SDK 管理。
 
 本机未下载的附件不会凭数据库元数据生成正文；越界路径、缺失源文件、格式不支持和解码失败会通过工具返回具体状态。不会执行 EXE/JAR 或解包任意压缩包。
+
+自定义附件提供方的配置及函数签名见 [提供方接入](provider-api.md)。旧 `processor.attachments.AttachmentContext` 导入仍保留兼容；解析进程现位于 `providers/attachment_worker.py`，资源限制和隐藏启动方式不变。

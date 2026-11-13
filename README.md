@@ -199,6 +199,7 @@ attachments.enabled 是保存附件的总开关；关闭时三档均不归档、
 
 - [数据契约](docs/data-contract.md)：消息、人物、附件、来源及兼容边界。
 - [收集层开发指南](docs/collector-development.md)：提供方适配、SQL、姓名解析和验收。
+- [提供方接入](docs/provider-api.md)：发布标准批次、注册按需附件工具和外部平台示例。
 - [AI 输入结构](docs/ai-context.md)：实际输入字段、短引用和合成示例。
 - [开发指南](docs/development.md)：模块边界、扩展入口和验证方法。
 - [性能优化](docs/optimization.md)：QQ 分段计时、SSD 临时目录、附件查找与安全发布。

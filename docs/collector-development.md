@@ -28,11 +28,15 @@ flowchart LR
 | `collector/identities.py: IdentityContext` | 只给最终选中消息补身份资料和显示名 |
 | `collector/assets.py: AttachmentArchive` | 归档、定位及复用现有媒体解码能力 |
 | `collector/store.py: Store` | 稳定消息身份、修订、事务、outbox 与原子批次发布 |
-| `processor/core.py` | 导入 JSONL 并验证事件；不是平台解析入口 |
+| `contracts.py` | 公共 `validate_event`、`ingest_batch`，校验与原子发布 |
+| `collector/attachment_provider.py` | 内置账号校验、实时附件定位和归档/解码 |
+| `providers/registry.py` | 根据本地配置加载附件提供方，消息不能选择执行代码 |
+| `providers/attachments.py` | 共用文件读取、页/块证据与覆盖状态 |
+| `processor/core.py` | 导入标准 JSONL；不是平台解析入口 |
 
-当前 `config.load_config` 仅允许 `wechat/qq`，调试台也有模块清单。新增内置平台需要更新适配器、配置白名单、身份/附件路由及相应测试；可选调试台需要另外接入。尚未提供“一行注册任意提供方”的 SDK，不能把 `ingest_batch`/`prepare_attachment` 讨论稿当成已有函数。
+内置采集命令和调试台模块卡片仍只管理 `wechat/qq`。外部收集器使用 `contracts.ingest_batch` 发布标准事件，附件通过 `attachments.providers` 注册 `prepare_attachment`，无需修改处理核心；完整步骤见 [提供方接入](provider-api.md)。外部提供方自行管理采集日程和断点，接入不自动增加调试台采集卡片。
 
-独立外部收集器可以直接发布符合 v1 的 JSONL 到处理层输入目录；要支持按需附件读取，还必须接通本地提供方路由，或预先提供有效归档。只输出附件名字不等于已实现实时解码。
+独立收集器也可以直接发布符合 v1 的不可变 JSONL。按需读取时，优先使用已有有效归档；没有归档则调用注册的提供方。只输出附件名字、未注册提供方且没有归档时，会明确返回不可用。
 
 ## 开发顺序
 

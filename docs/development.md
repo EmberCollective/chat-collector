@@ -31,7 +31,7 @@ flowchart LR
 | 修改优先级/任务规则 | `processing-rules/default.md`，具体处理合同见 [处理层](processing.md) |
 | 模型与上下文配置 | `config/processor.toml`，密钥通过环境变量或本地 `.env` 读取 |
 | AI 循环与工具 | `processor/pi-runtime/`，使用 Pi 原生扩展注册工具，见 [Pi 运行时](pi-runtime.md) |
-| 附件按需读取 | `processor/attachments.py`，初始输入仅提供索引，见 [附件上下文](attachment-context.md) |
+| 附件按需读取 | `providers/attachments.py`，初始输入仅提供索引，见 [附件上下文](attachment-context.md) |
 | 调试入口 | `tools/console/`，见 [处理调试台](console-processing.md)，核心不可反向依赖它 |
 
 ## 运行与验证
