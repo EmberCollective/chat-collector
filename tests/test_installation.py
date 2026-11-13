@@ -171,3 +171,40 @@ def test_console_port_choice_rejects_busy_port_without_changing_config(tmp_path,
     monkeypatch.setattr(setup, 'ask', lambda *args: str(busy))
     setup.configure_console(tmp_path)
     assert tomllib.loads(path.read_text())['port'] == busy
+
+
+def test_wechat_hook_waits_and_retries_main_process(monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+    recovery = module('recover_wechat')
+    now = [0.0]
+    monkeypatch.setattr(recovery.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(recovery.time, 'sleep', lambda delay: now.__setitem__(0, now[0] + delay))
+    exe = 'C:/Weixin/Weixin.exe'
+    child = SimpleNamespace(pid=2, info={'exe': exe, 'cmdline': [exe, '--type=renderer']})
+    main = SimpleNamespace(pid=1, info={'exe': exe, 'cmdline': [exe]})
+    monkeypatch.setattr(psutil, 'process_iter', lambda fields: [child, main])
+    native = Mock()
+    native.initialize_hook.side_effect = [False, False, True]
+    native.get_last_error_msg.return_value = 'module not loaded'
+    assert recovery.connect_hook(exe, native) == 1
+    assert now[0] >= 3
+    assert all(call.args == (1,) for call in native.initialize_hook.call_args_list)
+    assert native.cleanup_hook.call_count == 2
+
+
+def test_wechat_hook_timeout_preserves_native_diagnostic(monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+    recovery = module('recover_wechat')
+    now = [0.0]
+    monkeypatch.setattr(recovery.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(recovery.time, 'sleep', lambda delay: now.__setitem__(0, now[0] + delay))
+    exe = 'C:/Weixin/Weixin.exe'
+    monkeypatch.setattr(psutil, 'process_iter', lambda fields: [SimpleNamespace(pid=1, info={'exe': exe, 'cmdline': [exe]})])
+    native = Mock()
+    native.initialize_hook.return_value = False
+    native.get_last_error_msg.return_value = 'module not loaded'
+    with pytest.raises(RuntimeError, match='module not loaded'):
+        recovery.connect_hook(exe, native, timeout=3)
+    assert native.initialize_hook.call_count == native.cleanup_hook.call_count == 2
