@@ -1,6 +1,6 @@
 # 启用前先检查：python -m automation check --config config/automation.toml
-# 本模板不启动真实模型处理、不投递消息；逐项配置后再开启。
-enabled = false
+# 启用状态和间隔可在调试面板修改；后台独立运行，不依赖浏览器。
+enabled = true
 
 [storage]
 state_file = "../data/automation/state.db"
@@ -27,23 +27,32 @@ config = "qq.toml"
 interval_seconds = 60
 
 [jobs.processor]
-enabled = false
+enabled = true
 config = "processor.toml"
 interval_seconds = 60
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
 
 [jobs.messaging]
-enabled = false
+enabled = true
 config = "messaging.toml"
 interval_seconds = 60
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
 
 [jobs.feedback]
-enabled = false
+enabled = true
 config = "messaging.toml"
 interval_seconds = 5
 
 # 飞书官方长连接进程；重启预算包含首次启动，不因正常轮询而重置。
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
 [listener]
-enabled = false
+enabled = true
 config = "messaging.toml"
 check_interval_seconds = 5
 max_attempts = 3
@@ -52,7 +61,7 @@ max_backoff_seconds = 900
 
 # 使用 messaging.toml 中显式指定的专用飞书通知目标，不含聊天正文或密钥。
 [alerts]
-enabled = false
+enabled = true
 config = "messaging.toml"
 target_id = "feishu-assistant"
 cooldown_seconds = 3600

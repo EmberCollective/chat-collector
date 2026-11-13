@@ -1,5 +1,5 @@
 # 消息层独立消费已发布待办；填好目标后再开启，不会调用模型或刷新聊天库。
-enabled = false
+enabled = true
 env_file = "../.env"
 
 [feedback]
@@ -37,7 +37,7 @@ P4 = 0
 [[targets]]
 id = "feishu-assistant"
 kind = "feishu_app"
-enabled = false
+enabled = true
 app_id_env = "CHAT_FEISHU_APP_ID"
 app_secret_env = "CHAT_FEISHU_APP_SECRET"
 recipient_id = "oc_56ba9627a178629482da7f61878fb087"
