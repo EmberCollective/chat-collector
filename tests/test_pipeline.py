@@ -199,7 +199,8 @@ def test_refresh_interval_defers_without_losing_window_and_replay_bypasses(tmp_p
     def scan(source, start, end, **kwargs):
         calls.append((start, end))
         return [dict(message(),conversation_type='group')] if start <= 100 < end else []
-    monkeypatch.setattr(wechat, 'scan', scan)
+    from providers.platforms import wechat as query_adapter
+    monkeypatch.setattr(query_adapter, 'scan', scan)
     monkeypatch.setattr(runner.time, 'time', lambda: 200)
     assert runner.run_round(cfg)['matched'] == 1
     calls.clear()

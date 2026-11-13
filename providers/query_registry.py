@@ -8,7 +8,7 @@ class _LocalSnapshot:
         from .identities import IdentityContext
         self.config = scope['config']
         self.snapshot_id = metadata['snapshot_id']
-        self.adapter = importlib.import_module('collector.adapters.' + scope['platform'])
+        self.adapter = importlib.import_module('providers.platforms.' + scope['platform'])
         self.identities = IdentityContext(self.config)
 
     def scan(self, start, end, **kwargs):

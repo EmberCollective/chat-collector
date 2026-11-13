@@ -114,7 +114,7 @@ def test_three_rules_union_once_before_archive_and_replay(config, monkeypatch):
 
 def test_input_scanned_once_and_history_is_disjoint(config, monkeypatch):
     import importlib
-    adapter = importlib.import_module('collector.adapters.'+config['platform'])
+    adapter = importlib.import_module('providers.platforms.'+config['platform'])
     original, calls = adapter.scan, []
     def scan(source, start, end, *args, **kwargs):
         calls.append((start, end))
@@ -225,10 +225,10 @@ def test_disabled_rules_do_not_refresh_or_advance_checkpoint(config, monkeypatch
     rule['enabled'] = False
     config['source']['refresh'] = True
     import importlib
-    adapter = importlib.import_module('collector.adapters.'+config['platform'])
+    adapter = importlib.import_module('providers.platforms.'+config['platform'])
     def unexpected(*args, **kwargs):
         pytest.fail('Disabled rules must not scan or refresh')
-    monkeypatch.setattr(adapter, 'refresh', unexpected)
+    monkeypatch.setattr(importlib.import_module('collector.adapters.'+config['platform']), 'refresh', unexpected)
     monkeypatch.setattr(adapter, 'scan', unexpected)
     monkeypatch.setattr('collector.__main__.time.time', lambda:200)
     assert run_round(config)['status'] == 'no_enabled_rules'
@@ -278,7 +278,7 @@ def test_rule_sql_version_is_captured(config, tmp_path):
 @pytest.mark.parametrize('trigger', ['file', 'mentions_all'])
 def test_context_exactly_five_each_side_and_new_followups(config, monkeypatch, trigger):
     import importlib
-    adapter = importlib.import_module('collector.adapters.'+config['platform'])
+    adapter = importlib.import_module('providers.platforms.'+config['platform'])
     records = [dict(platform=config['platform'],account_id='account',conversation_id='room',
         conversation_type='group',message_id=str(i),sender_id='sender',sent_at=i,
         text='plain',kind='file' if trigger=='file' and i==11 else 'text',

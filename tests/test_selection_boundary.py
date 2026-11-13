@@ -13,10 +13,20 @@ from test_filters import config, register
 
 def test_collector_service_import_does_not_load_consumers():
     result = subprocess.run([sys.executable, '-c',
-        'import sys; import collector.service; '
+        'import sys; import collector.service; from collector.adapters import qq, wechat; '
         'assert not any(k.split(".")[0] in {"selection", "processor", "messaging", "providers"} '
         'for k in sys.modules)'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_legacy_scans_delegate_to_provider_mapping(monkeypatch):
+    from collector.adapters import qq, wechat
+    from providers.platforms import qq as qq_provider, wechat as wechat_provider
+    for legacy, provider in ((qq, qq_provider), (wechat, wechat_provider)):
+        monkeypatch.setattr(provider, 'scan', lambda *args, **kwargs: ['mapped'])
+        assert legacy.scan({}, 1, 2) == ['mapped']
+    assert wechat.decode_text is wechat_provider.decode_text
+    assert qq._body is qq_provider._body
 
 
 def test_selection_has_no_platform_mapping_or_message_database_code():

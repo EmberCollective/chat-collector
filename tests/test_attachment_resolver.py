@@ -28,7 +28,7 @@ def setup(request, tmp_path, monkeypatch):
     message = {'platform':platform,'account_id':'fixture','conversation_id':'room','conversation_type':'group',
         'message_id':'1','sender_id':'person','sent_at':100,'text':'See notice','kind':'file','source':{},'attachments':[attachment]}
     fresh = dict(message, attachments=[dict(attachment,local_path=str(path))])
-    adapter = importlib.import_module('collector.adapters.'+platform)
+    adapter = importlib.import_module('providers.platforms.'+platform)
     scans=[]
     def scan(source,start,end,**kwargs):
         scans.append((start,end,kwargs))
@@ -59,7 +59,7 @@ def test_metadata_is_resolved_by_ref_on_demand_and_archive_is_reused(setup, monk
     assert reader.read_attachment('f1')['details']['status']=='ok'
     # A new Pi session can reuse an on-demand archive even when old JSONL has only metadata.
     fresh_reader=AttachmentContext([event],config)
-    adapter=importlib.import_module('collector.adapters.'+event['message']['platform'])
+    adapter=importlib.import_module('providers.platforms.'+event['message']['platform'])
     monkeypatch.setattr(adapter,'scan',forbidden)
     assert fresh_reader.read_attachment('f1')['details']['status']=='ok'
     event['message']['attachments']=[resolved]
