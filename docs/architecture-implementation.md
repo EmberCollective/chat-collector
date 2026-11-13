@@ -17,7 +17,7 @@
 | 渠道 | `messaging.feishu`、`channels` | 平台校验、卡片/页面、文件上传和回执；不修改正式待办表 |
 | 自动运行 | `automation` | 独立任务调度、重试预算、报警和本机即时唤醒 |
 
-QQ/微信消息读取与字段映射在 `providers/platforms/`；原 `collector.adapters.*.scan` 只保留兼容转发。原生刷新仍在收集层。归档能力复用现有实现，未另写解密引擎。公共锁和稳定序列化在 `common/`，不依赖业务层。
+QQ/微信消息读取、字段映射以及高级附件定位/解码/归档在 `providers/platforms/`；原 `collector.adapters.*.scan` 与 `collector.assets.AttachmentArchive` 只保留兼容转发。原生刷新仍在收集层。归档直接迁移现有实现，继续复用 `collector.asset_vendor` 底层引擎。公共锁和稳定序列化在 `common/`，不依赖业务层。
 
 旧导入 `collector.filters`、`collector.store`、`collector.identities`、`collector.attachment_provider`、`processor.actions` 继续可用；新开发使用上表入口，不在兼容包装里新增业务。
 

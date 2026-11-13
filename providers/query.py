@@ -146,7 +146,7 @@ def selection_window_end(scope, requested_end):
 
 def prepare_selected(config, messages, *, snapshot_id, end_exclusive=None):
     """Apply configured local archive policy only after every SQL rule succeeds."""
-    from collector.assets import AttachmentArchive
+    from .platforms.assets import AttachmentArchive
     messages = list(messages)
     archive = AttachmentArchive(config, config['platform'], config['source']['account_id'])
     scope = dict(provider_id=config.get('provider_id', config['platform']), platform=config['platform'],

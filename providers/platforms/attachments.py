@@ -7,7 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from collector.assets import AttachmentArchive
+from .assets import AttachmentArchive
 from collector.config import load_config
 from collector.service import source_snapshot
 from common.codec import digest

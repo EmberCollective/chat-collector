@@ -30,7 +30,7 @@ flowchart LR
 |---|---|
 | 增加 SQL 规则 | `rulesets/*.sql`，返回 `identity`；在模块配置 `filters.rulesets` 注册，参数直接绑定 |
 | 修改 QQ / 微信读取 | `collector/adapters/`，保持原始数据库只读、时间窗和稳定身份 |
-| 附件归档 | `collector/assets.py`，只处理命中消息，保留路径白名单和完整性检查 |
+| 附件归档 | `providers/platforms/assets.py`，只处理命中消息，保留路径白名单和完整性检查；原收集路径兼容转发 |
 | 去重和发布 | `collector/store.py`，事件与断点同事务，文件通过 outbox 发布 |
 | 修改优先级/任务规则 | `processing-rules/default.md`，具体处理合同见 [处理层](processing.md) |
 | 模型与上下文配置 | `config/processor.toml`，密钥通过环境变量或本地 `.env` 读取 |
