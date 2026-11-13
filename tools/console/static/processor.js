@@ -96,7 +96,7 @@ function renderAttachmentReviews(groups,target){
 async function refreshProcessor(){
   const [state,result,reviews]=await Promise.all([api('/processor/status'),api('/processor/tasks?limit=20'),api('/processor/reviews?limit=20')]);
   renderAttachmentReviews(reviews.groups,$('processor-review-output'));
-  const configured=state.model.configured;processorConfigured=configured;processorBusy=!!state.running_job;
+  const configured=state.model.configured;processorConfigured=configured;processorBusy=!!state.running_job||!!state.automation_running;
   if(state.running_job&&!processorJob)processorJob=state.running_job;
   $('processor-state').textContent=processorBusy?'处理任务执行中':configured?'模型已配置':'模型未配置';
   $('processor-state').className='pill'+(configured?'':' warn');$('processor-run').disabled=!configured||processorBusy;$('processor-preview').disabled=processorBusy;

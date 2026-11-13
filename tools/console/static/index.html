@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>聊天收集与待办 · 本地调试</title><link rel="icon" href="/static/icon.svg"><link rel="stylesheet" href="/static/style.css"><script src="/static/processor.js" defer></script><script src="/static/app.js" defer></script><script src="/static/messaging.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>聊天收集与待办 · 本地调试</title><link rel="icon" href="/static/icon.svg"><link rel="stylesheet" href="/static/style.css"><script src="/static/processor.js" defer></script><script src="/static/app.js" defer></script><script src="/static/messaging.js" defer></script><script src="/static/automation.js" defer></script></head>
 <body>
 <header><div><span class="eyebrow">LOCAL TOOLS / 01</span><h1>聊天收集调试台</h1><p>查看采集状态，验证筛选条件，追踪消息与附件。</p></div><nav><button id="copy-token" class="secondary">复制 API 凭证</button><a href="/docs" target="_blank" rel="noopener">OpenAPI ↗</a></nav></header>
 <main>
@@ -31,15 +31,30 @@
 <div class="settings-grid"><label for="processor-preview-start">调试开始时间（含）<input id="processor-preview-start" type="datetime-local" step="1"></label><label for="processor-preview-end">调试结束时间（不含）<input id="processor-preview-end" type="datetime-local" step="1"></label></div>
 <p id="processor-preview-scope" class="scope">默认增量：起止时间留空，沿用已保存的处理起点。手动时间用于预览和调试处理（最多 7 天，浏览器本地时间）；调试结果独立保存，不改变默认值。</p>
 <div class="actions"><button id="processor-preview">预览待处理上下文</button><button id="processor-preview-reset" class="secondary">恢复默认增量</button><button id="processor-run" class="secondary" disabled>执行一轮处理…</button><button id="processor-reload" class="secondary">刷新状态与待办</button></div>
-<p class="scope">预览仅在本机读取。执行处理会把聊天片段和规则发送给你配置的模型服务，并由 Pi Agent 按需读取附件文字或图片；本面板只手动触发处理。</p>
+<p class="scope">预览仅在本机读取。执行处理会把聊天片段和规则发送给你配置的模型服务，并由 Pi Agent 按需读取附件文字或图片；可手动执行，也可在下方启用自动处理。</p>
+<details id="ops-processing"><summary>自动处理 · 后台运行</summary>
+<p class="scope">自动处理读取正式增量消息；上方调试时间不影响自动运行。保存运行设置后，启动后台服务即可持续运行，关闭本页面不停止服务。</p>
+<p id="ops-service-status" role="status">正在读取后台服务状态…</p>
+<div class="actions"><button id="ops-start" data-ops-action="true">启动后台服务</button><button id="ops-stop" class="secondary" data-ops-action="true">停止后台服务</button><button id="ops-restart" class="secondary" data-ops-action="true">重新启动</button><button id="ops-refresh" class="secondary">刷新运行状态</button></div>
+<p id="ops-status-error" role="status"></p><div id="ops-jobs"></div><div id="ops-processor-fields"></div>
+<div class="actions"><button id="ops-save" data-ops-action="true">保存运行与通道设置</button><button id="ops-reload" class="secondary" data-ops-action="true">重新加载设置</button></div><p id="ops-notice" role="status" aria-live="polite"></p>
+</details>
 <details id="processor-settings"><summary>模型连接与上下文设置</summary><p id="processor-config-file" class="muted path"></p><div id="processor-config-fields" class="settings-grid"></div><p class="scope">单会话字符预算由你设置。自动合批保留群聊/会话边界，超过初始批次预算时优先按会话拆分；关联片段不会按条数硬切。单个关联片段过大时明确报错，请调高预算或检查原消息，不会静默截断。</p><p id="processor-key-file" class="muted path"></p><p class="scope">这里只填写密钥环境变量的名称，不填写密钥；也支持项目本地 .env 文件。也可在提示的本机密钥文件中保存密钥原文，已有环境变量优先。地址与模型留空时可以预览，但不能执行处理；保存间隔只供独立命令行定时处理使用。</p><div class="actions"><button id="processor-save-config">保存处理配置</button><button id="processor-load-config" class="secondary">重新加载配置</button></div></details>
 <details id="processor-rules"><summary>编辑处理规则 · Markdown</summary><p id="processor-rules-file" class="muted path"></p><label for="processor-rules-text">规则正文</label><textarea id="processor-rules-text" rows="14" spellcheck="false" maxlength="1048576"></textarea><div class="actions"><button id="processor-save-rules">保存规则并备份</button><button id="processor-load-rules" class="secondary">重新加载规则</button></div><p class="scope">只修改配置指定的本地文件。保存时校验版本；冲突不会覆盖你的编辑内容。规则改变后，下一轮按新规则重新处理相关上下文。</p></details>
 <div class="processor-results"><section aria-labelledby="processor-context-title"><h3 id="processor-context-title">上下文预览</h3><div id="processor-preview-output"><p class="empty">预览会展示最多 5 批消息，不调用模型，也不推进处理状态。</p></div></section><section aria-labelledby="processor-tasks-title"><div id="processor-debug-output"></div><h3 id="processor-tasks-title">待办结果</h3><div id="processor-review-output"></div><div id="processor-tasks"><p class="empty">尚未读取处理结果。</p></div></section></div>
 </section>
 <section class="workspace" id="messaging-panel" aria-labelledby="messaging-title">
 <div class="workspace-title"><div><span class="eyebrow">DELIVERY / 03</span><h2 id="messaging-title">行动与材料 · 消息层</h2><p class="muted">整理用户接下来怎么做，直接查看相关链接和附件。参与人员指需要参与事项的人，不等同于负责人。</p></div></div>
-<p class="scope">先预览，再导入本地待办和材料。本页不发送外部消息；飞书、Notion 与 Notion Calendar 接入及提醒频率在 config/messaging.toml 配置，默认关闭。完成状态属于消息层，不修改原始消息和处理结果。</p>
+<p class="scope">先预览，再导入本地待办和材料。外部投递默认关闭；在下方配置通道并启动后台服务后，才会自动投递。完成、取消与重新打开操作通过处理层公开接口回写；不修改原始聊天。</p>
 <div class="actions"><button id="messaging-preview">预览行动与材料</button><button id="messaging-sync" class="secondary">导入并保存本地材料</button></div>
+<details id="ops-delivery"><summary>通道与自动投递</summary>
+<p class="scope">先配置并保存通道，再选择自动投递与提醒频率。此处只填写本机 .env 中的变量名，不填写密钥值。通道编号与类型创建后不更改，可通过取消启用停用。</p>
+<p class="muted">后台按钮监听默认连接 feishu-assistant 所属应用，同一应用的其他群可共用监听；不同应用需独立启动监听程序。</p>
+<div id="ops-delivery-fields"></div><h3>投递通道</h3><div id="ops-targets"></div>
+<div class="settings-grid"><label>新通道编号<input id="ops-new-id" maxlength="100" placeholder="例如 notion-tasks"></label><label>通道类型<select id="ops-new-kind"></select></label></div>
+<div class="actions"><button id="ops-add-target" class="secondary" data-ops-action="true">添加通道</button><button id="ops-delivery-save" data-ops-action="true">保存运行与通道设置</button><button id="ops-delivery-reload" class="secondary" data-ops-action="true">重新加载设置</button></div>
+<p id="ops-delivery-notice" role="status" aria-live="polite"></p><h3>通道测试记录</h3><div id="ops-tests"></div><div id="ops-recovery"></div>
+</details>
 <p id="messaging-notice" role="status" aria-live="polite">尚未加载。</p><div id="messaging-output"></div>
 </section>
 <section class="history"><div class="workspace-title"><div><span class="eyebrow">ACTIVITY</span><h2>任务记录</h2></div><span id="connection" class="muted">正在连接…</span></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>模块 / 操作</th><th>触发方式</th><th>状态</th><th>详情</th></tr></thead><tbody id="jobs"></tbody></table></div></section>

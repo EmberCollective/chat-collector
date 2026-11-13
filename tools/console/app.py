@@ -341,6 +341,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     app.state.jobs, app.state.bridge = jobs, bridge
     from messaging_routes import register_messaging_routes
     register_messaging_routes(app, bridge, authenticate)
+    from operations_routes import register_operations_routes
+    register_operations_routes(app, bridge, authenticate)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
@@ -474,8 +476,17 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     @app.get('/api/processor/status', dependencies=[Depends(authenticate)], summary='只读查看处理状态')
     def processor_status():
         result = bridge.processor.core().status(bridge.processor.config())
+        automated, automatic_running = False, False
+        automatic_path = bridge.root / bridge.settings.get('automation_config', 'config/automation.toml')
+        if automatic_path.is_file():
+            from automation import load_config, control
+            automatic = load_config(automatic_path)
+            if Path(automatic['jobs']['processor']['config']) == bridge.processor.path:
+                live = control.status(automatic)
+                automated = automatic['enabled'] and automatic['jobs']['processor']['enabled']
+                automatic_running = live['running'] and any(j['name'] == 'processor' and j['state'] == 'running' for j in live['jobs'])
         with jobs.mutex:
-            return dict(result, running_job=jobs.running.get('processor'), scheduler_enabled=False)
+            return dict(result, running_job=jobs.running.get('processor'), scheduler_enabled=automated, automation_running=automatic_running)
 
     @app.get('/api/processor/tasks', dependencies=[Depends(authenticate)], summary='查看结构化待办及来源证据')
     def processor_tasks(limit: int = Query(20, ge=1, le=100)):
