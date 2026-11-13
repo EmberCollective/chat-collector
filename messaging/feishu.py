@@ -289,12 +289,19 @@ def deliver_app(target, envelope, config, previous=None):
     task, identifier = envelope['task'], envelope['delivery_id']
     scope = _scope(target, config)
     alert = envelope['kind'] == 'alert'
+    refresh_sent = False
     with closing(_state(config)) as conn, conn:
         row = conn.execute('SELECT * FROM feishu_cards WHERE delivery_id=?', (identifier,)).fetchone()
         if row and (row['scope'] != scope or row['task_id'] != task['task_id'] or row['revision'] != task['revision']):
             raise DeliveryRejected('feishu_delivery_identity_conflict')
         if row and row['status'] in {'sending', 'unknown'}:
             raise DeliveryUncertain('feishu_card_prior_outcome_unknown')
+        if row and envelope['kind'] == 'daily_digest' and row['status'] in {'prepared', 'sent'}:
+            card = json.dumps(card_content(task, {}, upload_files=target.get('upload_files', True), daily_digest=True))
+            if card != row['card']:
+                conn.execute('UPDATE feishu_cards SET card=? WHERE delivery_id=?', (card, identifier))
+                refresh_sent = row['status'] == 'sent'
+                row = conn.execute('SELECT * FROM feishu_cards WHERE delivery_id=?', (identifier,)).fetchone()
         if not row:
             actions = [] if alert or envelope['kind'] == 'daily_digest' or task['status'] in {'cancelled', 'superseded'} else ['reopen'] if task['status'] in {'completed', 'done'} else ['complete', 'set_priority']
             tokens = {a: secrets.token_urlsafe(24) for a in actions}
@@ -305,17 +312,19 @@ def deliver_app(target, envelope, config, previous=None):
             row = conn.execute('SELECT * FROM feishu_cards WHERE delivery_id=?', (identifier,)).fetchone()
         head = conn.execute('SELECT c.* FROM feishu_heads h JOIN feishu_cards c ON c.scope=h.scope AND c.task_id=h.task_id AND c.generation=h.generation WHERE h.scope=? AND h.task_id=?', (scope, task['task_id'])).fetchone()
     client = _client(target, config)
-    if row['status'] not in {'sent', 'acknowledged'}:
+    if row['status'] not in {'sent', 'acknowledged'} or refresh_sent:
         with closing(_state(config)) as conn, conn:
             conn.execute("UPDATE feishu_cards SET status='sending' WHERE delivery_id=?", (identifier,))
         try:
-            if not alert and envelope['kind'] == 'upsert' and head and head['message_id'] and time.time() - head['created_at'] < 13 * 86400:
+            previous_card = row if envelope['kind'] == 'daily_digest' else head
+            if (not alert and envelope['kind'] in {'upsert', 'daily_digest'} and previous_card
+                    and previous_card['message_id'] and time.time() - previous_card['created_at'] < 13 * 86400):
                 from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
-                request = (PatchMessageRequest.builder().message_id(head['message_id'])
+                request = (PatchMessageRequest.builder().message_id(previous_card['message_id'])
                            .request_body(PatchMessageRequestBody.builder().content(row['card']).build()).build())
                 _call(client.im.v1.message.patch, request)
-                message_id = head['message_id']
-                created_at = head['created_at']
+                message_id = previous_card['message_id']
+                created_at = previous_card['created_at']
             else:
                 message_id = _send(client, target, 'interactive', json.loads(row['card']), identifier)
                 created_at = time.time()
