@@ -48,6 +48,10 @@ class SaveSettings(StrictModel):
     messaging: dict
 
 
+class StartupSettings(StrictModel):
+    enabled: bool
+
+
 def _hash(raw):
     return hashlib.sha256(raw).hexdigest()
 
@@ -69,6 +73,22 @@ def errors():
 
 
 def register_operations_routes(app, bridge, authenticate):
+    @app.get('/api/operations/startup', dependencies=[Depends(authenticate)])
+    def read_startup():
+        from tools.install.startup import startup_status
+        try:
+            return startup_status(bridge.root)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from None
+
+    @app.put('/api/operations/startup', dependencies=[Depends(authenticate)])
+    def write_startup(body: StartupSettings):
+        from tools.install.startup import set_startup
+        try:
+            return set_startup(bridge.root, body.enabled)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from None
+
     def paths():
         return tuple(bridge.root / bridge.settings.get(name + '_config', 'config/' + name + '.toml')
                      for name in ('automation', 'messaging'))

@@ -30,7 +30,9 @@ tools/console：网页 / OpenAPI → 任务控制 → bridge.py
 C:\veighna_studio\python.exe -B app.py
 ```
 
-启动后访问上面的面板地址。前台运行时按 Ctrl+C 正常退出：停止后续调度，等待当前任务结束；不要在采集进行中强制结束进程。本项目没有安装 Windows 服务或开机自启动。
+启动后访问上面的面板地址。前台运行时按 Ctrl+C 正常退出：停止后续调度，等待当前任务结束；不要在采集进行中强制结束进程。安装包用户使用根目录 `Start.cmd` 隐藏启动全部已配置服务，见 [安装指南](../../docs/installation.md)。
+
+“自动处理 · 后台运行 → 开机自启”提供开启、关闭和实际状态。它与安装向导共用当前用户 Windows 登录启动项，默认关闭；登录后不弹终端、不打开浏览器。关闭自启不停止当前服务。读写接口为 `GET/PUT /api/operations/startup`，PUT 只接受 `{"enabled": true/false}`，均要求控制台会话令牌；不接受任意程序或路径。
 
 **每次启动时，两模块的控制台定时状态默认暂停。** 手动点击各模块“恢复定时”后，按原配置的间隔触发；恢复立即安排首轮。暂停只停止下一次定时触发，不取消正在执行的采集、预览或重放。
 
@@ -57,7 +59,7 @@ python -m venv .venv
 .venv\Scripts\python -B tools\console\app.py
 ```
 
-`start.cmd` 优先使用主项目根目录 `.venv`，不存在时使用本机 `C:\veighna_studio\python.exe`。`console.toml` 的 `collector_root = '../..'` 相对于该配置文件解析，因此从任意工作目录启动仍能定位主项目。端口可在 `console.toml` 改；监听地址固定为 `127.0.0.1`。
+`start.cmd` 优先使用安装包的 `.runtime/python`，其次为主项目根目录 `.venv`，最后尝试开发机的 Python。`console.toml` 的 `collector_root = '../..'` 相对于该配置文件解析，因此从任意工作目录启动仍能定位主项目。端口可在 `console.toml` 改；监听地址固定为 `127.0.0.1`。
 
 ## 日常调试
 

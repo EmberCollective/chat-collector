@@ -35,6 +35,7 @@
 <details id="ops-processing"><summary>自动处理 · 后台运行</summary>
 <p class="scope">自动处理读取正式增量消息；上方调试时间不影响自动运行。保存运行设置后，启动后台服务即可持续运行，关闭本页面不停止服务。</p>
 <p id="ops-service-status" role="status">正在读取后台服务状态…</p>
+<div class="scope"><strong>开机自启</strong><p>当前用户登录 Windows 后，隐藏启动已配置的采集、处理、消息服务及调试台；不会自动打开浏览器。关闭此项不停止当前服务。</p><p id="ops-startup-status" role="status">正在读取启动项…</p><div class="actions"><button id="ops-startup-enable" class="secondary" data-ops-action="true">开启开机自启</button><button id="ops-startup-disable" class="secondary" data-ops-action="true">关闭开机自启</button></div></div>
 <div class="actions"><button id="ops-start" data-ops-action="true">启动后台服务</button><button id="ops-stop" class="secondary" data-ops-action="true">停止后台服务</button><button id="ops-restart" class="secondary" data-ops-action="true">重新启动</button><button id="ops-refresh" class="secondary">刷新运行状态</button></div>
 <p id="ops-status-error" role="status"></p><div id="ops-jobs"></div><div id="ops-processor-fields"></div>
 <div class="actions"><button id="ops-save" data-ops-action="true">保存运行与通道设置</button><button id="ops-reload" class="secondary" data-ops-action="true">重新加载设置</button></div><p id="ops-notice" role="status" aria-live="polite"></p>

@@ -24,6 +24,33 @@ config="messaging.toml"
     return client, root, path
 
 
+def test_startup_setting_is_authenticated_and_independent_of_job_settings(console, monkeypatch):
+    client, root, path = configured(console, monkeypatch)
+    from tools.install import startup
+    calls = []
+    monkeypatch.setattr(startup, 'startup_status', lambda folder: {'supported': True, 'enabled': False, 'installed': False})
+    monkeypatch.setattr(startup, 'set_startup', lambda folder, enabled: calls.append((folder, enabled)) or {'supported': True, 'enabled': enabled})
+    before = path.read_bytes()
+    assert client.get('/api/operations/startup').json()['enabled'] is False
+    assert not calls
+    assert client.put('/api/operations/startup', json={'enabled': True}, headers={'X-Console-Token': 'wrong'}).status_code == 401
+    assert client.put('/api/operations/startup', json={'enabled': 'true'}).status_code == 422
+    assert client.put('/api/operations/startup', json={'enabled': True, 'path': 'evil'}).status_code == 422
+    assert client.put('/api/operations/startup', json={'enabled': True}).json()['enabled'] is True
+    assert client.put('/api/operations/startup', json={'enabled': False}).json()['enabled'] is False
+    assert [enabled for _, enabled in calls] == [True, False]
+    assert path.read_bytes() == before
+
+
+def test_startup_permission_failure_is_not_reported_as_disabled(console, monkeypatch):
+    client, _, _ = configured(console, monkeypatch)
+    from tools.install import startup
+    def failure(*args):
+        raise RuntimeError('无法读取当前用户 Windows 启动项')
+    monkeypatch.setattr(startup, 'startup_status', failure)
+    assert client.get('/api/operations/startup').status_code == 503
+
+
 def test_settings_are_safe_versioned_and_preserve_unexposed_fields(console, monkeypatch):
     client, root, path = configured(console, monkeypatch)
     with (root/'messaging.toml').open('a', encoding='utf8') as stream:

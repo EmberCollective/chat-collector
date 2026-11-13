@@ -212,10 +212,22 @@ document.addEventListener('DOMContentLoaded', () => {
     catch (error) {byId('status-error').textContent = '状态刷新失败：' + error.message + '（稍后自动重试，未保存设置不受影响）';}
     finally {polling = false;}
   }
+  function renderStartup(value) {
+    byId('startup-status').textContent = !value.supported ? '此系统不支持 Windows 登录启动项。' : value.enabled ? '已开启：当前用户下次登录后自动启动。' : value.blocked_by_windows ? '已被 Windows 任务管理器禁用；点击开启可重新启用。' : value.installed && !value.matches ? '发现同名启动项，但启动路径不同；请核对安装目录后重新开启。' : '未开启';
+  }
+  async function refreshStartup() {
+    try {renderStartup(await request('/startup'));}
+    catch (error) {byId('startup-status').textContent = '启动项状态读取失败：' + error.message;}
+  }
+  for (const [id, enabled] of [['startup-enable', true], ['startup-disable', false]]) {
+    byId(id).addEventListener('click', () => action(async () => {
+      renderStartup(await request('/startup', {method: 'PUT', body: JSON.stringify({enabled})}));
+    }));
+  }
   for (const id of ['save', 'delivery-save']) byId(id).addEventListener('click', () => action(saveConfig));
   for (const id of ['reload', 'delivery-reload']) byId(id).addEventListener('click', () => action(loadConfig));
   for (const command of ['start', 'stop', 'restart']) byId(command).addEventListener('click', () => action(() => operate('/service/' + command, '后台服务操作已提交。')));
-  byId('refresh').addEventListener('click', refreshStatus);
+  byId('refresh').addEventListener('click', () => {refreshStatus(); refreshStartup();});
   byId('add-target').addEventListener('click', () => action(async () => {
     if (!config) throw Error('请先加载配置。');
     const id = byId('new-id').value.trim(), kind = byId('new-kind').value;
@@ -227,6 +239,6 @@ document.addEventListener('DOMContentLoaded', () => {
     config.messaging.targets.push(target); targetCard(target); byId('new-id').value = ''; markDirty();
   }));
   window.addEventListener('beforeunload', event => {if (dirty) {event.preventDefault(); event.returnValue = '';}});
-  action(loadConfig); refreshStatus();
+  action(loadConfig); refreshStatus(); refreshStartup();
   setInterval(refreshStatus, 5000); setInterval(countdowns, 1000);
 });
