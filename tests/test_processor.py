@@ -59,6 +59,20 @@ def response(keys, *, identifier=None, title='Submit report', priority='P2'):
                       'source_message_keys': keys}]}
 
 
+def test_processing_published_batches_does_not_refresh_collectors(config, monkeypatch):
+    import collector.__main__ as collection
+    def failed_collection(*args, **kwargs):
+        raise AssertionError('Collection must be scheduled separately')
+    monkeypatch.setattr(collection, 'run_round', failed_collection)
+    config['input']['refresh_collectors'] = True
+    batch(config, 'published', event('a'))
+    monkeypatch.setattr(core, '_call_model', lambda *args: response(['a']))
+    result = run_round(config)
+    assert result['collection'] == []
+    assert len(list_tasks(config)) == 1
+    assert any('refresh_collectors' in warning for warning in result['warnings'])
+
+
 def test_status_reports_effective_model_capabilities(config):
     config['model'].update(vision=True, context_window=1000000, max_output_tokens=384000)
     model = status(config)['model']

@@ -337,3 +337,23 @@ def test_debug_processing_rejects_incomplete_time_and_retains_failure_inputs(con
         app.state.bridge.execute('processor','process',{'start':now-60,'end':now})
     assert list((root/'processing/debug').glob('*/incoming/preview.jsonl'))
     assert not (root/'processing/state.db').exists()
+
+
+def test_debug_processing_uses_verified_snapshots_without_refresh(console, monkeypatch):
+    client, app, root, now = console
+    from collector.adapters import qq, wechat
+    def fail(*args, **kwargs):
+        raise AssertionError('Debug processing must not start collection')
+    monkeypatch.setattr(qq, 'refresh', fail)
+    monkeypatch.setattr(wechat, 'refresh', fail)
+    original = app.state.bridge.config
+    def configured(module):
+        config = original(module)
+        config['source']['refresh'] = True
+        return config
+    monkeypatch.setattr(app.state.bridge, 'config', configured)
+    core = app.state.bridge.processor.core()
+    monkeypatch.setattr(core, 'run_round', lambda config: {'processed_groups': 0})
+    monkeypatch.setattr(core, 'list_tasks', lambda *args, **kwargs: [])
+    result = app.state.bridge.context_window({'start': now-60, 'end': now}, process=True)
+    assert result['formal_state_changed'] is False

@@ -591,14 +591,8 @@ def run_round(config):
         raise ValueError('Configure model.base_url, model.model and a local API key before processing; preview remains available')
     with InstanceLock(config['storage']['state_file']):
         refreshes = []
-        if config['input'].get('refresh_collectors'):
-            from collector.config import load_config as load_collector
-            from collector.__main__ import run_round as collect
-            for platform, path in config['attachments']['collector_configs'].items():
-                source = load_collector(path)
-                if source['platform'] != platform or Path(source['storage']['output_dir']).resolve() != Path(config['input']['batches_dir']).resolve():
-                    raise ValueError('Collector identity or output directory does not match processor input')
-                refreshes.append(collect(source))
+        warnings = (['input.refresh_collectors 已停用；处理只读取已发布批次，请单独运行采集。']
+                    if config['input'].get('refresh_collectors') else [])
         conn = _connect(config, write=True)
         try:
             batches = _export(config, conn)
@@ -682,6 +676,6 @@ def run_round(config):
             return {'status': 'succeeded', 'imported_events': len(events), 'processed_groups': processed,
                     'pending_groups': len(pending) - processed, 'tasks_upserted': updated, 'batches': batches,
                     'group_results':outcomes, 'review_groups':sum(item['review_required'] for item in outcomes),
-                    'collection':refreshes}
+                    'collection':refreshes, 'warnings':warnings}
         finally:
             conn.close()

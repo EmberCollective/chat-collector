@@ -1,7 +1,7 @@
 [input]
 batches_dir = "../data/batches"
 start_at = 1794489581
-refresh_collectors = true
+refresh_collectors = false
 
 [storage]
 state_file = "../data/processor/state.db"

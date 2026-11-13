@@ -220,7 +220,6 @@ class Bridge:
 
     def context_window(self, request, *, process=False):
         from collector.store import digest
-        import importlib
         start, end = request['start'], request['end']
         if type(start) is not int or type(end) is not int or not 0 <= start < end or end-start > 7*86400:
             raise ValueError('上下文调试需要有效的起止时间，每次最多 7 天')
@@ -237,8 +236,6 @@ class Bridge:
                 for module in self.paths:
                     source = self.config(module)
                     with self.lock(source['storage']['state_file']):
-                        if process and source['source'].get('refresh', True):
-                            importlib.import_module('collector.adapters.'+module).refresh(source['source'])
                         for message in self.scan_filtered(source, start, end):
                             rules = message.pop('matched_rules', [])
                             key = digest([str(message[k]) for k in ('platform','account_id','conversation_id','message_id')])
