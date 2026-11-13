@@ -92,6 +92,38 @@ def test_continuity_digest_upgrade_does_not_republish_unchanged_events(tmp_path)
         store.close()
 
 
+def test_large_legacy_continuity_upgrade_uses_index_without_republishing(tmp_path):
+    from common.codec import digest
+    count = 3000
+
+    def records():
+        for number in range(count):
+            record = message()
+            record['message_id'] = str(number)
+            record['source']['selection_context'] = {'previous_message_key': str(number-1), 'previous_known': True}
+            yield record
+
+    path = tmp_path/'legacy-large.db'
+    store = Store(path, 'wechat', 'account')
+    assert store.ingest(records(), 0, 200, 'now')['emitted'] == count
+    with store.db:
+        store.db.execute('DROP INDEX outbox_event_id')
+        store.db.executemany('UPDATE seen SET payload_hash=? WHERE message_key=?',
+            ((digest({key: value for key, value in record.items() if key != 'source'}),
+              digest([str(record[key]) for key in ('platform', 'account_id', 'conversation_id', 'message_id')]))
+             for record in records()))
+    store.close()
+    store = Store(path, 'wechat', 'account')
+    try:
+        plan = store.db.execute("EXPLAIN QUERY PLAN SELECT body FROM outbox WHERE json_extract(body,'$.event_id')=?",
+                                ('sample-id',)).fetchall()
+        assert any('SEARCH outbox USING INDEX outbox_event_id' in row[3] for row in plan)
+        assert store.ingest(records(), 0, 200, 'later')['emitted'] == 0
+        assert store.db.execute('SELECT count(*) FROM outbox').fetchone()[0] == count
+    finally:
+        store.close()
+
+
 def test_identical_text_in_another_conversation_is_preserved(tmp_path):
     store = Store(tmp_path / 'state.db', 'wechat', 'account')
     try:
