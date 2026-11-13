@@ -126,7 +126,7 @@ def test_synthetic_card_callback_is_authenticated_and_never_queues_task(case, mo
     with feishu._state(config) as conn:
         saved = conn.execute('SELECT * FROM feishu_tests').fetchone()
         assert saved['clicked_at'] and saved['action'] == 'complete'
-        assert conn.execute('SELECT count(*) FROM feedback_requests').fetchone()[0] == 0
+        assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name='feedback_requests'").fetchone()
     feishu.handle_callback(config, target, event, enqueue=enqueue)
     event['event']['operator']['open_id'] = 'ou_intruder'
     with pytest.raises(ValueError, match='not_authorized'):
@@ -607,3 +607,26 @@ def test_feishu_state_refuses_other_business_database_without_mutation(case):
     with pytest.raises(ValueError, match='wrong_database'):
         feishu._state(config)
     assert path.read_bytes() == original
+
+
+def test_channel_connection_keeps_legacy_tokens_receipts_and_feedback_rows(case, monkeypatch):
+    from messaging import feedback
+    config = case[0]
+    with feedback._connect(config, write=True) as conn:
+        conn.execute("INSERT INTO feedback_requests(request_id,task_id,request,acknowledgement,status,created_at,updated_at) VALUES('q1','t1','{}','{}','queued',1,1)")
+    with feishu._state(config) as conn:
+        conn.execute("INSERT INTO feishu_cards VALUES('d1','scope','target','t1',3,'g1','om_old',1,'sent','{}')")
+        conn.execute("INSERT INTO feishu_actions VALUES('old-token','d1','complete')")
+        conn.execute("INSERT INTO feishu_heads VALUES('scope','t1','g1')")
+        conn.execute("INSERT INTO feishu_files VALUES('scope','t1','sha','file_key','om_file','unknown',NULL,'original.pdf')")
+        expected = {name: [tuple(row) for row in conn.execute('SELECT * FROM ' + name)]
+                    for name in ('feishu_cards', 'feishu_actions', 'feishu_heads', 'feishu_files', 'feedback_requests')}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('channel connection must not call the feedback connector')
+
+    monkeypatch.setattr(feedback, '_connect', forbidden)
+    with feishu._state(config) as conn:
+        assert conn.execute('PRAGMA database_list').fetchone()['file'] == str(Path(config['feedback']['state_file']).resolve())
+        for name, rows in expected.items():
+            assert [tuple(row) for row in conn.execute('SELECT * FROM ' + name)] == rows

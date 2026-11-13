@@ -11,6 +11,7 @@ import importlib.metadata
 import json
 from pathlib import Path
 import secrets
+import sqlite3
 import time
 
 from .channels import DeliveryRejected, DeliveryUncertain, _secret, _url, public_envelope
@@ -30,16 +31,23 @@ CREATE TABLE IF NOT EXISTS feishu_files(
 
 
 def _state(config):
-    from .feedback import _connect
     path = Path(config.get('feedback', {}).get('state_file') or Path(config['storage']['state_file']).with_name('feedback.db'))
-    settings = dict(config, feedback=dict(config.get('feedback', {}), state_file=str(path)))
-    conn = _connect(settings, write=True)
-    conn.executescript(SCHEMA)
-    with conn:
-        conn.execute('BEGIN IMMEDIATE')
-        if 'file_name' not in {r[1] for r in conn.execute('PRAGMA table_info(feishu_files)')}:
-            conn.execute('ALTER TABLE feishu_files ADD COLUMN file_name TEXT')
-    return conn
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=1)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+        if any(name != 'feedback_requests' and not name.startswith('feishu_') for name in tables):
+            raise ValueError('feishu_state_wrong_database')
+        conn.executescript(SCHEMA)
+        with conn:
+            conn.execute('BEGIN IMMEDIATE')
+            if 'file_name' not in {r[1] for r in conn.execute('PRAGMA table_info(feishu_files)')}:
+                conn.execute('ALTER TABLE feishu_files ADD COLUMN file_name TEXT')
+        return conn
+    except Exception:
+        conn.close()
+        raise
 
 
 def _scope(target, config):
