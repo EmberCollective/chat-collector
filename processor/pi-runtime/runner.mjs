@@ -25,7 +25,8 @@ lines.on('line', line => {
     started = true;
     void runPi(message, (args, signal) => requestTool('read_attachment', args, signal),
       event => send({type: 'progress', event}),
-      (args, signal) => requestTool('find_related_tasks', args, signal)).then(result => send({type: 'result', result})).catch(error => {
+      (args, signal) => requestTool('find_related_tasks', args, signal),
+      (args, signal) => requestTool('validate_submission', args, signal)).then(result => send({type: 'result', result})).catch(error => {
       send({type: 'error', code: safeCodes.has(error.message) ? error.message : 'runtime_error'});
       process.exitCode = 1;
     }).finally(() => {lines.close(); process.stdin.pause();});

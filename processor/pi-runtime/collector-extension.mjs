@@ -15,7 +15,7 @@ const taskSchema = Type.Object({
 export const TOOL_NAMES = ['read_attachment', 'find_related_tasks', 'submit_tasks'];
 
 // A native Pi extension: Pi owns validation, execution and the model/tool loop.
-export function collectorExtension({input, state, readAttachment, findTasks, progress}) {
+export function collectorExtension({input, state, readAttachment, findTasks, validateSubmission, progress}) {
   const segments = [...(input.payload.segments ?? []), ...(input.payload.conversations ?? []).flatMap(c => c.segments ?? [])];
   const sourceRefs = new Set(segments.flatMap(s => s.messages ?? []).map(m => m.id));
   const attachmentRefs = new Set((input.payload.attachments ?? []).map(a => a.id ?? a.ref));
@@ -82,7 +82,7 @@ export function collectorExtension({input, state, readAttachment, findTasks, pro
     });
     pi.registerTool({
       name: 'submit_tasks', label: 'Submit structured tasks', executionMode: 'sequential',
-      description: 'Finish processing by submitting structured tasks based on the selected messages and relevant content actually read. sources must be supplied message IDs or read_attachment evidence refs. Use tasks:[] if no actionable task is found; you are not required to read every attachment. Optionally explain skipped irrelevant attachments via attachment_decisions:[{ref:"f1",reason:"not relevant to the request"}]. Mark tasks needs_review when required evidence is missing. This ends the native Pi run.',
+      description: 'Submit structured tasks based on the selected messages and relevant content actually read. Each task must cite exactly one conversation; split tasks with sources from different conversations. sources must be supplied message IDs or read_attachment evidence refs. Add an explicit message source if attachment evidence belongs to multiple conversations. Use tasks:[] if no actionable task is found; you are not required to read every attachment. Optionally explain skipped irrelevant attachments via attachment_decisions:[{ref:"f1",reason:"not relevant to the request"}]. Mark tasks needs_review when required evidence is missing. Only a valid submission ends the Pi run; if rejected, use the returned feedback to correct and submit again.',
       parameters: Type.Object({tasks: Type.Array(taskSchema, {maxItems: 100}),
         attachment_decisions: Type.Optional(Type.Array(Type.Object({ref:Type.String(), reason:Type.String({minLength:1,maxLength:500})}, {additionalProperties:false}), {maxItems:1000}))}, {additionalProperties: false}),
       async execute(_id, args, signal, _update, ctx) {
@@ -99,6 +99,11 @@ export function collectorExtension({input, state, readAttachment, findTasks, pro
             state.error = 'invalid_task'; ctx.abort(); throw new Error('Unknown or duplicate task reference');
           }
           if (task.task_id != null) assigned.add(task.task_id);
+        }
+        const validation = await validateSubmission(args, signal);
+        if (validation?.accepted !== true) {
+          const details = {status: 'needs_review', warnings: ['submission_rejected'], ...validation};
+          return {content: [{type: 'text', text: JSON.stringify(details)}], details, isError: true};
         }
         state.result = structuredClone(args);
         return {content: [{type: 'text', text: 'Structured tasks accepted.'}], details: {count: args.tasks.length}, terminate: true};

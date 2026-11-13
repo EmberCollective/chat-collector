@@ -35,7 +35,7 @@ def runtime_status():
             'package': '@earendil-works/pi-coding-agent', 'version': '1.5.2'}
 
 
-def run_agent(config, system, payload, *, api_key='', attachment_reader=None, existing_tasks=None, task_finder=None):
+def run_agent(config, system, payload, *, api_key='', attachment_reader=None, existing_tasks=None, task_finder=None, submission_validator=None):
     runtime = runtime_status()
     if not runtime['installed']:
         raise RuntimeError('Pi runtime is missing; install the pinned packages with npm ci in processor/pi-runtime and Node >=22.19')
@@ -72,6 +72,10 @@ def run_agent(config, system, payload, *, api_key='', attachment_reader=None, ex
 
     def execute_tool(message):
         try:
+            if message['name'] == 'validate_submission':
+                result = submission_validator(**message['arguments']) if submission_validator else {'accepted': True}
+                incoming.put(('reply', {'type': 'tool_result', 'id': message['id'], 'result': result}))
+                return
             handler = attachment_reader if message['name'] == 'read_attachment' else task_finder
             if handler is None:
                 raise RuntimeError('Tool unavailable')
@@ -79,7 +83,8 @@ def run_agent(config, system, payload, *, api_key='', attachment_reader=None, ex
             incoming.put(('reply', {'type': 'tool_result', 'id': message['id'], 'result': result}))
         except Exception as exc:
             # Third-party parser errors can contain local paths or private contents.
-            error = 'attachment_read_failed' if message['name'] == 'read_attachment' else 'task_search_failed'
+            error = {'read_attachment': 'attachment_read_failed', 'find_related_tasks': 'task_search_failed',
+                     'validate_submission': 'submission_validation_failed'}[message['name']]
             if message['name'] == 'find_related_tasks' and isinstance(exc, ValueError) and len(str(exc))<=150 and str(exc).replace('_','').isalnum():
                 error = str(exc)
             incoming.put(('reply', {'type': 'tool_result', 'id': message['id'], 'error': error}))
@@ -104,7 +109,7 @@ def run_agent(config, system, payload, *, api_key='', attachment_reader=None, ex
             if kind == 'reply':
                 send(message)
             elif message.get('type') == 'tool_request':
-                if message.get('name') not in {'read_attachment', 'find_related_tasks'} or not isinstance(message.get('arguments'), dict):
+                if message.get('name') not in {'read_attachment', 'find_related_tasks', 'validate_submission'} or not isinstance(message.get('arguments'), dict):
                     raise RuntimeError('Invalid Pi tool request')
                 threading.Thread(target=execute_tool, args=(message,), daemon=True).start()
             elif message.get('type') == 'progress':

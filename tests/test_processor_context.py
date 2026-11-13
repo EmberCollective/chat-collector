@@ -124,6 +124,44 @@ def test_task_cannot_mix_messages_from_different_conversations(config, monkeypat
         run(config, groups, monkeypatch, lambda *args, **kwargs: {'tasks':[task('m1','m2')]})
 
 
+def test_submission_feedback_rejects_cross_conversation_then_accepts_corrected_tasks(config, monkeypatch):
+    groups = [group(event('a'), identifier='a'), group(event('b', conversation='other'), identifier='b')]
+    def fake(cfg, system, payload, **kwargs):
+        feedback = kwargs['submission_validator'](tasks=[task('m1', 'm2')])
+        assert feedback['accepted'] is False
+        assert feedback['source_conversations'] == {'m1':['c1'], 'm2':['c2']}
+        assert 'one explicit conversation' in feedback['error']
+        for g in groups:
+            assert g['messages'][0]['message_key'] not in json.dumps(feedback)
+        corrected = {'tasks':[task('m1'), task('m2')]}
+        assert kwargs['submission_validator'](**corrected) == {'accepted': True}
+        return corrected
+    result = run(config, groups, monkeypatch, fake)
+    assert len(result['a']['tasks']) == len(result['b']['tasks']) == 1
+
+
+def test_submission_accepts_multiple_segments_in_one_conversation(config, monkeypatch):
+    first, second = event('a'), event('b')
+    selected = group(first, second)
+    selected['segments'] = [[first], [second]]
+    def fake(cfg, system, payload, **kwargs):
+        submitted = {'tasks':[task('m1', 'm2')]}
+        assert kwargs['submission_validator'](**submitted) == {'accepted': True}
+        return submitted
+    assert len(run(config, [selected], monkeypatch, fake)['group-id']['tasks']) == 1
+
+
+def test_submission_feedback_includes_business_validation_before_accepting(config, monkeypatch):
+    history, current = event('history'), event('current')
+    selected = group(history, current, primary=[current['message_key']])
+    def fake(cfg, system, payload, **kwargs):
+        feedback = kwargs['submission_validator'](tasks=[task('m1')])
+        assert feedback['accepted'] is False
+        assert 'historical context' in feedback['error']
+        return {'tasks':[task('m2')]}
+    assert len(run(config, [selected], monkeypatch, fake)['group-id']['tasks']) == 1
+
+
 def test_attachment_proof_cannot_be_attached_to_another_conversation(config, tmp_path, monkeypatch):
     groups = [group(event('a', attachments=[pdf_attachment(tmp_path)]), identifier='a'),
               group(event('b', conversation='other'), identifier='b')]

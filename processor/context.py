@@ -100,8 +100,83 @@ def process_batch(config, rules, groups, existing, *, api_key=''):
         content = [{'type': 'text', 'text': canonical(details)}, *result.get('content', [])[1:]]
         return {'content': content, 'details': details}
 
+    keys_by_group = {group['id']: {e['message_key'] for e in group['messages']} for group in groups}
+
+    def map_submission(result, submission=None):
+        if not isinstance(result, dict) or not isinstance(result.get('tasks'), list):
+            raise ValueError('Pi did not submit tasks')
+        replies = {group['id']: {'tasks': [], '_agent': result.get('_agent', {}), 'submission_file':str(submission) if submission else None} for group in groups}
+        for task in result['tasks']:
+            refs = task.get('sources')
+            if not isinstance(refs, list) or not refs or any(not isinstance(ref, str) for ref in refs):
+                raise ValueError('Task sources must contain actual short references')
+            message_keys, proofs = set(), []
+            for ref in refs:
+                if ref in message_map:
+                    message_keys.add(message_map[ref]['message_key'])
+                elif ref in attachments.evidence:
+                    proofs.append(attachments.evidence[ref])
+                else:
+                    raise ValueError('Task references unread or fabricated evidence')
+            owners = [group for group in groups if message_keys and message_keys <= keys_by_group[group['id']]]
+            if len(owners) > 1:
+                current = [group for group in owners if message_keys & set(group['primary_message_keys'])]
+                if len(current) == 1:
+                    owners = current
+            if not message_keys:
+                proof_keys = set().union(*(set(p['message_keys']) for p in proofs))
+                owners = [group for group in groups if proof_keys & keys_by_group[group['id']]]
+            if len(owners) != 1:
+                raise ValueError('A task must reference one explicit conversation, never mix conversations')
+            group = owners[0]
+            evidence = []
+            for proof in proofs:
+                origins = proof.get('origins', [])
+                selected = [o for o in origins if o['message_key'] in keys_by_group[group['id']]]
+                if not selected:
+                    raise ValueError('Attachment evidence belongs to a different conversation')
+                for origin in selected:
+                    key, index = origin['message_key'], origin['attachment_index']
+                    event = next(e for e in group['messages'] if e['message_key'] == key)
+                    evidence.append({'ref': proof['ref'], 'message_key': key, 'attachment_index': index,
+                                     'locator': {k: proof[k] for k in ('page', 'block') if k in proof},
+                                     'attachment': attachments.resolved.get((key,index), event['message']['attachments'][index])})
+                    message_keys.add(key)
+            mapped = {key: value for key, value in task.items() if key != 'sources'}
+            identifier = task.get('task_id')
+            if identifier is not None:
+                if identifier not in task_map or task_map[identifier].get('status') == 'superseded':
+                    raise ValueError('Existing task reference is unknown or superseded')
+                mapped['task_id'] = task_map[identifier]['task_id']
+                replies[group['id']].setdefault('_existing_tasks', []).append(task_map[identifier])
+            mapped['source_message_keys'] = sorted(message_keys)
+            mapped['attachment_evidence'] = evidence
+            replies[group['id']]['tasks'].append(mapped)
+        return replies
+
+    def validate_submission(**result):
+        try:
+            from .core import _validate_response
+            mapped = map_submission(result)
+            for group in groups:
+                reply = mapped[group['id']]
+                _validate_response(reply, group, reply.get('_existing_tasks', []), config['context']['timezone'])
+            return {'accepted': True}
+        except ValueError as exc:
+            # Only short references and static validation text cross the tool boundary.
+            cited = {ref for task in result.get('tasks', []) for ref in task.get('sources', []) if isinstance(ref, str)}
+            scopes = {}
+            for ref in sorted(cited):
+                keys = ({message_map[ref]['message_key']} if ref in message_map
+                        else set(attachments.evidence.get(ref, {}).get('message_keys', [])))
+                scopes[ref] = [f'c{index}' for index, group in enumerate(groups, 1)
+                               if keys & {event['message_key'] for event in group['messages']}]
+            return {'accepted': False, 'error': str(exc), 'source_conversations': scopes,
+                    'next_action': 'Correct the submission and call submit_tasks again. Each task must cite one conversation; split cross-conversation tasks. Add an explicit message reference when an attachment appears in multiple conversations.'}
+
     result = run_agent(config, system, payload, api_key=api_key,
-                       attachment_reader=read_attachment, existing_tasks=related, task_finder=lookup.find)
+                       attachment_reader=read_attachment, existing_tasks=related, task_finder=lookup.find,
+                       submission_validator=validate_submission)
     # Local audit only: never inject submissions or source maps into Pi's conversation.
     folder = Path(config['storage']['state_file']).parent / 'submissions'
     folder.mkdir(parents=True, exist_ok=True)
@@ -110,56 +185,7 @@ def process_batch(config, rules, groups, existing, *, api_key=''):
         json.dump({'result':result, 'message_refs':{ref:event['message_key'] for ref,event in message_map.items()},
                    'task_refs':{ref:task['task_id'] for ref,task in task_map.items()},
                    'attachments':attachments.catalog()}, stream, ensure_ascii=False)
-    if not isinstance(result, dict) or not isinstance(result.get('tasks'), list):
-        raise ValueError('Pi did not submit tasks')
-    replies = {group['id']: {'tasks': [], '_agent': result.get('_agent', {}), 'submission_file':str(submission)} for group in groups}
-    keys_by_group = {group['id']: {e['message_key'] for e in group['messages']} for group in groups}
-    for task in result['tasks']:
-        refs = task.get('sources')
-        if not isinstance(refs, list) or not refs or any(not isinstance(ref, str) for ref in refs):
-            raise ValueError('Task sources must contain actual short references')
-        message_keys, proofs = set(), []
-        for ref in refs:
-            if ref in message_map:
-                message_keys.add(message_map[ref]['message_key'])
-            elif ref in attachments.evidence:
-                proofs.append(attachments.evidence[ref])
-            else:
-                raise ValueError('Task references unread or fabricated evidence')
-        owners = [group for group in groups if message_keys and message_keys <= keys_by_group[group['id']]]
-        if len(owners) > 1:
-            current = [group for group in owners if message_keys & set(group['primary_message_keys'])]
-            if len(current) == 1:
-                owners = current
-        if not message_keys:
-            proof_keys = set().union(*(set(p['message_keys']) for p in proofs))
-            owners = [group for group in groups if proof_keys & keys_by_group[group['id']]]
-        if len(owners) != 1:
-            raise ValueError('A task must reference one explicit conversation, never mix conversations')
-        group = owners[0]
-        evidence = []
-        for proof in proofs:
-            origins = proof.get('origins', [])
-            selected = [o for o in origins if o['message_key'] in keys_by_group[group['id']]]
-            if not selected:
-                raise ValueError('Attachment evidence belongs to a different conversation')
-            for origin in selected:
-                key, index = origin['message_key'], origin['attachment_index']
-                event = next(e for e in group['messages'] if e['message_key'] == key)
-                evidence.append({'ref': proof['ref'], 'message_key': key, 'attachment_index': index,
-                                 'locator': {k: proof[k] for k in ('page', 'block') if k in proof},
-                                 'attachment': attachments.resolved.get((key,index), event['message']['attachments'][index])})
-                message_keys.add(key)
-        mapped = {key: value for key, value in task.items() if key != 'sources'}
-        identifier = task.get('task_id')
-        if identifier is not None:
-            if identifier not in task_map or task_map[identifier].get('status') == 'superseded':
-                raise ValueError('Existing task reference is unknown or superseded')
-            mapped['task_id'] = task_map[identifier]['task_id']
-            replies[group['id']].setdefault('_existing_tasks', []).append(task_map[identifier])
-        mapped['source_message_keys'] = sorted(message_keys)
-        mapped['attachment_evidence'] = evidence
-        replies[group['id']]['tasks'].append(mapped)
+    replies = map_submission(result, submission)
     decisions = {item['ref']:item['reason'] for item in result.get('attachment_decisions', [])}
     for group in groups:
         review = []

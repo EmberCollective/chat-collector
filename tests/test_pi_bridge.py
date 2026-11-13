@@ -108,6 +108,30 @@ def test_unknown_source_rejected_across_python_node_protocol(endpoint):
         run_agent(config, 'Submit tasks.', payload, api_key='fixture-secret')
 
 
+def test_native_pi_can_correct_rejected_submission_without_restarting(endpoint, tmp_path):
+    from processor import context
+    from test_processor_context import event, group
+    config, payload, responder, requests = endpoint
+    config.update(storage={'state_file': str(tmp_path/'state.db')},
+                  context={'timezone':'Asia/Shanghai'}, processing={'max_input_chars':100000},
+                  attachments={'archive_roots':[], 'cache_dir':str(tmp_path/'cache')},
+                  _progress_file=str(tmp_path/'events.jsonl'))
+    groups = [group(event('a'), identifier='one'),
+              group(event('b', conversation='another'), identifier='two')]
+    responder.append(lambda handler, n: send_tool(handler, 'submit_tasks',
+        {'tasks':[task(['m1','m2'])]} if n == 1 else {'tasks':[task(['m1']),task(['m2'])]}))
+    result = context.process_batch(config, {'text':'Extract explicit tasks.'}, groups, [])
+    assert len(result['one']['tasks']) == len(result['two']['tasks']) == 1
+    assert len(requests) == 2
+    feedback = json.dumps(requests[1]['messages'])
+    assert 'submission_rejected' in feedback and 'source_conversations' in feedback
+    assert all(e['message_key'] not in feedback for g in groups for e in g['messages'])
+    events = [json.loads(line) for line in (tmp_path/'events.jsonl').read_text().splitlines()]
+    outcomes = [e for e in events if e['type']=='tool_execution_end' and e['tool']=='submit_tasks']
+    assert [e['failed'] for e in outcomes] == [True,False]
+    assert events[-1]['type']=='run_end' and events[-1]['failed'] is False
+
+
 def test_live_task_lookup_registers_new_reference_for_native_submission(endpoint):
     config,payload,responder,requests=endpoint
     filters={'platforms':['wechat'],'people':['张老师'],'time_from':'2026-11-01','time_to':'2026-12-01','offset':40}
