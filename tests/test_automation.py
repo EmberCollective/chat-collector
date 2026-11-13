@@ -297,6 +297,27 @@ def test_disabled_check_and_once_never_call_callbacks_or_network(config):
     assert result['state'] == 'disabled'
 
 
+def test_check_rejects_multiple_listener_apps_before_start(config, monkeypatch):
+    import messaging
+    from messaging import feishu
+    for entry in config['jobs'].values():
+        entry['enabled'] = False
+    config['listener']['enabled'] = True
+    monkeypatch.setenv('APP_ONE', 'cli_one')
+    monkeypatch.setenv('APP_TWO', 'cli_two')
+    targets = [{'id': 'team-one', 'kind': 'feishu_app', 'enabled': True, 'app_id_env': 'APP_ONE'},
+               {'id': 'team-two', 'kind': 'feishu_app', 'enabled': True, 'app_id_env': 'APP_TWO'}]
+    monkeypatch.setattr(messaging, 'load_config', lambda path: {'enabled': True, 'targets': targets})
+    monkeypatch.setattr(feishu, 'check', lambda *args: {'configured': True})
+    result = check(config)
+    assert not result['ready']
+    assert result['jobs']['listener']['reason'] == 'feishu_listener_multiple_apps_not_supported'
+    targets.pop()
+    assert check(config)['ready']
+    monkeypatch.setattr(feishu, 'check', lambda *args: {'configured': False})
+    assert not check(config)['ready']
+
+
 def test_scheduler_recovery_counts_interrupted_execution_and_prevents_duplicate_instances(config):
     clock = Clock()
     with core._connect(config, write=True) as conn:

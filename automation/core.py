@@ -175,6 +175,10 @@ def check(config):
             ready = importlib.util.find_spec(module) is not None
             if name == 'alerts':
                 ready = ready and loaded['enabled'] and any(t['id'] == entry['target_id'] and t['enabled'] and t['kind'] in {'feishu', 'feishu_app'} for t in loaded['targets'])
+            else:
+                from messaging.feishu import check as check_listener, listener_target
+                target = listener_target(loaded)
+                ready = ready and loaded['enabled'] and check_listener(loaded, target)['configured']
             checks[name] = {'enabled': True, 'ready': ready}
         except Exception as exc:
             checks[name] = {'enabled': True, 'ready': False, 'reason': _error(exc)}
