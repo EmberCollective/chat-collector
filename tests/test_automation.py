@@ -11,7 +11,15 @@ from automation import core
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(tmp_path, monkeypatch):
+    monkeypatch.setenv('TEST_AUTOMATION_APP', 'cli_automation')
+    (tmp_path / 'messaging.toml').write_text('''enabled=true
+[[targets]]
+id="custom-team"
+kind="feishu_app"
+enabled=true
+app_id_env="TEST_AUTOMATION_APP"
+''', encoding='utf-8')
     path = tmp_path / 'automation.toml'
     path.write_text('''enabled = true
 [storage]
@@ -329,7 +337,8 @@ def test_listener_restart_budget_is_not_reset_by_monitor_poll(config, monkeypatc
     assert status(config)['listener']['attempts'] == 3
 
 
-def test_listener_recovers_unrecorded_child_instead_of_launching_twice(config, monkeypatch):
+@pytest.mark.parametrize('legacy', [True, False])
+def test_listener_recovers_unrecorded_child_instead_of_launching_twice(config, monkeypatch, legacy):
     from automation.listener import ListenerSupervisor
     import automation.listener as module
     service = SchedulerService(config, clock=Clock())
@@ -337,12 +346,61 @@ def test_listener_recovers_unrecorded_child_instead_of_launching_twice(config, m
         conn.execute("UPDATE listener SET state='starting',attempts=1 WHERE id=1")
     supervisor = ListenerSupervisor(service)
     command = [module.sys.executable, '-m', 'messaging.feishu', 'listen', '--config', config['listener']['config'], '--stop-file', str(supervisor.stop_file)]
+    if not legacy:
+        command += ['--target', 'custom-team']
     process = type('Process', (), {'pid': 123, 'info': {'cmdline': command, 'create_time': 1.0}})()
     monkeypatch.setattr(module.psutil, 'process_iter', lambda *args: [process])
     monkeypatch.setattr(module.subprocess, 'Popen', lambda *args, **kwargs: pytest.fail('Must adopt existing child'))
     supervisor.poll()
     assert status(config)['listener']['state'] == 'running'
     assert status(config)['listener']['pid'] == 123
+    assert json.loads(status(config)['listener']['command']) == command
+
+
+def test_listener_reports_multiple_apps_before_spawning(config, monkeypatch):
+    from automation.listener import ListenerSupervisor
+    import automation.listener as module
+    message_config = Path(config['listener']['config'])
+    message_config.write_text('''enabled=true
+[[targets]]
+id="custom-team"
+kind="feishu_app"
+enabled=true
+app_id_env="LISTENER_APP_ONE"
+[[targets]]
+id="another-app"
+kind="feishu_app"
+enabled=true
+app_id_env="LISTENER_APP_TWO"
+''', encoding='utf-8')
+    monkeypatch.setenv('LISTENER_APP_ONE', 'cli_one')
+    monkeypatch.setenv('LISTENER_APP_TWO', 'cli_two')
+    service = SchedulerService(config, clock=Clock())
+    with core._connect(config, write=True):
+        pass
+    monkeypatch.setattr(module.psutil, 'process_iter', lambda *args: [])
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda *a, **kw: pytest.fail('Must reject ambiguous apps'))
+    ListenerSupervisor(service).poll()
+    listener = status(config)['listener']
+    assert listener['state'] == 'paused'
+    assert listener['error'] == 'feishu_listener_multiple_apps_not_supported'
+
+
+def test_listener_spawns_custom_target_explicitly(config, monkeypatch):
+    from types import SimpleNamespace
+    from automation.listener import ListenerSupervisor
+    import automation.listener as module
+    service = SchedulerService(config, clock=Clock())
+    with core._connect(config, write=True):
+        pass
+    commands = []
+    monkeypatch.setattr(module.psutil, 'process_iter', lambda *args: [])
+    monkeypatch.setattr(module.psutil, 'Process', lambda pid: SimpleNamespace(create_time=lambda: 1.0))
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda command, **kw:
+                        commands.append(command) or SimpleNamespace(pid=123))
+    ListenerSupervisor(service).poll()
+    assert commands[0][-2:] == ['--target', 'custom-team']
+    assert status(config)['listener']['state'] == 'running'
 
 
 def test_listener_stop_timeout_keeps_process_for_graceful_shutdown(config, monkeypatch):
