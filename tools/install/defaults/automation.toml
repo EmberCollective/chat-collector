@@ -1,0 +1,68 @@
+# 启用前先检查：python -m automation check --config config/automation.toml
+# 启用状态和间隔可在调试面板修改；后台独立运行，不依赖浏览器。
+enabled = false
+
+[storage]
+state_file = "../data/automation/state.db"
+
+[scheduler]
+timezone = "Asia/Shanghai"
+control_interval_seconds = 5
+worker_threads = 8
+
+# max_attempts 包含首次执行；耗尽后持久暂停，必须显式 resume。
+[retry]
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
+
+[jobs.wechat]
+enabled = false
+config = "wechat.toml"
+interval_seconds = 60
+
+[jobs.qq]
+enabled = false
+config = "qq.toml"
+interval_seconds = 60
+
+[jobs.processor]
+enabled = false
+config = "processor.toml"
+interval_seconds = 1800
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
+
+[jobs.messaging]
+enabled = false
+config = "messaging.toml"
+interval_seconds = 60
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
+
+[jobs.feedback]
+enabled = false
+config = "messaging.toml"
+interval_seconds = 5
+
+# 飞书官方长连接进程；重启预算包含首次启动，不因正常轮询而重置。
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
+[listener]
+enabled = false
+config = "messaging.toml"
+check_interval_seconds = 5
+max_attempts = 3
+backoff_seconds = 30
+max_backoff_seconds = 900
+
+# 使用 messaging.toml 中显式指定的专用飞书通知目标，不含聊天正文或密钥。
+[alerts]
+enabled = false
+config = "messaging.toml"
+target_id = "feishu-assistant"
+cooldown_seconds = 3600
+recovery_enabled = true

@@ -21,6 +21,8 @@ from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# Embedded Python does not add the entry script's directory to sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge import Bridge, atomic_json
 
 ROOT = Path(__file__).resolve().parent

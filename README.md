@@ -37,6 +37,8 @@ Notion Calendar 有两条路径：将带 Date 属性的 Notion 数据库连接�
 
 ## 启动与日常操作
 
+新机器使用 Windows x64 预览包：解压后双击 `Install.cmd` 完成依赖、模型/飞书配置和首次最近 7 日处理；以后双击 `Start.cmd`。安装引导和调试面板均可按用户选择设置登录后自动启动。完整步骤、重试方式与兼容性边界见 [安装指南](docs/installation.md)。
+
 在项目根目录运行。当前本机 Python 为 `C:\veighna_studio\python.exe`，可代替下列 `python`。本地 `runtime-deps` 中包含 SQLCipher 等依赖；迁移机器时需重新安装匹配版本。
 
 ```powershell
@@ -62,7 +64,7 @@ python -m automation status --config config/automation.toml
 .\tools\console\start.cmd
 ```
 
-`collector`、`processor` 和 `messaging` 可分别运行；需要统一自动运行时使用 `automation`，不要与调试台同时调度同一采集模块。`tools/automation/start.cmd` / `stop.cmd` 隐藏启动和安全停止后台服务；启用状态以配置和调试面板为准，未安装开机任务。详细开关、重试和恢复命令见 [自动运行](docs/automation.md)。
+`collector`、`processor` 和 `messaging` 可分别运行；需要统一自动运行时使用 `automation`，不要与调试台同时调度同一采集模块。`tools/automation/start.cmd` / `stop.cmd` 启动和安全停止后台服务；启用状态以配置和调试面板为准。开机自启是可选的当前用户登录任务，面板读取实际状态；关闭它不停止当前服务。详细开关、重试和恢复命令见 [自动运行](docs/automation.md)。
 
 首次 QQ 取钥使用 `tools/qq-recover.cmd`，需要以管理员身份运行并保持 QQ 登录。已有合法密钥后的日常采集不需要反复扫描进程。微信媒体解码由采集提供方处理，处理层通过附件编号请求，不直接操作原始数据库。
 

@@ -1,0 +1,42 @@
+platform = "wechat"
+
+[source]
+account_id = "unconfigured"
+encrypted_dir = "../data/unconfigured/wechat"
+decrypted_dir = "../data/wechat/decrypted"
+key_file = "../secrets/wechat-keys.json"
+refresh = true
+snapshot_mode = "incremental"
+media_dir = "../data/unconfigured/wechat"
+resource_db = '../data/wechat/decrypted/message_resource.db'
+
+[processing]
+intensity = "metadata" # metadata / standard / full
+
+[attachments]
+enabled = true
+archive_dir = "../data/assets"
+allowed_roots = []
+
+[storage]
+state_file = "../data/wechat/state.db"
+output_dir = "../data/batches"
+
+[schedule]
+# 0 refreshes every round; positive values defer whole rounds without advancing the checkpoint.
+refresh_interval_seconds = 0
+interval_seconds = 1800
+initial_lookback_seconds = 604800
+
+[[filters.rulesets]]
+file = "../rulesets/mentions-all.sql"
+enabled = true
+
+[[filters.rulesets]]
+file = "../rulesets/files.sql"
+enabled = true
+
+[[filters.rulesets]]
+file = "../rulesets/context.sql"
+enabled = true
+recent_count = 5

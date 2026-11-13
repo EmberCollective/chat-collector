@@ -1,0 +1,41 @@
+platform = "qq"
+
+[source]
+account_id = "unconfigured"
+encrypted_dir = "../data/unconfigured/qq"
+decrypted_dir = "../data/qq/decrypted"
+key_file = "../secrets/account-key.json"
+refresh = true
+snapshot_mode = "incremental"
+media_dir = "../data/unconfigured/qq"
+
+[processing]
+intensity = "full" # metadata / standard / full
+
+[attachments]
+enabled = true
+archive_dir = "../data/assets"
+allowed_roots = []
+
+[storage]
+state_file = "../data/qq/state.db"
+output_dir = "../data/batches"
+
+[schedule]
+# 0 refreshes every round; positive values defer whole rounds without advancing the checkpoint.
+refresh_interval_seconds = 0
+interval_seconds = 1800
+initial_lookback_seconds = 604800
+
+[[filters.rulesets]]
+file = "../rulesets/mentions-all.sql"
+enabled = true
+
+[[filters.rulesets]]
+file = "../rulesets/files.sql"
+enabled = true
+
+[[filters.rulesets]]
+file = "../rulesets/context.sql"
+enabled = true
+recent_count = 5

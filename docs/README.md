@@ -3,6 +3,7 @@
 | 目标 | 文档 |
 |---|---|
 | 理解模块与运行入口 | [开发指南](development.md) |
+| 安装、一键启动与开机自启 | [安装指南](installation.md)、[安装验收](installation-acceptance.md) |
 | 接入新的收集模块 | [数据契约](data-contract.md)、[收集层开发指南](collector-development.md)、[提供方接入](provider-api.md) |
 | 检查模型实际收到什么 | [AI 输入结构](ai-context.md)、[合成输入](examples/ai-context-v1.json) |
 | 编写 SQL 筛选 | [规则集](../FILTERS.md) |

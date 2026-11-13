@@ -1,0 +1,98 @@
+# 消息层独立消费已发布待办；填好目标后再开启，不会调用模型或刷新聊天库。
+enabled = false
+env_file = "../.env"
+
+[feedback]
+enabled = true
+processor_config = "processor.toml"
+state_file = "../data/messaging/feedback.db"
+max_attempts = 5
+retry_base_seconds = 15
+
+[input]
+batches_dir = "../data/todos"
+
+[storage]
+state_file = "../data/messaging/state.db"
+assets_dir = "../data/messaging/assets"
+
+[attachments]
+allowed_roots = ["../data/assets", "../data/processor/attachment-cache"]
+
+[schedule]
+interval_seconds = 60
+retry_base_seconds = 60
+max_attempts = 5
+max_deliveries_per_round = 100
+
+# 秒，可自行调整。0 = 只同步初次/修订，不周期提醒。
+# 这些是示例频率；completed/cancelled/superseded 不重复提醒，snooze 暂缓提醒。
+[reminders]
+P0 = 3600
+P1 = 14400
+P2 = 86400
+P3 = 604800
+P4 = 0
+
+[[targets]]
+id = "feishu-assistant"
+kind = "feishu_app"
+enabled = false
+app_id_env = "CHAT_FEISHU_APP_ID"
+app_secret_env = "CHAT_FEISHU_APP_SECRET"
+recipient_id = ""
+receive_id_type = "chat_id"
+allowed_operator_ids = []
+snooze_seconds = 3600
+upload_files = true
+timeout_seconds = 30
+max_file_bytes = 30000000
+
+[[targets]]
+id = "feishu-personal"
+kind = "feishu"
+enabled = false
+url_env = "CHAT_FEISHU_WEBHOOK_URL"
+secret_env = "CHAT_FEISHU_WEBHOOK_SECRET"
+timeout_seconds = 30
+
+# 含日期的数据库条目可在 Notion Calendar 中显示；无需重复创建另一份日程。
+[[targets]]
+id = "notion-tasks"
+kind = "notion"
+enabled = false
+token_env = "CHAT_NOTION_TOKEN"
+data_source_id = ""
+timeout_seconds = 30
+
+[targets.properties]
+title = "Name"
+task_id = "Task ID"
+priority = "Priority"
+status = "Status"
+date = "Date"
+instructions = "Instructions"
+files = "Materials"
+
+# 对接 n8n/其他已有工作流：接收统一 envelope，凭据只存本机 .env。
+[[targets]]
+id = "external-workflow"
+kind = "webhook"
+enabled = false
+url_env = "CHAT_DELIVERY_WEBHOOK_URL"
+token_env = "CHAT_DELIVERY_WEBHOOK_TOKEN"
+timeout_seconds = 30
+
+# 独立日历事件通过已有 OAuth Notion Calendar MCP 工作流执行。
+# 接收端持久化 task_id -> event_id，按 upsert 更新，不能每次新增。
+mode = "notify"
+purpose = ""
+[[targets]]
+id = "notion-calendar"
+kind = "webhook"
+purpose = "notion_calendar"
+mode = "sync"
+enabled = false
+url_env = "CHAT_NOTION_CALENDAR_WEBHOOK_URL"
+token_env = "CHAT_NOTION_CALENDAR_WEBHOOK_TOKEN"
+timeout_seconds = 30

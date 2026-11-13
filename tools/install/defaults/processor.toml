@@ -1,0 +1,60 @@
+[input]
+batches_dir = "../data/batches"
+start_at = 0
+refresh_collectors = false
+
+[storage]
+state_file = "../data/processor/state.db"
+output_dir = "../data/todos"
+
+[rules]
+file = "../processing-rules/default.md"
+
+[model]
+# Fill the provider's API root (normally ending in /v1) and model name locally.
+base_url = "https://api.deepseek.com"
+model = "deepseek-flash"
+api_key_env = "CHAT_PROCESSOR_API_KEY"
+api_key_file = ""
+timeout_seconds = 600
+env_file = "../.env"
+vision = true
+context_window = 1000000
+max_output_tokens = 384000
+
+[context]
+gap_seconds = 300
+max_messages = 200
+history_messages = 0
+timezone = "Asia/Shanghai"
+grouping = "sql"
+max_conversation_chars = 100000
+
+[processing]
+max_groups_per_round = 10
+max_input_chars = 300000
+
+[schedule]
+interval_seconds = 60
+
+[source_descriptions]
+qq = "QQ 本地消息数据库采集模块；官方 SQLCipher 解密快照，SQL 规则筛选，保留原始消息标识和附件归档引用。"
+wechat = "微信本地消息数据库采集模块；本地解密快照，SQL 规则筛选，保留原始消息标识和附件归档引用。"
+
+[agent]
+batching = "auto"
+max_turns = 32
+max_tool_calls = 128
+auto_compaction = true
+compaction_reserve_tokens = 384000
+compaction_keep_recent_tokens = 64000
+max_retries = 2
+
+[attachments]
+archive_roots = ["../data/assets"]
+cache_dir = "../data/processor/attachment-cache"
+max_memory_mb = 1024
+
+[attachments.collector_configs]
+qq = "qq.toml"
+wechat = "wechat.toml"

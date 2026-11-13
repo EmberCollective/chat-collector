@@ -47,7 +47,8 @@ def main():
         with private_log.open("wb") as log:
             subprocess.run([sys.executable, str(scanner_root / "scripts" / "ntqq_key_scan.py"),
                             "--src-db", str(SOURCE), "--json-out", str(report), "--no-write-config"],
-                           stdout=log, stderr=subprocess.STDOUT, timeout=240, check=False)
+                           stdout=log, stderr=subprocess.STDOUT, timeout=240, check=False,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         if not report.exists():
             raise RuntimeError("scanner_no_report")
         result = json.loads(report.read_text(encoding="utf-8"))
