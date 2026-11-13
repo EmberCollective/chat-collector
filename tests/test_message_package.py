@@ -42,6 +42,21 @@ def test_materials_are_read_only_in_preview_durable_and_deduplicated_on_prepare(
     assert 'PRIVATE.db' not in str(package)
 
 
+def test_source_original_is_preserved_and_long_text_archived_without_preview_writes(tmp_path):
+    config, task, _ = fixture(tmp_path)
+    original = '原始通知\n<at id=all>\u2028' + '长正文' * 1000
+    task['sources'][0]['text'] = original
+    preview = build_package(task, config)
+    assert preview['sources'][0]['text'] == original
+    assert not Path(config['storage']['assets_dir']).exists()
+    package = build_package(task, config, prepare=True)
+    resource = next(r for r in package['resources'] if r['name'] == '来源原文.txt')
+    path, _ = material_path(package, resource['id'], config)
+    assert original in path.read_text(encoding='utf-8')
+    assert 'PRIVATE.db' not in path.read_text(encoding='utf-8')
+    assert build_package(task, config)['resources'][-1]['id'] == resource['id']
+
+
 def test_resolved_evidence_wins_over_old_missing_metadata(tmp_path):
     config, task, original = fixture(tmp_path)
     resolved = dict(task['sources'][0]['attachments'][0])

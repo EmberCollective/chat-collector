@@ -348,12 +348,20 @@ def _queue(config, conn, tasks, local, packages, now):
             state = local.get(key, {})
             version = state.get('version', 0)
             package_hash = _package_hash(packages[key])
+            deadline_mode, node = _deadline_node(config, task, now)
             # Unknown remote outcomes require reconciliation before any follow-up send.
             if conn.execute("SELECT 1 FROM deliveries WHERE target_id=? AND task_id=? AND status='unknown'", (target['id'], key)).fetchone():
                 continue
             with conn:
                 conn.execute("UPDATE deliveries SET status='obsolete' WHERE target_id=? AND task_id=? AND status IN ('pending','retry','failed') AND (target_hash!=? OR revision!=? OR local_version!=? OR package_hash!=?)",
                              (target['id'], key, fingerprint, task['revision'], version, package_hash))
+                # A later node supersedes unsent earlier reminders, including their retries.
+                if deadline_mode:
+                    conn.execute("UPDATE deliveries SET status='obsolete' WHERE target_id=? AND task_id=? AND kind='reminder' AND status IN ('pending','retry','failed') AND json_extract(body,'$.reminder.due_at') IS NOT ?",
+                                 (target['id'], key, node['due_at'] if node else None))
+                else:
+                    conn.execute("UPDATE deliveries SET status='obsolete' WHERE target_id=? AND task_id=? AND kind='reminder' AND status IN ('pending','retry','failed') AND json_extract(body,'$.reminder.due_at') IS NOT NULL",
+                                 (target['id'], key))
             last = conn.execute("SELECT * FROM deliveries WHERE target_id=? AND target_hash=? AND task_id=? AND status='sent' ORDER BY finished_at DESC,rowid DESC LIMIT 1",
                                 (target['id'], fingerprint, key)).fetchone()
             current = last and last['revision'] == task['revision'] and last['local_version'] == version and last['package_hash'] == package_hash
@@ -361,9 +369,17 @@ def _queue(config, conn, tasks, local, packages, now):
             if current:
                 interval = config['reminders'][task['priority']]
                 if (sync_only or _effective(task, state)['status'] != 'open'
-                        or state.get('snoozed_until', 0) > now or not interval or now < last['finished_at'] + interval):
+                        or state.get('snoozed_until', 0) > now):
                     continue
-                kind, anchor = 'reminder', last['id']
+                if deadline_mode:
+                    if node is None or last['finished_at'] >= node['due_at']:
+                        continue
+                    anchor = digest(node)
+                else:
+                    if not interval or now < last['finished_at'] + interval:
+                        continue
+                    anchor = last['id']
+                kind = 'reminder'
             elif state.get('snoozed_until', 0) > now and not sync_only:
                 continue
             elif not last and _effective(task, state)['status'] != 'open' and not sync_only:
@@ -372,9 +388,30 @@ def _queue(config, conn, tasks, local, packages, now):
                 anchor = last['id']
             identifier = digest([target['id'], fingerprint, key, task['revision'], version, package_hash, kind, anchor])
             envelope = {'schema_version': 1, 'delivery_id': identifier, 'kind': kind, 'task': packages[key]}
+            if kind == 'reminder' and deadline_mode:
+                envelope['reminder'] = node
             with conn:
                 conn.execute('INSERT OR IGNORE INTO deliveries(id,target_id,target_hash,task_id,revision,local_version,kind,body,status,created_at,package_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                              (identifier, target['id'], fingerprint, key, task['revision'], version, kind, canonical(envelope), 'pending', now, package_hash))
+
+
+def _deadline_node(config, task, now):
+    settings = config.get('deadline_reminders', {})
+    timing = task.get('time') or {}
+    value = timing.get('deadline')
+    if not settings.get('enabled') or not value:
+        return False, None
+    if len(value) == 10:
+        # A date without a clock time is scheduled at the end of that local day.
+        deadline = dt.datetime.combine(dt.date.fromisoformat(value), dt.time(23, 59, 59),
+                                       ZoneInfo(timing.get('timezone') or settings['timezone'])).timestamp()
+    else:
+        deadline = dt.datetime.fromisoformat(value).timestamp()
+    due = [offset for offset in settings[task['priority']] if deadline - offset <= now]
+    if not due:
+        return True, None
+    offset = min(due)
+    return True, {'deadline_at': deadline, 'offset_seconds': offset, 'due_at': deadline - offset}
 
 
 def run_round(config, *, now=None):
@@ -433,6 +470,7 @@ def status(config):
         return {'enabled': config['enabled'],
                 'targets': [{k: t[k] for k in ('id', 'kind', 'enabled')} for t in config['targets']],
                 'reminders': config['reminders'],
+                'deadline_reminders': config.get('deadline_reminders', {}),
                 'tasks': 0 if conn is None else conn.execute('SELECT count(*) FROM tasks').fetchone()[0],
                 'delivery_counts': {} if conn is None else dict(conn.execute('SELECT status,count(*) FROM deliveries GROUP BY status')),
                 'deliveries': [] if conn is None else [dict(r) for r in conn.execute('SELECT id,target_id,task_id,kind,status,attempts,next_attempt,error FROM deliveries ORDER BY created_at DESC,rowid DESC LIMIT 100')],

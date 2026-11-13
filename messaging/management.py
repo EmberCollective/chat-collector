@@ -25,6 +25,7 @@ FIELDS = {
 PROPERTIES = {'title', 'task_id', 'priority', 'status', 'date', 'instructions', 'files'}
 SECTIONS = {'schedule': {'interval_seconds', 'retry_base_seconds', 'max_attempts', 'max_deliveries_per_round'},
             'reminders': {'P0', 'P1', 'P2', 'P3', 'P4'},
+            'deadline_reminders': {'enabled', 'timezone', 'P0', 'P1', 'P2', 'P3', 'P4'},
             'feedback': {'max_attempts', 'retry_base_seconds'}}
 
 

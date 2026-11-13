@@ -217,7 +217,7 @@ def test_notes_are_displayed_without_a_review_gate(case):
 def test_sources_collapsed_grouped_and_escaped_without_losing_entries(case):
     task = case[2]['task']
     task.update(notes=['<at id=all></at> 补充说明'],
-                sources=[{'ref': 'm1', 'platform': 'wechat', 'conversation': '项目群', 'sender': '<at id=all>', 'time': '2026-11-13T10:20:31+08:00'},
+                sources=[{'ref': 'm1', 'platform': 'wechat', 'conversation': '项目群', 'sender': '<at id=all>', 'time': '2026-11-13T10:20:31+08:00', 'text': '请提交报告\n第二行 <at id=all>'},
                          {'ref': 'm2', 'platform': 'wechat', 'conversation': '项目群', 'sender': '李四', 'time': '2026-11-13T10:21:00+08:00'},
                          {'ref': 'm3', 'platform': 'qq', 'conversation': '**伪造群**', 'sender': '王五'}])
     card = feishu.card_content(task, {'complete': 'opaque', 'snooze': 'other'})
@@ -231,7 +231,27 @@ def test_sources_collapsed_grouped_and_escaped_without_losing_entries(case):
     assert '<at ' not in json.dumps(card, ensure_ascii=False) and '**伪造群**' not in text
     assert '2026-11-13 10:20:31（UTC+08:00）' in text
     assert '2026-11-13 10:21（UTC+08:00）' in text
+    assert '请提交报告\n第二行' in text
     assert card['body']['elements'][-1]['columns'][0]['elements'][0]['behaviors'][0]['value'] == {'token': 'opaque'}
+
+
+def test_long_source_original_uses_archive_hint_and_stays_within_card_limit(case):
+    _, _, envelope = case
+    task = envelope['task']
+    task['sources'] = [{'platform': 'wechat', 'text': '<' * 20000}]
+    card = feishu.card_content(task, {})
+    encoded = json.dumps(card, ensure_ascii=False)
+    assert '来源原文.txt' in encoded and len(encoded.encode()) <= 28000
+
+
+@pytest.mark.parametrize('offset,label', [(86400, '截止前 1 天提醒'), (21600, '截止前 6 小时提醒'), (1800, '截止前 30 分钟提醒'), (0, '已到截止时间')])
+def test_deadline_reminder_card_shows_node_and_date_only_policy(case, offset, label):
+    config, target, envelope = case
+    envelope.update(kind='reminder', reminder={'deadline_at': 200000, 'due_at': 200000 - offset, 'offset_seconds': offset})
+    assert feishu.public_envelope(envelope)['reminder']['offset_seconds'] == offset
+    card = feishu.card_content(envelope['task'], {}, reminder=envelope['reminder'])
+    encoded = json.dumps(card, ensure_ascii=False)
+    assert label in encoded and '23:59:59' in encoded
 
 
 @pytest.mark.parametrize(('raw', 'expected'), [

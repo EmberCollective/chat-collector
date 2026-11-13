@@ -28,11 +28,22 @@ max_deliveries_per_round = 100
 # 秒，可自行调整。0 = 只同步初次/修订，不周期提醒。
 # 这些是示例频率；completed/cancelled/superseded 不重复提醒，snooze 暂缓提醒。
 [reminders]
+# 无截止时间时使用以下间隔；有截止时间时优先使用 deadline_reminders。
 P0 = 3600
 P1 = 14400
 P2 = 86400
 P3 = 604800
 P4 = 0
+
+[deadline_reminders]
+enabled = true
+timezone = "Asia/Shanghai"
+# 提前秒数；0 表示截止时。只有日期时按该时区当天 23:59:59 安排。
+P0 = [86400, 21600, 7200, 1800, 0]
+P1 = [21600, 7200, 1800, 0]
+P2 = [7200, 1800, 0]
+P3 = [1800, 0]
+P4 = [0]
 
 [[targets]]
 id = "feishu-assistant"

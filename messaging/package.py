@@ -9,6 +9,31 @@ import re
 import tempfile
 from urllib.parse import urlsplit
 
+SOURCE_INLINE_CHARS = 2000
+
+
+def _source_archive(sources, config, prepare):
+    text = '\n\n'.join(' · '.join(str(s.get(k) or '') for k in ('platform', 'conversation', 'sender', 'time'))
+                       + '\n' + s.get('text', '') for s in sources)
+    data = text.encode('utf-8')
+    sha = hashlib.sha256(data).hexdigest()
+    root = Path(config['storage']['assets_dir']).resolve()
+    path = root / sha[:2] / sha
+    if prepare and not path.exists():
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root, prefix='.sources-') as temporary:
+            original = Path(temporary) / 'sources.txt'
+            original.write_bytes(data)
+            _store(original, config, sha)
+    item = {'id': sha, 'name': '来源原文.txt', 'type': 'file', 'role': 'input',
+            'purpose': '完整来源原文', 'source_refs': [s['ref'] for s in sources],
+            'sha256': sha, 'size_bytes': len(data), 'status': 'unavailable'}
+    if path.exists():
+        if not path.resolve().is_relative_to(root) or _hash(path) != sha:
+            raise ValueError('material_store_corrupt')
+        item.update(status='ready', local_path=str(path))
+    return item
+
 
 def _hash(path):
     with path.open('rb') as stream:
@@ -136,7 +161,8 @@ def build_package(task, config, *, prepare=False):
         conversation = identity.get('conversation') or {}
         package['sources'].append({'ref': key, 'platform': source.get('collector_module'),
             'conversation': conversation.get('display_name') or conversation.get('remark') or conversation.get('name') or '名称未获取',
-            'sender': source.get('sender') or '名称未获取', 'time': source.get('sent_at_local')})
+            'sender': source.get('sender') or '名称未获取', 'time': source.get('sent_at_local'),
+            'text': source.get('text') or ''})
         for index, original in enumerate(source.get('attachments', [])):
             attachment = selected.get((key, index))
             if attachment is None:
@@ -157,6 +183,8 @@ def build_package(task, config, *, prepare=False):
                                              'status': 'ready', 'url': url, 'source_refs': []}
                 resources[identifier]['source_refs'] = sorted(set(resources[identifier]['source_refs'] + [key]))
     package['resources'] = list(resources.values())
+    if sum(len(s['text']) for s in package['sources']) > SOURCE_INLINE_CHARS:
+        package['resources'].append(_source_archive(package['sources'], config, prepare))
     return package
 
 

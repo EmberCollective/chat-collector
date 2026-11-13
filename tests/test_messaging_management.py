@@ -45,6 +45,7 @@ def test_view_exposes_allowlist_and_preserves_unknown_content_on_save(settings):
         'enabled': False, 'feedback_enabled': True,
         'schedule': {'interval_seconds': 45}, 'reminders': {'P4': 600},
         'feedback': {'max_attempts': 7},
+        'deadline_reminders': {'P0': [86400, 3600, 0], 'P4': []},
         'targets': [{'id': 'sample', 'enabled': False},
                     {'id': 'another', 'kind': 'webhook', 'enabled': False, 'url_env': 'MY_OTHER_URL'}],
     }, current['version'])
@@ -52,6 +53,8 @@ def test_view_exposes_allowlist_and_preserves_unknown_content_on_save(settings):
     assert updated['schedule']['interval_seconds'] == 45
     assert updated['feedback']['max_attempts'] == 7
     assert updated['reminders']['P4'] == 600
+    assert updated['deadline_reminders']['P0'] == [86400, 3600, 0]
+    assert updated['deadline_reminders']['P4'] == []
     assert [t['id'] for t in updated['targets']] == ['sample', 'another']
     stored = tomlkit.parse(settings.read_text(encoding='utf-8'))
     assert stored['targets'][0]['unknown_secret'] == 'never-output-this'
@@ -62,6 +65,8 @@ def test_view_exposes_allowlist_and_preserves_unknown_content_on_save(settings):
 
 @pytest.mark.parametrize('payload', [
     {'enabled': 'true'}, {'schedule': {'interval_seconds': 0}},
+    {'deadline_reminders': {'P0': [False]}}, {'deadline_reminders': {'P1': [0, 0]}},
+    {'deadline_reminders': {'P2': [-1]}}, {'deadline_reminders': {'timezone': 'not/a/zone'}},
     {'feedback': {'state_file': 'other.db'}}, {'reminders': {'P0': -1}},
     {'targets': [{'id': 'sample', 'kind': 'webhook'}]},
     {'targets': [{'id': 'sample', 'app_secret': 'secret'}]},

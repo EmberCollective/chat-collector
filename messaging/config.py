@@ -1,6 +1,10 @@
 """Message delivery is configured independently from collection and processing."""
 from pathlib import Path
 import tomllib
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+DEADLINE_DEFAULTS = {'P0': [86400, 21600, 7200, 1800, 0], 'P1': [21600, 7200, 1800, 0],
+                     'P2': [7200, 1800, 0], 'P3': [1800, 0], 'P4': [0]}
 
 
 def load_config(path):
@@ -56,6 +60,22 @@ def load_config(path):
         value = config.setdefault(section, {}).setdefault(key, default)
         if type(value) is not int or not minimum <= value <= maximum:
             raise ValueError(f'{section}.{key} must be an integer in [{minimum}, {maximum}]')
+    deadlines = config.setdefault('deadline_reminders', {})
+    if not isinstance(deadlines, dict):
+        raise ValueError('deadline_reminders must be a table')
+    if type(deadlines.setdefault('enabled', True)) is not bool:
+        raise ValueError('deadline_reminders.enabled must be boolean')
+    try:
+        ZoneInfo(deadlines.setdefault('timezone', 'Asia/Shanghai'))
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        raise ValueError('deadline_reminders.timezone must be an IANA timezone') from None
+    for priority, defaults in DEADLINE_DEFAULTS.items():
+        offsets = deadlines.setdefault(priority, list(defaults))
+        if (not isinstance(offsets, list) or len(offsets) > 32
+                or any(type(v) is not int or not 0 <= v <= 31536000 for v in offsets)
+                or len(offsets) != len(set(offsets))):
+            raise ValueError('deadline_reminders.' + priority + ' must contain unique nonnegative seconds')
+        deadlines[priority] = sorted(offsets, reverse=True)
     targets = config.setdefault('targets', [])
     if not isinstance(targets, list):
         raise ValueError('targets must be an array')

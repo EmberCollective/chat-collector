@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (type !== 'strings') input.type = type === 'boolean' ? 'checkbox' : type === 'integer' ? 'number' : 'text';
     input.id = 'ops-field-' + controls.length;
     if (type === 'boolean') input.checked = !!object[key];
-    else input.value = type === 'strings' ? (object[key] || []).join('\n') : object[key] ?? '';
+    else input.value = type === 'minutes' ? (object[key] || []).map(v => v / 60).join(', ') : type === 'strings' ? (object[key] || []).join('\n') : object[key] ?? '';
     if (type === 'integer') {input.min = options.min ?? 1; input.max = options.max ?? 86400; input.step = '1'; input.required = true;}
     if (type === 'env') {input.pattern = '[A-Za-z_][A-Za-z0-9_]{0,127}'; input.placeholder = '仅填写变量名；密钥值保留在本机 .env'; input.maxLength = 128;}
     if (type === 'string') input.maxLength = 500;
@@ -103,7 +103,16 @@ document.addEventListener('DOMContentLoaded', () => {
     delivery.append(node('p', '保存监听开关后，启动或重新启动后台服务生效。', 'muted'));
     const listenerActions = node('div', null, 'actions'); delivery.append(listenerActions);
     button(listenerActions, '恢复按钮监听重试', () => operate('/jobs/listener/resume', '已恢复按钮监听。'));
-    const reminders = grid(details(delivery, '优先级提醒间隔（秒；0 表示不重复提醒）'));
+    if (config.messaging.deadline_reminders) {
+      const section = details(delivery, '按截止日期提醒（提前分钟；0 为截止时）');
+      section.open = true;
+      section.append(node('p', '已完成、取消的事项不再催办；每个节点只提醒一次，错过多个节点只补最近一次。只有日期时按当日 23:59:59 安排。空列表表示该优先级不做截止提醒。', 'muted'));
+      const fields = grid(section), settings = config.messaging.deadline_reminders;
+      field(fields, settings, 'enabled', 'boolean', {label: '启用截止节点提醒'});
+      field(fields, settings, 'timezone', 'string', {label: '日期未注明时区时使用'});
+      for (const key of ['P0', 'P1', 'P2', 'P3', 'P4']) field(fields, settings, key, 'minutes', {label: key + ' · 提前分钟（逗号分隔）'});
+    }
+    const reminders = grid(details(delivery, '无截止时间时的间隔提醒（秒；0 表示不重复）'));
     for (const key of ['P0', 'P1', 'P2', 'P3', 'P4']) field(reminders, config.messaging.reminders, key, 'integer', {min: 0, max: 31536000});
     const retry = details(delivery, '投递与状态回写的重试上限');
     retry.append(node('p', '自动运行间隔控制上方服务；以下间隔也供独立运行消息层时使用。', 'muted'));
@@ -128,6 +137,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     for (const {input, object, key, type, optional} of controls) {
       if (optional && !input.value.trim()) {delete object[key]; continue;}
+      if (type === 'minutes') {
+        const values = input.value.trim() ? input.value.trim().split(/[,，\s]+/).map(Number) : [];
+        if (values.some(v => !Number.isFinite(v) || v < 0 || !Number.isInteger(v * 60))) throw Error(key + ' 请填写有效的非负分钟数，使用逗号分隔。');
+        object[key] = values.map(v => v * 60); continue;
+      }
       object[key] = type === 'boolean' ? input.checked : type === 'integer' ? Number(input.value) : type === 'strings' ? input.value.split(/[\n,，]+/).map(x => x.trim()).filter(Boolean) : input.value.trim();
     }
     const {schemas, ...messaging} = config.messaging;

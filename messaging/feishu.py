@@ -113,7 +113,7 @@ def _collapsed(title, content):
             'elements': [{'tag': 'markdown', 'content': content}]}
 
 
-def card_content(task, tokens, *, alert=False, upload_files=True):
+def card_content(task, tokens, *, alert=False, upload_files=True, reminder=None):
     recovered = alert and task.get('alert_state') == 'recovery'
     color = ('green' if recovered else 'red') if alert else {
         'P0': 'red', 'P1': 'orange', 'P2': 'blue', 'P3': 'green', 'P4': 'grey',
@@ -136,6 +136,12 @@ def card_content(task, tokens, *, alert=False, upload_files=True):
         details.append('**参与人员**\n' + '；'.join(_plain(f"{p['name']}（{p['role']}）") for p in task['people']))
     details.append('**状态**\n' + _plain(status))
     elements = [{'tag': 'markdown', 'content': ('**恢复说明**\n' if recovered else '**故障说明**\n' if alert else '**你需要做**\n') + main}]
+    if reminder:
+        seconds = reminder['offset_seconds']
+        label = '已到截止时间' if seconds == 0 else f'截止前 {seconds // 86400:g} 天提醒' if seconds % 86400 == 0 else f'截止前 {seconds // 3600:g} 小时提醒' if seconds % 3600 == 0 else f'截止前 {seconds / 60:g} 分钟提醒'
+        elements.insert(0, {'tag': 'markdown', 'content': '**截止提醒**\n' + label})
+        if len(str(task.get('time', {}).get('deadline') or '')) == 10:
+            elements.insert(1, {'tag': 'markdown', 'content': '原消息只给出日期；提醒按该时区当天 23:59:59 安排。'})
     for detail in details:
         elements.extend([{'tag': 'hr'}, {'tag': 'markdown', 'content': detail}])
     materials = []
@@ -156,18 +162,27 @@ def card_content(task, tokens, *, alert=False, upload_files=True):
     if explanations:
         elements.append(_collapsed('补充说明', _plain('说明：' + '\n'.join(explanations))))
     source_groups = {}
+    from .package import SOURCE_INLINE_CHARS
+    remaining = SOURCE_INLINE_CHARS
     for source in task.get('sources', []):
         group = (source.get('platform', ''), source.get('conversation', ''))
         parts = [str(source['sender'])] if source.get('sender') else []
         if source.get('time'):
             parts.append(_display_time(source['time']))
-        source_groups.setdefault(group, []).append(' · '.join(parts) or '未提供消息明细')
+        entry = _plain(' · '.join(parts) or '未提供消息明细')
+        text = source.get('text') or ''
+        visible = text[:remaining]
+        remaining -= len(visible)
+        entry += '\n**原文**\n' + (_plain(visible) if visible else '（无文字正文）' if not text else '')
+        if len(visible) < len(text):
+            entry += '\n（正文较长，完整原文见相关资料「来源原文.txt」；未开启文件发送时可在调试台查看。）'
+        source_groups.setdefault(group, []).append(entry)
     if source_groups:
         lines = []
         for (platform, conversation), sources in source_groups.items():
             platform = {'wechat': '微信', 'weixin': '微信', 'qq': 'QQ'}.get(str(platform).lower(), platform)
             heading = ' · '.join(str(v) for v in (platform, conversation) if v) or '来源未注明'
-            lines.append('**' + _plain(heading) + '**\n' + '\n'.join(_plain(s) for s in sources))
+            lines.append('**' + _plain(heading) + '**\n\n' + '\n\n'.join(sources))
         elements.append(_collapsed(f"信息来源 · {len(task.get('sources', []))} 条", '\n\n'.join(lines)))
     if tokens and not alert:
         labels = {'complete': '完成待办', 'reopen': '恢复待办', 'snooze': '稍后提醒'}
@@ -256,7 +271,7 @@ def deliver_app(target, envelope, config, previous=None):
         if not row:
             actions = [] if alert or task['status'] in {'cancelled', 'superseded'} else ['reopen'] if task['status'] in {'completed', 'done'} else ['complete', 'snooze']
             tokens = {a: secrets.token_urlsafe(24) for a in actions}
-            card = card_content(task, tokens, alert=alert, upload_files=target.get('upload_files', True))
+            card = card_content(task, tokens, alert=alert, upload_files=target.get('upload_files', True), reminder=envelope.get('reminder'))
             conn.execute('INSERT INTO feishu_cards VALUES(?,?,?,?,?,?,?,?,?,?)',
                          (identifier, scope, target['id'], task['task_id'], task['revision'], secrets.token_hex(16), None, time.time(), 'prepared', json.dumps(card)))
             conn.executemany('INSERT INTO feishu_actions VALUES(?,?,?)', [(token, identifier, action) for action, token in tokens.items()])

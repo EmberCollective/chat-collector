@@ -56,7 +56,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       card.append(materials);
       if (task.unselected_materials_count) card.append(node('p', `另有 ${task.unselected_materials_count} 个来源附件未被选为此待办材料，因此不自动上传。旧待办可重新处理以补全材料关联。`));
-      card.append(node('p', (task.sources || []).map(s => [s.platform, s.conversation, s.sender, s.time].filter(Boolean).join(' · ')).join('；')));
+      if ((task.sources || []).length) {
+        const sources = node('details'); sources.append(node('summary', '信息来源与原文'));
+        for (const source of task.sources) {
+          sources.append(node('p', [source.platform, source.conversation, source.sender, source.time].filter(Boolean).join(' · ')));
+          const original = node('p', source.text || '（无文字正文）'); original.style.whiteSpace = 'pre-wrap';
+          sources.append(original);
+        }
+        card.append(sources);
+      }
       const feedbackStates = {queued: '操作已排队', applying: '正在保存操作', retry: '操作等待重试', failed: '操作保存失败', conflict: '内容已变化，操作未应用'};
       const currentFeedback = pending.find(r => r.task_id === task.task_id);
       if (currentFeedback) card.append(node('p', feedbackStates[currentFeedback.status] || currentFeedback.status));

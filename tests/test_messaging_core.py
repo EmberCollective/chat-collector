@@ -122,6 +122,67 @@ def test_repeated_rounds_and_intervals_do_not_duplicate_notifications(config, se
     assert len({envelope['delivery_id'] for _, envelope, _ in sent}) == len(sent)
 
 
+def deadline_event(deadline, **kwargs):
+    item = event(**kwargs)
+    item['task']['time'] = {'deadline': core.dt.datetime.fromtimestamp(deadline, core.dt.timezone.utc).isoformat()}
+    return item
+
+
+@pytest.mark.parametrize('priority,offsets', [('P0', [86400, 21600, 7200, 1800, 0]), ('P1', [21600, 7200, 1800, 0]), ('P2', [7200, 1800, 0]), ('P3', [1800, 0]), ('P4', [0])])
+def test_deadline_nodes_are_sent_once_at_each_priority_time(config, sent, priority, offsets):
+    deadline = 200000
+    batch(config, 'one', deadline_event(deadline, priority=priority))
+    assert run_round(config, now=100)['sent'] == 1
+    for offset in offsets:
+        assert run_round(config, now=deadline - offset - 1)['sent'] == 0
+        assert run_round(config, now=deadline - offset)['sent'] == 1
+        assert sent[-1][1]['reminder']['offset_seconds'] == offset
+        assert run_round(config, now=deadline - offset)['sent'] == 0
+    assert run_round(config, now=deadline + 86400 * 10)['sent'] == 0
+    assert len(sent) == len(offsets) + 1
+
+
+def test_late_poll_coalesces_nodes_and_replans_after_deadline_change(config, sent):
+    batch(config, 'one', deadline_event(200000))
+    run_round(config, now=100)
+    assert run_round(config, now=199000)['sent'] == 1
+    assert sent[-1][1]['reminder']['offset_seconds'] == 1800
+    assert run_round(config, now=199001)['sent'] == 0
+    batch(config, 'two', deadline_event(300000, revision=2))
+    assert run_round(config, now=199002)['sent'] == 1
+    assert run_round(config, now=200000)['sent'] == 0
+    assert run_round(config, now=300000 - 86400)['sent'] == 1
+
+
+def test_completion_stops_deadline_reminders(config, sent):
+    batch(config, 'one', deadline_event(200000))
+    run_round(config, now=100)
+    set_task_state(config, 'one', 'complete')
+    run_round(config, now=101)
+    count = len(sent)
+    assert run_round(config, now=200000)['sent'] == 0
+    assert len(sent) == count
+
+
+def test_later_deadline_node_replaces_failed_older_retry(config, sent, monkeypatch):
+    batch(config, 'one', deadline_event(200000))
+    run_round(config, now=100)
+    deliver = channels.deliver
+    monkeypatch.setattr(channels, 'deliver', lambda *a, **kw: (_ for _ in ()).throw(channels.DeliveryRejected('test_rejected')))
+    assert run_round(config, now=200000 - 86400)['retry'] == 1
+    monkeypatch.setattr(channels, 'deliver', deliver)
+    assert run_round(config, now=200000 - 7200)['sent'] == 1
+    assert sent[-1][1]['reminder']['offset_seconds'] == 7200
+    assert status(config)['delivery_counts']['obsolete'] == 1
+
+
+def test_date_only_deadline_uses_task_timezone_end_of_day(config):
+    task = {'priority': 'P0', 'time': {'deadline': '2026-11-13', 'timezone': 'Asia/Shanghai'}}
+    expected = core.dt.datetime(2026, 11, 13, 23, 59, 59, tzinfo=core.ZoneInfo('Asia/Shanghai')).timestamp()
+    enabled, node = core._deadline_node(config, task, expected)
+    assert enabled and node == {'deadline_at': expected, 'offset_seconds': 0, 'due_at': expected}
+
+
 def test_revisions_update_existing_remote_receipt(config, sent):
     batch(config, 'first', event())
     run_round(config, now=100)

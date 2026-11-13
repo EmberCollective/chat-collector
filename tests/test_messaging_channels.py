@@ -33,11 +33,13 @@ def test_webhook_uses_ack_idempotency_previous_id_and_sanitized_fields(sample, m
     target, envelope, config = sample
     envelope['task']['resources'] = [{'id': 'a1', 'name': 'file.pdf', 'local_path': 'PRIVATE/file.pdf',
         'url': 'file:///PRIVATE/file.pdf', 'type': 'file', 'status': 'ready', 'role': 'input'}]
+    envelope['task']['sources'][0]['text'] = '原始通知\n请提交材料'
     def post(url, **kwargs):
         assert kwargs['headers']['Idempotency-Key'] == 'd1'
         assert kwargs['headers']['Authorization'] == 'Bearer private-token-never-in-output'
         assert kwargs['json']['remote_id'] == 'event-1'
         assert 'PRIVATE' not in json.dumps(kwargs['json'])
+        assert kwargs['json']['task']['sources'][0]['text'] == '原始通知\n请提交材料'
         assert kwargs['follow_redirects'] is False
         return httpx.Response(200, json={'accepted': True, 'delivery_id': 'd1', 'remote_id': 'event-1'})
     monkeypatch.setattr(httpx, 'post', post)

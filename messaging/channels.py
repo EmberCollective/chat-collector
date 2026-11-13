@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import logging
 import mimetypes
 import os
@@ -88,7 +89,7 @@ def public_envelope(envelope):
     for field in ('review_reasons', 'notes', 'action_steps'):
         if field in task:
             result[field] = _text_list(task[field])
-    result['sources'] = [_text_fields(s, ('ref', 'platform', 'conversation', 'sender', 'time'))
+    result['sources'] = [_text_fields(s, ('ref', 'platform', 'conversation', 'sender', 'time', 'text'))
                          for s in task.get('sources', [])]
     result['resources'] = []
     for resource in task.get('resources', []):
@@ -103,7 +104,14 @@ def public_envelope(envelope):
         if _url(resource.get('url')):
             safe['url'] = resource['url']
         result['resources'].append(safe)
-    return {'schema_version': 1, **header, 'task': result}
+    output = {'schema_version': 1, **header, 'task': result}
+    if 'reminder' in envelope:
+        reminder = envelope['reminder']
+        keys = ('deadline_at', 'offset_seconds', 'due_at')
+        if not isinstance(reminder, dict) or any(type(reminder.get(k)) not in (int, float) or not math.isfinite(reminder[k]) for k in keys):
+            raise DeliveryRejected('invalid_reminder_metadata')
+        output['reminder'] = {k: reminder[k] for k in keys}
+    return output
 
 
 def _instructions(task, *, material_destination='见材料附件'):
@@ -122,8 +130,16 @@ def _instructions(task, *, material_destination='见材料附件'):
         lines.append(f"{label}：{r.get('name', r['id'])} — {destination}" + (f"；用途：{r['purpose']}" if r.get('purpose') else ''))
         if r.get('note'):
             lines.append('成果说明：' + r['note'])
+    from .package import SOURCE_INLINE_CHARS
+    remaining = SOURCE_INLINE_CHARS
     for source in task.get('sources', []):
         lines.append('来源：' + ' · '.join(str(source[k]) for k in ('platform', 'conversation', 'sender', 'time') if source.get(k)))
+        if source.get('text'):
+            visible = source['text'][:remaining]
+            remaining -= len(visible)
+            lines.append('原文：\n' + visible)
+            if len(visible) < len(source['text']):
+                lines.append('完整原文见材料「来源原文.txt」。')
     notes = task.get('notes') or task.get('review_reasons', [])
     if notes:
         lines.append('说明：' + '；'.join(notes))
