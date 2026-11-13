@@ -307,7 +307,7 @@ class Jobs:
         if progress.is_file():
             with progress.open('rb') as stream:
                 stream.seek(max(0, progress.stat().st_size-256000))
-                lines = stream.read().decode('utf-8', errors='replace').splitlines()
+                lines = stream.read().decode('utf-8', errors='replace').split('\n')
             events = []
             for line in lines:
                 try:

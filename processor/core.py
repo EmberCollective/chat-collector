@@ -203,7 +203,8 @@ def _read_inputs(config, conn):
             if prior[2] != sha:
                 raise ValueError('An imported immutable collector batch was modified: ' + path.name)
         else:
-            for line in raw.decode('utf-8').splitlines():
+            # JSONL separates records with LF; Unicode line separators belong to JSON strings.
+            for line in raw.decode('utf-8').split('\n'):
                 if not line.strip():
                     continue
                 event = _validate_event(json.loads(line))

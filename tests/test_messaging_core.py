@@ -76,6 +76,20 @@ def test_ingestion_deduplicates_events_and_does_not_roll_back_revision(config):
     assert preview(config)['tasks'][0]['revision'] == 3
 
 
+@pytest.mark.parametrize('newline', ['\n', '\r\n'])
+def test_unicode_line_separators_preserved_in_task_batches(config, sent, newline):
+    title = 'first\u2028second\u2029third\u0085last'
+    records = [event('unicode', title=title), event('following')]
+    path = Path(config['input']['batches_dir']) / 'unicode.jsonl'
+    raw = (newline.join(json.dumps(row, ensure_ascii=False) for row in records) + newline).encode('utf-8')
+    path.write_bytes(raw)
+    assert sync(config)['imported_events'] == 2
+    assert next(task for task in preview(config)['tasks'] if task['task_id'] == 'unicode')['title'] == title
+    assert sync(config)['imported_events'] == 0
+    assert path.read_bytes() == raw
+    assert not sent
+
+
 @pytest.mark.parametrize('same_id', [True, False])
 def test_conflict_does_not_partially_import(config, same_id):
     batch(config, 'one', event())

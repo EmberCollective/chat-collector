@@ -81,6 +81,22 @@ def test_status_reports_effective_model_capabilities(config):
     assert model['max_output_tokens'] == 384000
 
 
+@pytest.mark.parametrize('newline', ['\n', '\r\n'])
+def test_unicode_line_separators_do_not_split_collector_records(config, monkeypatch, newline):
+    text = 'first\u2028second\u2029third\u0085last'
+    records = [event('unicode', text=text), event('following')]
+    path = Path(config['input']['batches_dir']) / 'unicode.jsonl'
+    raw = (newline.join(json.dumps(row, ensure_ascii=False) for row in records) + newline).encode('utf-8')
+    path.write_bytes(raw)
+    monkeypatch.setattr(core, '_call_model', lambda *args: {'tasks': []})
+    assert run_round(config)['imported_events'] == 2
+    with sqlite3.connect(config['storage']['state_file']) as db:
+        saved = json.loads(db.execute("SELECT body FROM messages WHERE message_key='unicode'").fetchone()[0])
+    assert saved['message']['text'] == text
+    assert run_round(config)['processed_groups'] == 0
+    assert path.read_bytes() == raw
+
+
 def test_live_lookup_updates_cross_platform_task_and_preserves_both_sources(config,monkeypatch):
     from processor import context
     batch(config,'one',event('original',platform='qq'))

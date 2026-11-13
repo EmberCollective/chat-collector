@@ -209,7 +209,8 @@ def _inputs(config, conn):
         if previous and previous['sha256'] != sha:
             raise ValueError('An imported immutable task batch was modified')
         if not previous:
-            for line in raw.decode('utf-8').splitlines():
+            # JSONL separates records with LF; Unicode line separators belong to JSON strings.
+            for line in raw.decode('utf-8').split('\n'):
                 if not line.strip():
                     continue
                 if len(line) > 16 * 1024 * 1024:
