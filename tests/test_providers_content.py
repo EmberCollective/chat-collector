@@ -87,3 +87,22 @@ def test_missing_task_material_can_prepare_from_bound_source(external):
     assert result['archive_path'] == str(path.resolve()) and result['name'] == original['name']
     missing = content.export_material(original, config, event=event, attachment_index=7)
     assert missing['status'] == 'unavailable' and 'archive_path' not in missing
+
+
+def test_public_content_configuration_keeps_legacy_and_plugin_paths_local(tmp_path):
+    settings = {'collector_configs': {'qq': 'qq.toml'}, 'archive_roots': ['archive'], 'cache_dir': 'cache',
+                'providers': {'demo': {'factory': 'examples.local_file_provider:LocalFileProvider', 'config': 'demo.toml'}}}
+    content.configure_content(settings, tmp_path)
+    assert settings['collector_configs'] == {'qq': str(tmp_path / 'qq.toml')}
+    assert settings['providers']['demo']['config'] == str(tmp_path / 'demo.toml')
+    assert settings['archive_roots'] == [str(tmp_path / 'archive')]
+    assert settings['cache_dir'] == str(tmp_path / 'cache')
+
+
+@pytest.mark.parametrize('settings,error', [
+    ({'collector_configs': {'unknown': 'source.toml'}}, 'collector_configs'),
+    ({'archive_roots': ['archive'], 'cache_dir': 'archive/cache'}, 'outside original archives'),
+])
+def test_public_content_configuration_rejects_unsafe_or_unknown_legacy_settings(tmp_path, settings, error):
+    with pytest.raises(ValueError, match=error):
+        content.configure_content(settings, tmp_path)
