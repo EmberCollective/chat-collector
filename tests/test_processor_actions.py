@@ -181,7 +181,7 @@ def test_unread_selected_material_is_prepared_only_after_final_validation(contex
     monkeypatch.setattr(AttachmentProviders, 'resolve', resolve)
     def forbidden(*args):
         raise AssertionError('Preparing materials must not parse document content')
-    monkeypatch.setattr(context.AttachmentContext, '_prepare', forbidden)
+    monkeypatch.setattr(context.content.AttachmentContext, '_prepare', forbidden)
     def fake(cfg, system, payload, **kwargs):
         item = context_task('m1')
         item['material_refs'] = ['f1']

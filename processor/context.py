@@ -8,9 +8,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from common.codec import canonical
-from providers.attachments import AttachmentContext
+from providers import content
 from .pi_bridge import run_agent
-from .task_search import TaskLookup
+from .service import TaskLookup
 from .identity_context import project_identities
 from contracts import validate_context_notes
 
@@ -35,7 +35,7 @@ def prepare_input(config, groups, existing=()):
     events = {event['message_key']: event for group in groups for event in group['messages']}
     message_map = {f'm{i}': event for i, event in enumerate(events.values(), 1)}
     references = {event['message_key']: ref for ref, event in message_map.items()}
-    attachments = AttachmentContext(list(events.values()), config)
+    attachments = content.create_attachment_context(list(events.values()), config)
     catalog = attachments.catalog()
     file_refs = {}
     for item in catalog:
@@ -91,14 +91,14 @@ def process_batch(config, rules, groups, existing, *, api_key=''):
         raise ValueError('完整上下文超过 processing.max_input_chars；请提高预算或缩小 SQL 选取范围，内容未截断')
 
     def read_attachment(**arguments):
-        result = attachments.read_attachment(**arguments)
+        result = content.read_attachment(attachments, **arguments)
         details = dict(result.get('details', {}))
         if 'evidence' in details:
             details['evidence'] = [{key: value for key, value in item.items() if key not in {
                 'sha256', 'message_keys', 'origins'}} for item in details['evidence']]
         # The parser's first text block mirrors its local metadata; rebuild that too.
-        content = [{'type': 'text', 'text': canonical(details)}, *result.get('content', [])[1:]]
-        return {'content': content, 'details': details}
+        blocks = [{'type': 'text', 'text': canonical(details)}, *result.get('content', [])[1:]]
+        return {'content': blocks, 'details': details}
 
     keys_by_group = {group['id']: {e['message_key'] for e in group['messages']} for group in groups}
 
@@ -179,7 +179,7 @@ def process_batch(config, rules, groups, existing, *, api_key=''):
                 for task in reply['tasks']:
                     for material in task['materials']:
                         ref = refs_by_origin[material['message_key'], material['attachment_index']]
-                        material['attachment'] = attachments.prepare_material(ref)
+                        material['attachment'] = content.export_attachment(attachments, ref)
         return replies
 
     def validate_submission(**result):
