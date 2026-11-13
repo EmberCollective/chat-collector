@@ -79,23 +79,8 @@ def load_config(path):
         raise ValueError('agent.auto_compaction must be a boolean')
     if model['max_output_tokens'] > model['context_window'] or agent['compaction_reserve_tokens'] >= model['context_window'] or agent['compaction_keep_recent_tokens'] >= model['context_window'] - agent['compaction_reserve_tokens']:
         raise ValueError('Model output and Pi compaction budgets must fit model.context_window')
-    attachments = config.setdefault('attachments', {})
-    collectors = attachments.setdefault('collector_configs', {})
-    if not isinstance(collectors, dict) or set(collectors) - {'qq', 'wechat'} or any(not isinstance(p, str) or not p for p in collectors.values()):
-        raise ValueError('attachments.collector_configs must map qq/wechat to local configuration files')
-    attachments['collector_configs'] = {k: str((path.parent / p).resolve()) for k, p in collectors.items()}
-    from providers.registry import configure_providers
-    configure_providers(attachments, path.parent)
-    roots = attachments.setdefault('archive_roots', ['../data/assets'])
-    if not isinstance(roots, list) or any(not isinstance(p, str) or not p for p in roots):
-        raise ValueError('attachments.archive_roots must be an array of paths')
-    attachments['archive_roots'] = [str((path.parent / p).resolve()) for p in roots]
-    cache = attachments.setdefault('cache_dir', '../data/processor/attachment-cache')
-    if not isinstance(cache, str) or not cache:
-        raise ValueError('attachments.cache_dir must be a path')
-    attachments['cache_dir'] = str((path.parent / cache).resolve())
-    if any(Path(root) == Path(attachments['cache_dir']) or Path(root) in Path(attachments['cache_dir']).parents for root in attachments['archive_roots']):
-        raise ValueError('Attachment cache must be outside original archives')
+    from providers.content import configure_content
+    configure_content(config.setdefault('attachments', {}), path.parent)
     timezone = config['context'].setdefault('timezone', 'Asia/Shanghai')
     try:
         ZoneInfo(timezone)
