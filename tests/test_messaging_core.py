@@ -93,6 +93,39 @@ def test_preview_no_write_no_network_and_sync_never_delivers(config, sent):
     assert source.read_bytes() == original
 
 
+@pytest.mark.parametrize('failure', ['corrupt', 'unreadable'])
+def test_unavailable_source_archive_does_not_block_other_tasks_or_upload_bad_content(config, sent, monkeypatch, failure):
+    from messaging import package
+    monkeypatch.setattr(core, '_package', lambda task, config, prepare=False:
+                        package.build_package(task, config, prepare=prepare))
+    long = event('long-source')
+    long['task']['sources'] = [{'message_key': 'm1', 'text': 'source text ' * 210}]
+    batch(config, 'tasks', long, event('normal'))
+    sync(config)
+    material = task_package(config, 'long-source')['resources'][0]
+    path = Path(material['local_path'])
+    if failure == 'corrupt':
+        path.write_bytes(b'corrupt')
+    else:
+        original_hash = package._hash
+        def unreadable(candidate):
+            if candidate == path:
+                raise PermissionError('private local path')
+            return original_hash(candidate)
+        monkeypatch.setattr(package, '_hash', unreadable)
+    assert run_round(config, now=100)['sent'] == 2
+    assert {envelope['task']['task_id'] for _, envelope, _ in sent} == {'long-source', 'normal'}
+    delivered = next(envelope['task'] for _, envelope, _ in sent if envelope['task']['task_id'] == 'long-source')
+    resource = delivered['resources'][0]
+    assert resource['status'] == 'unavailable' and 'local_path' not in resource
+    assert resource['warnings'] == ['material_store_corrupt' if failure == 'corrupt' else 'material_file_unavailable']
+    with pytest.raises(ValueError, match='material_not_available'):
+        package.material_path(delivered, resource['id'], config)
+    assert run_round(config, now=101)['sent'] == 0
+    if failure == 'corrupt':
+        assert path.read_bytes() == b'corrupt'
+
+
 def test_ingestion_deduplicates_events_and_does_not_roll_back_revision(config):
     batch(config, 'first', event(revision=3), event(revision=1))
     assert sync(config)['imported_events'] == 2

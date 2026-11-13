@@ -19,19 +19,22 @@ def _source_archive(sources, config, prepare):
     sha = hashlib.sha256(data).hexdigest()
     root = Path(config['storage']['assets_dir']).resolve()
     path = root / sha[:2] / sha
-    if prepare and not path.exists():
-        root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=root, prefix='.sources-') as temporary:
-            original = Path(temporary) / 'sources.txt'
-            original.write_bytes(data)
-            _store(original, config, sha)
     item = {'id': sha, 'name': '来源原文.txt', 'type': 'file', 'role': 'input',
             'purpose': '完整来源原文', 'source_refs': [s['ref'] for s in sources],
             'sha256': sha, 'size_bytes': len(data), 'status': 'unavailable'}
-    if path.exists():
-        if not path.resolve().is_relative_to(root) or _hash(path) != sha:
-            raise ValueError('material_store_corrupt')
-        item.update(status='ready', local_path=str(path))
+    try:
+        if prepare and not path.exists():
+            root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=root, prefix='.sources-') as temporary:
+                original = Path(temporary) / 'sources.txt'
+                original.write_bytes(data)
+                _store(original, config, sha)
+        if path.exists():
+            if not path.resolve().is_relative_to(root) or _hash(path) != sha:
+                raise ValueError('material_store_corrupt')
+            item.update(status='ready', local_path=str(path))
+    except (OSError, ValueError) as exc:
+        item['warnings'] = [str(exc) if isinstance(exc, ValueError) else 'material_file_unavailable']
     return item
 
 
