@@ -264,6 +264,67 @@ def test_digest_retries_same_id_and_expires_without_late_spam(config, sent, monk
     assert status(config)['delivery_counts']['obsolete'] == 1
 
 
+@pytest.mark.parametrize('change', ['complete', 'reschedule', 'reprioritize', 'feedback'])
+def test_digest_retry_refreshes_current_open_tasks_and_notification_plan(config, monkeypatch, change):
+    slot = core.dt.datetime(2026, 11, 14, 8, tzinfo=core.ZoneInfo('Asia/Shanghai')).timestamp()
+    config['daily_digest']['enabled'] = True
+    config['initial_notifications']['P0'] = config['initial_notifications']['P4'] = False
+    batch(config, 'first', deadline_event(slot + 6 * 3600))
+    attempts = []
+    def deliver(target, envelope, *args, **kwargs):
+        attempts.append(envelope)
+        if len(attempts) == 1:
+            raise channels.DeliveryRejected('temporary')
+        return {'remote_id': 'digest'}
+    monkeypatch.setattr(channels, 'deliver', deliver)
+    assert run_round(config, now=slot)['retry'] == 1
+    if change == 'feedback':
+        from messaging.feedback import enqueue_feedback
+        config['feedback']['enabled'] = True
+        enqueue_feedback(config, 'notify', 'pending-completion', 'one', 'complete',
+                         {'platform': 'local', 'user_id': 'tester', 'source': 'test'}, expected_revision=1)
+    else:
+        updated = deadline_event(slot + (3 * 86400 if change == 'reschedule' else 6 * 3600), revision=2,
+                                 priority='P4' if change == 'reprioritize' else 'P0',
+                                 task_status='completed' if change == 'complete' else 'open')
+        batch(config, 'updated', updated)
+    assert run_round(config, now=slot + 59)['sent'] == 0
+    assert run_round(config, now=slot + 61)['sent'] == 1
+    assert attempts[0]['delivery_id'] == attempts[1]['delivery_id']
+    items = attempts[1]['digest']['items']
+    if change == 'reprioritize':
+        assert [(i['task_id'], i['priority']) for i in items] == [('one', 'P4')]
+        assert [n['offset_seconds'] for n in items[0]['notifications']] == [0]
+    else:
+        assert items == []
+    with core._connect(config) as conn:
+        assert conn.execute("SELECT attempts FROM deliveries WHERE kind='daily_digest'").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize('outcome', ['sent', 'unknown'])
+def test_digest_refresh_preserves_sent_and_unknown_body_and_does_not_resend(config, monkeypatch, outcome):
+    slot = core.dt.datetime(2026, 11, 14, 8, tzinfo=core.ZoneInfo('Asia/Shanghai')).timestamp()
+    config['daily_digest']['enabled'] = True
+    config['initial_notifications']['P0'] = False
+    batch(config, 'first', deadline_event(slot + 6 * 3600))
+    attempts = []
+    def deliver(target, envelope, *args, **kwargs):
+        attempts.append(envelope)
+        if outcome == 'unknown':
+            raise channels.DeliveryUncertain('response_lost')
+        return {'remote_id': 'digest'}
+    monkeypatch.setattr(channels, 'deliver', deliver)
+    assert run_round(config, now=slot)[outcome] == 1
+    with core._connect(config) as conn:
+        original = dict(conn.execute("SELECT * FROM deliveries WHERE kind='daily_digest'").fetchone())
+    batch(config, 'completed', deadline_event(slot + 6 * 3600, revision=2, task_status='completed'))
+    run_round(config, now=slot + 61)
+    with core._connect(config) as conn:
+        unchanged = dict(conn.execute("SELECT * FROM deliveries WHERE kind='daily_digest'").fetchone())
+    assert unchanged == original
+    assert len(attempts) == 1
+
+
 def test_revisions_update_existing_remote_receipt(config, sent):
     batch(config, 'first', event())
     run_round(config, now=100)
