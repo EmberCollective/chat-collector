@@ -23,10 +23,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   async function load() {
-    const [preview, status] = await Promise.all([request('/preview').then(r => r.json()), request('/status').then(r => r.json())]);
-    notice.textContent = `共 ${preview.total_tasks} 项；待导入 ${preview.pending_events} 个修订。外部投递${status.enabled ? '已在配置中启用（需独立运行消息层）' : '关闭'}。`;
+    const [preview, status, feedback] = await Promise.all([request('/preview').then(r => r.json()), request('/status').then(r => r.json()), request('/feedback').then(r => r.json())]);
+    notice.textContent = `共 ${preview.total_tasks} 项；待导入 ${preview.pending_events} 项更新。外部投递${status.enabled ? '已在配置中启用（需独立运行消息层）' : '关闭'}。`;
     const summary = node('p', Object.entries(status.reminders).map(([p,s]) => `${p}：${s ? duration(s) : '不重复提醒'}`).join(' · '));
     summary.className = 'scope'; area.replaceChildren(summary);
+    const pending = (feedback.requests || []).filter(r => !['applied', 'superseded'].includes(r.status));
+    if (pending.length) area.append(node('p', `有 ${pending.length} 项操作等待回写或恢复；这些待办已暂停提醒。请保持反馈处理程序运行。`));
     if (!preview.tasks.length) area.append(node('p', '尚无正式待办输出。调试处理结果不会自动投递；正式处理后可在此预览。'));
     for (const task of preview.tasks) {
       const card = node('article'); card.className = 'message task';
@@ -34,7 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const people = (task.people || []).map(p => [p.name, p.role].filter(Boolean).join(' · ')).join('、');
       card.append(node('p', `参与人员：${people || '未明确'} ｜ 截止：${task.time?.deadline || '未明确'} ｜ 状态：${states[task.status] || task.status}`));
       if (task.action_steps?.length) {const list = node('ol'); for (const step of task.action_steps) list.append(node('li', step)); card.append(list);}
-      if (task.review_reasons?.length) {const review = node('p', '待核对：' + task.review_reasons.join('；')); review.className = 'scope'; card.append(review);}
+      const notes = task.notes || task.review_reasons || [];
+      if (notes.length) {const info = node('p', '说明：' + notes.join('；')); info.className = 'muted'; card.append(info);}
       const materials = node('ul');
       for (const resource of task.resources || []) {
         const item = node('li'); item.append(node('span', `${resource.role === 'result' ? '成果' : '材料'} · ${resource.name} `));
@@ -54,6 +57,9 @@ document.addEventListener('DOMContentLoaded', () => {
       card.append(materials);
       if (task.unselected_materials_count) card.append(node('p', `另有 ${task.unselected_materials_count} 个来源附件未被选为此待办材料，因此不自动上传。旧待办可重新处理以补全材料关联。`));
       card.append(node('p', (task.sources || []).map(s => [s.platform, s.conversation, s.sender, s.time].filter(Boolean).join(' · ')).join('；')));
+      const feedbackStates = {queued: '操作已排队', applying: '正在保存操作', retry: '操作等待重试', failed: '操作保存失败', conflict: '内容已变化，操作未应用'};
+      const currentFeedback = pending.find(r => r.task_id === task.task_id);
+      if (currentFeedback) card.append(node('p', feedbackStates[currentFeedback.status] || currentFeedback.status));
       const buttons = node('div'); buttons.className = 'actions';
       for (const [label, type] of (task.status === 'open' ? [['标记完成', 'complete'], ['1 小时后提醒', 'snooze']] : task.status === 'completed' ? [['恢复待办', 'reopen']] : [])) {
         const b = node('button', label); b.className = 'secondary';

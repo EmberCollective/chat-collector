@@ -60,3 +60,28 @@ def test_panel_is_local_only_and_cannot_send_or_choose_arbitrary_files(console):
     assert client.get('/api/messaging/preview', headers={'Origin': 'https://evil.example'}).status_code == 403
     assert client.post('/api/messaging/tasks/t1/state', json={'action': 'send'}).status_code == 422
     assert client.get('/api/messaging/tasks/unknown/materials/anything').status_code == 400
+
+
+def test_feedback_queue_and_automation_are_authenticated_and_read_only(console):
+    client, root = setup(console)
+    path = root/'automation.toml'
+    console[1].state.bridge.settings['automation_config'] = str(path)
+    assert client.get('/api/messaging/feedback').json()['enabled'] is False
+    for url in ['/api/messaging/feedback', '/api/automation/status', '/api/automation/check']:
+        assert client.get(url, headers={'X-Console-Token': 'invalid'}).status_code == 401
+    assert client.get('/api/automation/status').status_code == 404
+    path.write_text('enabled=false\n[storage]\nstate_file="automation/state.db"\n', encoding='utf8')
+    assert client.get('/api/automation/status').json()['enabled'] is False
+    assert client.get('/api/automation/check').status_code == 200
+    assert not (root/'automation/state.db').exists()
+
+
+def test_state_action_queues_feedback_without_claiming_completion(console):
+    client, root = setup(console)
+    with (root/'messaging.toml').open('a', encoding='utf8') as stream:
+        stream.write('\n[feedback]\nenabled=true\nprocessor_config="processor.toml"\nstate_file="delivery/feedback.db"\n')
+    client.post('/api/messaging/sync').raise_for_status()
+    response = client.post('/api/messaging/tasks/t1/state', json={'action':'complete'})
+    assert response.status_code == 200 and response.json()['status'] == 'queued'
+    assert client.get('/api/messaging/feedback').json()['counts']['queued'] == 1
+    assert client.get('/api/messaging/preview').json()['tasks'][0]['status'] == 'open'

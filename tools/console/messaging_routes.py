@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from typing import Literal
+import uuid
 
 
 class TaskAction(BaseModel):
@@ -46,8 +47,30 @@ def register_messaging_routes(app, bridge, authenticate):
 
     @app.post('/api/messaging/tasks/{task_id}/state', dependencies=[Depends(authenticate)], summary='标记完成、恢复或稍后提醒')
     def state(task_id: str, body: TaskAction):
-        from messaging.core import set_task_state
-        return call(lambda cfg: set_task_state(cfg, task_id, body.action, until=body.until))
+        from messaging.feedback import request_task_action
+        return call(lambda cfg: request_task_action(cfg, task_id, body.action,
+                    event_id=uuid.uuid4().hex, actor={'platform':'local','user_id':'console','source':'console'}, until=body.until))
+
+    @app.get('/api/messaging/feedback', dependencies=[Depends(authenticate)], summary='查看卡片操作回写队列与处理结果')
+    def feedback():
+        from messaging.feedback import feedback_status
+        return call(feedback_status)
+
+    @app.get('/api/automation/status', dependencies=[Depends(authenticate)], summary='查看各层自动化、重试与报警状态')
+    def automation_status():
+        from automation import load_config, status
+        path = bridge.root / bridge.settings.get('automation_config', 'config/automation.toml')
+        if not path.is_file():
+            raise HTTPException(404, '尚未配置自动化，请参考 config/automation.toml')
+        return status(load_config(path))
+
+    @app.get('/api/automation/check', dependencies=[Depends(authenticate)], summary='只读检查自动化配置，不启动任务')
+    def automation_check():
+        from automation import load_config, check
+        path = bridge.root / bridge.settings.get('automation_config', 'config/automation.toml')
+        if not path.is_file():
+            raise HTTPException(404, '尚未配置自动化，请参考 config/automation.toml')
+        return check(load_config(path))
 
     @app.get('/api/messaging/tasks/{task_id}/materials/{resource_id}', dependencies=[Depends(authenticate)], summary='按材料编号下载经校验的本地附件')
     def material(task_id: str, resource_id: str):
