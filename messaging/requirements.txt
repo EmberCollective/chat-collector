@@ -1,0 +1,4 @@
+# Optional delivery integrations; collection and processing do not import them.
+httpx>=0.27,<1
+python-dotenv>=1,<2
+notion-client==3.1.0
