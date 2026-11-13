@@ -254,6 +254,24 @@ def test_deadline_reminder_card_shows_node_and_date_only_policy(case, offset, la
     assert label in encoded and '23:59:59' in encoded
 
 
+def test_digest_card_has_no_fake_task_actions_and_delivers_complete_large_schedule(case, monkeypatch):
+    from messaging.channels import deliver
+    config, target, _ = case
+    calls = fake_client(monkeypatch)
+    envelope = {'schema_version': 1, 'delivery_id': 'daily-test', 'kind': 'daily_digest',
+                'digest': {'date': '2026-11-14', 'timezone': 'Asia/Shanghai', 'generated_at': '2026-11-14T08:00:00+08:00',
+                           'items': [{'task_id': str(i), 'title': '待办' + str(i), 'priority': 'P1', 'deadline': '2026-11-15',
+                                      'notifications': [{'time': '2026-11-14T18:00:00+08:00', 'kind': 'deadline', 'offset_seconds': 21600}]} for i in range(40)]}}
+    result = deliver(target, envelope, config)
+    assert result['remote_id']
+    with feishu._state(config) as db:
+        card = json.loads(db.execute('SELECT card FROM feishu_cards WHERE delivery_id=?', ('daily-test',)).fetchone()[0])
+        assert db.execute('SELECT count(*) FROM feishu_actions').fetchone()[0] == 0
+    assert '[早报]' in card['header']['title']['content']
+    assert '今日通知安排.txt' in json.dumps(card, ensure_ascii=False)
+    assert any(kind == 'upload' for kind, _ in calls)
+
+
 @pytest.mark.parametrize(('raw', 'expected'), [
     ('2026-11-13T10:20:00-05:00', '2026-11-13 10:20（UTC-05:00）'),
     ('2026-11-13T10:20:00Z', '2026-11-13 10:20（UTC+00:00）'),

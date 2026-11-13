@@ -29,6 +29,22 @@ def test_disabled_channels_never_connect(sample, monkeypatch):
         channels.deliver(target, envelope, config)
 
 
+def test_webhook_digest_keeps_structured_items_without_synthetic_task(sample, monkeypatch):
+    target, _, config = sample
+    envelope = {'schema_version': 1, 'delivery_id': 'daily', 'kind': 'daily_digest',
+                'digest': {'date': '2026-11-14', 'timezone': 'Asia/Shanghai', 'generated_at': '2026-11-14T08:00:00+08:00',
+                           'expires_at': 123, 'items': [{'task_id': 't1', 'title': 'Test', 'priority': 'P0', 'deadline': '2026-11-15',
+                              'local_path': 'PRIVATE.db', 'notifications': [{'time': '2026-11-14T10:00:00+08:00', 'kind': 'deadline', 'offset_seconds': 86400}]}]}}
+    def post(url, **kwargs):
+        body = kwargs['json']
+        assert 'task' not in body and body['kind'] == 'daily_digest'
+        assert body['digest']['items'][0]['notifications'][0]['offset_seconds'] == 86400
+        assert 'PRIVATE.db' not in json.dumps(body) and 'expires_at' not in body['digest']
+        return httpx.Response(200, json={'accepted': True, 'delivery_id': 'daily'})
+    monkeypatch.setattr(httpx, 'post', post)
+    channels.deliver(target, envelope, config)
+
+
 def test_webhook_uses_ack_idempotency_previous_id_and_sanitized_fields(sample, monkeypatch):
     target, envelope, config = sample
     envelope['task']['resources'] = [{'id': 'a1', 'name': 'file.pdf', 'local_path': 'PRIVATE/file.pdf',

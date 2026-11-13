@@ -25,7 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
   async function load() {
     const [preview, status, feedback] = await Promise.all([request('/preview').then(r => r.json()), request('/status').then(r => r.json()), request('/feedback').then(r => r.json())]);
     notice.textContent = `共 ${preview.total_tasks} 项；待导入 ${preview.pending_events} 项更新。外部投递${status.enabled ? '已在配置中启用（需独立运行消息层）' : '关闭'}。`;
-    const summary = node('p', Object.entries(status.reminders).map(([p,s]) => `${p}：${s ? duration(s) : '不重复提醒'}`).join(' · '));
+    const nodes = status.deadline_reminders;
+    const description = nodes?.enabled ? '截止节点：' + ['P0', 'P1', 'P2', 'P3', 'P4'].map(p => `${p}：${nodes[p].map(s => s ? '提前 ' + duration(s) : '截止时').join(' / ') || '不提醒'}`).join('；') + '。无截止时间时使用间隔提醒。' : '间隔提醒：' + Object.entries(status.reminders).map(([p,s]) => `${p}：${s ? duration(s) : '不重复提醒'}`).join(' · ');
+    const summary = node('p', description);
     summary.className = 'scope'; area.replaceChildren(summary);
     const pending = (feedback.requests || []).filter(r => !['applied', 'superseded'].includes(r.status));
     if (pending.length) area.append(node('p', `有 ${pending.length} 项操作等待回写或恢复；这些待办已暂停提醒。请保持反馈处理程序运行。`));

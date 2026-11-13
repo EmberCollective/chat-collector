@@ -57,7 +57,7 @@ def deliver_example(target, envelope, config, previous=None):
 |---|---|
 | `target` | 本地配置的目标实例；凭据用 `_secret(target, "token_env", config)` 读取 |
 | `envelope.delivery_id` | 本次投递的稳定 ID；重试时保持不变 |
-| `envelope.kind` | 常规任务为 `upsert` / `reminder`；`alert` 是自动化故障通知专用路径 |
+| `envelope.kind` | 常规任务为 `upsert` / `reminder`；`alert` 是故障通知；`daily_digest` 是今日通知安排，正文使用 `digest` 而非 `task` |
 | `envelope.task` | 统一行动包，含 `task_id`、`revision`、步骤、时间、参与人员、材料和精简来源 |
 | `config` | 消息层配置、状态和归档位置，不是模型配置 |
 | `previous` | 同目标配置、同任务最近一次成功投递的回执，首次可为 `None` |
@@ -166,3 +166,33 @@ python -m pytest tests/test_messaging_channels.py tests/test_messaging_core.py t
 本机使用 `runtime-deps` 安装可选依赖时，运行前设置 `$env:PYTHONPATH="$PWD/runtime-deps"`。新增平台只运行上述测试不代表已验证，必须加入该平台测试。
 
 上线前在专用目标发送一次明确的合成测试，核对远端对象、文件和真实回调。重启持有配置或已导入适配器的后台服务，再启用正式目标；不要重复启动第二套调度器。未验证的 OAuth、文件上限、客户端显示和平台权限应在该渠道文档中明确标注。
+
+## 早报与截止提醒的渠道契约
+
+渠道先按 `kind` 分流，不应无条件读取 `envelope.task`。`reminder` 继续提供 `task`，截止节点还附 `reminder={deadline_at, offset_seconds, due_at}`，数值为 Unix 秒或提前秒数；普通间隔提醒不附此对象。
+
+早报使用独立结构，下面是合成示例：
+
+```json
+{
+  "schema_version": 1,
+  "delivery_id": "stable-target-and-date-id",
+  "kind": "daily_digest",
+  "digest": {
+    "date": "2026-11-14",
+    "timezone": "Asia/Shanghai",
+    "generated_at": "2026-11-14T08:00:00+08:00",
+    "items": [{
+      "task_id": "existing-task-id",
+      "title": "提交报告",
+      "priority": "P0",
+      "deadline": "2026-11-15T10:00:00+08:00",
+      "notifications": [{"time": "2026-11-14T10:00:00+08:00", "kind": "deadline", "offset_seconds": 86400}]
+    }]
+  }
+}
+```
+
+`notifications.kind` 可为 `deadline`、`initial`、`interval`、`snooze`；间隔项带 `interval_seconds`，时间表示当天首次计划通知，不展开每一次重复。`items=[]` 表示生成时没有已知的今日通知安排。条目范围按通知时间而非截止日期确定，完成事项和被反馈队列阻塞的事项排除。
+
+消息层负责时间窗、选项、稳定 ID、投递状态和重试；适配器负责文字、卡片、附件及平台限制。不应将早报创建为正式待办或给它添加“完成待办”按钮。Webhook 沿用原有接受回执；飞书应用使用现有 SDK 和附件发送机制。纯同步渠道跳过早报，避免 Notion 资料库中新增假任务。外部包不带本地 `expires_at` 调度字段、路径或凭据。

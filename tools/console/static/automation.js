@@ -112,6 +112,19 @@ document.addEventListener('DOMContentLoaded', () => {
       field(fields, settings, 'timezone', 'string', {label: '日期未注明时区时使用'});
       for (const key of ['P0', 'P1', 'P2', 'P3', 'P4']) field(fields, settings, key, 'minutes', {label: key + ' · 提前分钟（逗号分隔）'});
     }
+    if (config.messaging.initial_notifications) {
+      const fields = grid(details(delivery, '新待办首次通知（消息层下一轮立即发送）'));
+      for (const key of ['P0', 'P1', 'P2', 'P3', 'P4']) field(fields, config.messaging.initial_notifications, key, 'boolean', {label: key + ' · 首次立即通知'});
+    }
+    if (config.messaging.daily_digest) {
+      const section = details(delivery, '每日早报 · 今日通知安排'); section.open = true;
+      section.append(node('p', '只汇总今天有通知节点的未完成事项，不按“今天到期或已逾期”直接筛选。呈现方式由渠道决定。', 'muted'));
+      const fields = grid(section), settings = config.messaging.daily_digest;
+      field(fields, settings, 'enabled', 'boolean', {label: '启用每日早报'});
+      field(fields, settings, 'time', 'string', {label: '发送时间（HH:MM）'});
+      field(fields, settings, 'timezone', 'string', {label: '早报时区'});
+      field(fields, settings, 'catch_up_minutes', 'integer', {label: '错过发送时间后的补发窗口（分钟）', min: 1, max: 1440});
+    }
     const reminders = grid(details(delivery, '无截止时间时的间隔提醒（秒；0 表示不重复）'));
     for (const key of ['P0', 'P1', 'P2', 'P3', 'P4']) field(reminders, config.messaging.reminders, key, 'integer', {min: 0, max: 31536000});
     const retry = details(delivery, '投递与状态回写的重试上限');

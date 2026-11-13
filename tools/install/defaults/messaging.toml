@@ -45,6 +45,19 @@ P2 = [7200, 1800, 0]
 P3 = [1800, 0]
 P4 = [0]
 
+[initial_notifications]
+P0 = true
+P1 = true
+P2 = true
+P3 = true
+P4 = true
+
+[daily_digest]
+enabled = false
+time = "08:00"
+timezone = "Asia/Shanghai"
+catch_up_minutes = 60
+
 [[targets]]
 id = "feishu-assistant"
 kind = "feishu_app"

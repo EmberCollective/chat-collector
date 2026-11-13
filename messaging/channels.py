@@ -6,6 +6,8 @@ import hashlib
 import hmac
 import json
 import math
+import datetime as dt
+import tempfile
 import logging
 import mimetypes
 import os
@@ -72,6 +74,34 @@ def _text_list(value):
 
 def public_envelope(envelope):
     """Allowlist outbound fields so future local metadata cannot leak by accident."""
+    if envelope.get('kind') == 'daily_digest':
+        data = envelope.get('digest', {})
+        result = _text_fields(data, ('date', 'timezone', 'generated_at'))
+        items = data.get('items')
+        if not isinstance(items, list):
+            raise DeliveryRejected('invalid_digest_payload')
+        result['items'] = []
+        for item in items:
+            safe = _text_fields(item, ('task_id', 'title', 'priority', 'deadline'))
+            notifications = item.get('notifications')
+            if not isinstance(notifications, list):
+                raise DeliveryRejected('invalid_digest_payload')
+            safe['notifications'] = []
+            for notification in notifications:
+                value = _text_fields(notification, ('time', 'kind'))
+                try:
+                    if dt.datetime.fromisoformat(value['time']).tzinfo is None:
+                        raise ValueError()
+                except (KeyError, TypeError, ValueError):
+                    raise DeliveryRejected('invalid_digest_time') from None
+                for key in ('offset_seconds', 'interval_seconds'):
+                    if key in notification:
+                        if type(notification[key]) is not int or notification[key] < 0:
+                            raise DeliveryRejected('invalid_digest_payload')
+                        value[key] = notification[key]
+                safe['notifications'].append(value)
+            result['items'].append(safe)
+        return {'schema_version': 1, **_text_fields(envelope, ('delivery_id', 'kind')), 'digest': result}
     task = envelope['task']
     header = _text_fields(envelope, ('delivery_id', 'kind'))
     result = _text_fields(task, ('task_id', 'title', 'event', 'priority', 'priority_reason', 'status', 'location'))
@@ -193,7 +223,8 @@ def _feishu(target, envelope, config):
     local_only = [r['name'] for r in task.get('resources', []) if r.get('local_path') and not _url(r.get('url'))]
     if local_only:
         text += '\n仅本机已保存（机器人消息不支持直接上传文件）：' + '；'.join(local_only)
-    payload = {'msg_type': 'text', 'content': {'text': f"[{task['priority']}] {task['title']}\n状态：{task['status']}\n{text}"}}
+    heading = f"[早报] {task['title']}" if envelope['kind'] == 'daily_digest' else f"[{task['priority']}] {task['title']}\n状态：{task['status']}"
+    payload = {'msg_type': 'text', 'content': {'text': heading + '\n' + text}}
     secret = _secret(target, 'secret_env', config, required=False)
     if secret:
         stamp = str(int(time.time()))
@@ -329,6 +360,8 @@ def deliver(target, envelope, config, previous=None):
         raise DeliveryRejected('delivery_disabled')
     public_envelope(envelope)
     kind = target.get('kind')
+    if envelope.get('kind') == 'daily_digest' and kind in {'feishu_app', 'feishu'}:
+        envelope = dict(envelope, task=_digest_task(envelope, config, compact=kind == 'feishu_app'))
     if kind == 'feishu_app':
         from .feishu import deliver_app
         return deliver_app(target, envelope, config, previous)
@@ -339,3 +372,37 @@ def deliver(target, envelope, config, previous=None):
     if kind == 'webhook':
         return _webhook(target, envelope, config, previous)
     raise DeliveryRejected('unknown_delivery_channel')
+
+
+def _digest_task(envelope, config, *, compact):
+    """Feishu presentation only; this summary is never inserted as a formal task."""
+    data = public_envelope(envelope)['digest']
+    lines = []
+    for item in data['items']:
+        times = '、'.join(dt.datetime.fromisoformat(n['time']).strftime('%H:%M')
+                         + ('起按间隔提醒' if n['kind'] == 'interval' else '') for n in item['notifications'])
+        lines.append(f"[{item['priority']}] {item['title']} — 今日通知：{times}")
+    resources = []
+    visible = lines
+    if compact and (len(lines) > 25 or sum(len(line) for line in lines) > 2000):
+        root = Path(config['storage']['assets_dir'])
+        root.mkdir(parents=True, exist_ok=True)
+        from .package import archive_result
+        with tempfile.TemporaryDirectory(dir=root, prefix='.digest-') as folder:
+            path = Path(folder) / '今日通知安排.txt'
+            path.write_text(data['date'] + ' · ' + data['timezone'] + '\n\n' + '\n'.join(lines), encoding='utf-8')
+            resource = archive_result(path, config)
+        resource.update(role='input', purpose='今日完整通知安排')
+        resources.append(resource)
+        visible, budget = [], 2000
+        for line in lines[:25]:
+            if len(line) > budget:
+                break
+            visible.append(line)
+            budget -= len(line)
+        visible.append('完整通知安排见材料「今日通知安排.txt」；未开启文件发送时仅本地可用。')
+    return {'task_id': 'digest:' + data['date'], 'revision': 1, 'priority': 'P2', 'status': 'open',
+            'title': data['date'] + ' · 今日通知安排（' + str(len(lines)) + ' 项）',
+            'event': '今天没有已知的通知安排。' if not lines else '按当前规则，今天需要通知的事项如下。',
+            'action_steps': visible, 'time': {}, 'people': [], 'sources': [], 'resources': resources,
+            'notes': ['生成时间：' + data['generated_at'] + '；仅汇总生成时已知的通知安排。']}

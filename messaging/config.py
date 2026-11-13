@@ -1,6 +1,8 @@
 """Message delivery is configured independently from collection and processing."""
 from pathlib import Path
 import tomllib
+import datetime as dt
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DEADLINE_DEFAULTS = {'P0': [86400, 21600, 7200, 1800, 0], 'P1': [21600, 7200, 1800, 0],
@@ -76,6 +78,22 @@ def load_config(path):
                 or len(offsets) != len(set(offsets))):
             raise ValueError('deadline_reminders.' + priority + ' must contain unique nonnegative seconds')
         deadlines[priority] = sorted(offsets, reverse=True)
+    initial = config.setdefault('initial_notifications', {})
+    if not isinstance(initial, dict) or any(type(initial.setdefault(p, True)) is not bool for p in DEADLINE_DEFAULTS):
+        raise ValueError('initial_notifications must contain priority booleans')
+    daily = config.setdefault('daily_digest', {})
+    if not isinstance(daily, dict) or type(daily.setdefault('enabled', False)) is not bool:
+        raise ValueError('daily_digest.enabled must be boolean')
+    clock = daily.setdefault('time', '08:00')
+    try:
+        if not isinstance(clock, str) or not re.fullmatch(r'\d{2}:\d{2}', clock):
+            raise ValueError()
+        dt.time.fromisoformat(clock)
+        ZoneInfo(daily.setdefault('timezone', 'Asia/Shanghai'))
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        raise ValueError('daily_digest needs HH:MM time and an IANA timezone') from None
+    if type(daily.setdefault('catch_up_minutes', 60)) is not int or not 1 <= daily['catch_up_minutes'] <= 1440:
+        raise ValueError('daily_digest.catch_up_minutes must be between 1 and 1440')
     targets = config.setdefault('targets', [])
     if not isinstance(targets, list):
         raise ValueError('targets must be an array')

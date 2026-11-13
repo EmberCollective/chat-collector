@@ -113,7 +113,7 @@ def _collapsed(title, content):
             'elements': [{'tag': 'markdown', 'content': content}]}
 
 
-def card_content(task, tokens, *, alert=False, upload_files=True, reminder=None):
+def card_content(task, tokens, *, alert=False, upload_files=True, reminder=None, daily_digest=False):
     recovered = alert and task.get('alert_state') == 'recovery'
     color = ('green' if recovered else 'red') if alert else {
         'P0': 'red', 'P1': 'orange', 'P2': 'blue', 'P3': 'green', 'P4': 'grey',
@@ -134,8 +134,9 @@ def card_content(task, tokens, *, alert=False, upload_files=True, reminder=None)
         details.append('**地点**\n' + _plain(task['location']))
     if task.get('people'):
         details.append('**参与人员**\n' + '；'.join(_plain(f"{p['name']}（{p['role']}）") for p in task['people']))
-    details.append('**状态**\n' + _plain(status))
-    elements = [{'tag': 'markdown', 'content': ('**恢复说明**\n' if recovered else '**故障说明**\n' if alert else '**你需要做**\n') + main}]
+    if not daily_digest:
+        details.append('**状态**\n' + _plain(status))
+    elements = [{'tag': 'markdown', 'content': ('**今日通知安排**\n' if daily_digest else '**恢复说明**\n' if recovered else '**故障说明**\n' if alert else '**你需要做**\n') + main}]
     if reminder:
         seconds = reminder['offset_seconds']
         label = '已到截止时间' if seconds == 0 else f'截止前 {seconds // 86400:g} 天提醒' if seconds % 86400 == 0 else f'截止前 {seconds // 3600:g} 小时提醒' if seconds % 3600 == 0 else f'截止前 {seconds / 60:g} 分钟提醒'
@@ -192,7 +193,7 @@ def card_content(task, tokens, *, alert=False, upload_files=True, reminder=None)
             'behaviors': [{'type': 'callback', 'value': {'token': token}}]}]}
             for i, (action, token) in enumerate(tokens.items())]
         elements.append({'tag': 'column_set', 'flex_mode': 'none', 'columns': buttons})
-    prefix = '已恢复' if recovered else 'ERROR' if alert else task['priority']
+    prefix = '早报' if daily_digest else '已恢复' if recovered else 'ERROR' if alert else task['priority']
     card = {'schema': '2.0', 'config': {'update_multi': True, 'width_mode': 'default', 'enable_forward': False},
             'header': {'title': {'tag': 'plain_text', 'content': f"[{prefix}] {task['title']}"},
                        'template': color, 'icon': {'tag': 'standard_icon', 'token': 'todo_colorful'}},
@@ -269,9 +270,9 @@ def deliver_app(target, envelope, config, previous=None):
         if row and row['status'] in {'sending', 'unknown'}:
             raise DeliveryUncertain('feishu_card_prior_outcome_unknown')
         if not row:
-            actions = [] if alert or task['status'] in {'cancelled', 'superseded'} else ['reopen'] if task['status'] in {'completed', 'done'} else ['complete', 'snooze']
+            actions = [] if alert or envelope['kind'] == 'daily_digest' or task['status'] in {'cancelled', 'superseded'} else ['reopen'] if task['status'] in {'completed', 'done'} else ['complete', 'snooze']
             tokens = {a: secrets.token_urlsafe(24) for a in actions}
-            card = card_content(task, tokens, alert=alert, upload_files=target.get('upload_files', True), reminder=envelope.get('reminder'))
+            card = card_content(task, tokens, alert=alert, upload_files=target.get('upload_files', True), reminder=envelope.get('reminder'), daily_digest=envelope['kind'] == 'daily_digest')
             conn.execute('INSERT INTO feishu_cards VALUES(?,?,?,?,?,?,?,?,?,?)',
                          (identifier, scope, target['id'], task['task_id'], task['revision'], secrets.token_hex(16), None, time.time(), 'prepared', json.dumps(card)))
             conn.executemany('INSERT INTO feishu_actions VALUES(?,?,?)', [(token, identifier, action) for action, token in tokens.items()])

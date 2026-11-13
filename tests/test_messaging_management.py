@@ -46,6 +46,8 @@ def test_view_exposes_allowlist_and_preserves_unknown_content_on_save(settings):
         'schedule': {'interval_seconds': 45}, 'reminders': {'P4': 600},
         'feedback': {'max_attempts': 7},
         'deadline_reminders': {'P0': [86400, 3600, 0], 'P4': []},
+        'initial_notifications': {'P4': False},
+        'daily_digest': {'enabled': True, 'time': '08:30', 'timezone': 'Asia/Shanghai'},
         'targets': [{'id': 'sample', 'enabled': False},
                     {'id': 'another', 'kind': 'webhook', 'enabled': False, 'url_env': 'MY_OTHER_URL'}],
     }, current['version'])
@@ -55,6 +57,8 @@ def test_view_exposes_allowlist_and_preserves_unknown_content_on_save(settings):
     assert updated['reminders']['P4'] == 600
     assert updated['deadline_reminders']['P0'] == [86400, 3600, 0]
     assert updated['deadline_reminders']['P4'] == []
+    assert updated['initial_notifications']['P4'] is False
+    assert updated['daily_digest']['time'] == '08:30'
     assert [t['id'] for t in updated['targets']] == ['sample', 'another']
     stored = tomlkit.parse(settings.read_text(encoding='utf-8'))
     assert stored['targets'][0]['unknown_secret'] == 'never-output-this'
@@ -67,6 +71,8 @@ def test_view_exposes_allowlist_and_preserves_unknown_content_on_save(settings):
     {'enabled': 'true'}, {'schedule': {'interval_seconds': 0}},
     {'deadline_reminders': {'P0': [False]}}, {'deadline_reminders': {'P1': [0, 0]}},
     {'deadline_reminders': {'P2': [-1]}}, {'deadline_reminders': {'timezone': 'not/a/zone'}},
+    {'daily_digest': {'time': '25:00'}}, {'daily_digest': {'enabled': 'true'}},
+    {'initial_notifications': {'P4': 1}},
     {'feedback': {'state_file': 'other.db'}}, {'reminders': {'P0': -1}},
     {'targets': [{'id': 'sample', 'kind': 'webhook'}]},
     {'targets': [{'id': 'sample', 'app_secret': 'secret'}]},

@@ -183,6 +183,62 @@ def test_date_only_deadline_uses_task_timezone_end_of_day(config):
     assert enabled and node == {'deadline_at': expected, 'offset_seconds': 0, 'due_at': expected}
 
 
+def test_initial_notification_can_wait_for_first_future_node(config, sent):
+    config['initial_notifications']['P0'] = False
+    batch(config, 'one', deadline_event(200000))
+    assert run_round(config, now=150000)['sent'] == 0
+    assert status(config)['delivery_counts']['deferred'] == 1
+    assert run_round(config, now=150001)['sent'] == 0
+    assert run_round(config, now=200000 - 21600)['sent'] == 1
+    assert sent[-1][1]['kind'] == 'reminder'
+
+
+def test_enabling_initial_notification_sends_previously_deferred_task(config, sent):
+    config['initial_notifications']['P0'] = False
+    batch(config, 'one', deadline_event(200000))
+    assert run_round(config, now=100)['sent'] == 0
+    config['initial_notifications']['P0'] = True
+    assert run_round(config, now=101)['sent'] == 1
+    assert run_round(config, now=102)['sent'] == 0
+
+
+def test_digest_uses_today_notification_nodes_instead_of_due_date(config, sent):
+    zone = core.ZoneInfo('Asia/Shanghai')
+    day = core.dt.datetime(2026, 11, 14, tzinfo=zone).timestamp()
+    config['daily_digest']['enabled'] = True
+    config['initial_notifications'] = {p: False for p in config['initial_notifications']}
+    batch(config, 'one', deadline_event(day + 86400 + 8 * 3600, identifier='tomorrow-p0'),
+          deadline_event(day + 12 * 3600, identifier='today-p4', priority='P4'),
+          deadline_event(day - 86400, identifier='overdue-p4', priority='P4'),
+          deadline_event(day + 86400 + 12 * 3600, identifier='tomorrow-p4', priority='P4'),
+          deadline_event(day + 86400 + 8 * 3600, identifier='completed', task_status='completed'))
+    run_round(config, now=day - 3600)
+    assert not sent
+    run_round(config, now=day + 8 * 3600)
+    digest = next(e for _, e, _ in sent if e['kind'] == 'daily_digest')
+    assert 'task' not in digest
+    assert {i['task_id'] for i in digest['digest']['items']} == {'tomorrow-p0', 'today-p4'}
+    run_round(config, now=day + 8 * 3600 + 1)
+    assert len([e for _, e, _ in sent if e['kind'] == 'daily_digest']) == 1
+    assert status(config)['tasks'] == 5
+
+
+def test_digest_retries_same_id_and_expires_without_late_spam(config, sent, monkeypatch):
+    zone = core.ZoneInfo('Asia/Shanghai')
+    slot = core.dt.datetime(2026, 11, 14, 8, tzinfo=zone).timestamp()
+    config['daily_digest']['enabled'] = True
+    rejected = []
+    def reject(target, envelope, *args, **kwargs):
+        rejected.append(envelope['delivery_id'])
+        raise channels.DeliveryRejected('temporary')
+    monkeypatch.setattr(channels, 'deliver', reject)
+    assert run_round(config, now=slot)['retry'] == 1
+    assert run_round(config, now=slot + 61)['retry'] == 1
+    assert len(set(rejected)) == 1
+    assert run_round(config, now=slot + 3601)['retry'] == 0
+    assert status(config)['delivery_counts']['obsolete'] == 1
+
+
 def test_revisions_update_existing_remote_receipt(config, sent):
     batch(config, 'first', event())
     run_round(config, now=100)

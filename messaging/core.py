@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from collector.__main__ import InstanceLock
 from collector.store import canonical, digest
+from .notifications import deadline_node as _deadline_node, queue_digest
 
 
 SCHEMA = '''
@@ -362,9 +363,12 @@ def _queue(config, conn, tasks, local, packages, now):
                 else:
                     conn.execute("UPDATE deliveries SET status='obsolete' WHERE target_id=? AND task_id=? AND kind='reminder' AND status IN ('pending','retry','failed') AND json_extract(body,'$.reminder.due_at') IS NOT NULL",
                                  (target['id'], key))
-            last = conn.execute("SELECT * FROM deliveries WHERE target_id=? AND target_hash=? AND task_id=? AND status='sent' ORDER BY finished_at DESC,rowid DESC LIMIT 1",
+            last = conn.execute("SELECT * FROM deliveries WHERE target_id=? AND target_hash=? AND task_id=? AND status IN ('sent','deferred') ORDER BY finished_at DESC,rowid DESC LIMIT 1",
                                 (target['id'], fingerprint, key)).fetchone()
             current = last and last['revision'] == task['revision'] and last['local_version'] == version and last['package_hash'] == package_hash
+            initial = config.get('initial_notifications', {}).get(task['priority'], True)
+            if last and last['status'] == 'deferred' and initial:
+                current = False
             kind, anchor = 'upsert', ''
             if current:
                 interval = config['reminders'][task['priority']]
@@ -390,28 +394,12 @@ def _queue(config, conn, tasks, local, packages, now):
             envelope = {'schema_version': 1, 'delivery_id': identifier, 'kind': kind, 'task': packages[key]}
             if kind == 'reminder' and deadline_mode:
                 envelope['reminder'] = node
+            deferred = (not sync_only and not initial and kind == 'upsert' and (not last or last['status'] == 'deferred'))
             with conn:
                 conn.execute('INSERT OR IGNORE INTO deliveries(id,target_id,target_hash,task_id,revision,local_version,kind,body,status,created_at,package_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                              (identifier, target['id'], fingerprint, key, task['revision'], version, kind, canonical(envelope), 'pending', now, package_hash))
-
-
-def _deadline_node(config, task, now):
-    settings = config.get('deadline_reminders', {})
-    timing = task.get('time') or {}
-    value = timing.get('deadline')
-    if not settings.get('enabled') or not value:
-        return False, None
-    if len(value) == 10:
-        # A date without a clock time is scheduled at the end of that local day.
-        deadline = dt.datetime.combine(dt.date.fromisoformat(value), dt.time(23, 59, 59),
-                                       ZoneInfo(timing.get('timezone') or settings['timezone'])).timestamp()
-    else:
-        deadline = dt.datetime.fromisoformat(value).timestamp()
-    due = [offset for offset in settings[task['priority']] if deadline - offset <= now]
-    if not due:
-        return True, None
-    offset = min(due)
-    return True, {'deadline_at': deadline, 'offset_seconds': offset, 'due_at': deadline - offset}
+                if deferred:
+                    conn.execute("UPDATE deliveries SET status='deferred',finished_at=? WHERE id=? AND status IN ('pending','retry','failed')", (now, identifier))
 
 
 def run_round(config, *, now=None):
@@ -426,6 +414,8 @@ def run_round(config, *, now=None):
         from .channels import DeliveryError, deliver
         from .feedback import blocked_task_ids
         _queue(config, conn, tasks, local, packages, now)
+        queue_digest(config, conn, {key: _effective(task, local.get(key, {})) for key, task in tasks.items()},
+                     local, now, blocked_task_ids(config), _target_hash)
         targets = {t['id']: t for t in config['targets'] if t['enabled']}
         rows = conn.execute("SELECT * FROM deliveries WHERE status IN ('pending','retry') AND next_attempt<=? ORDER BY created_at,rowid", (now,)).fetchall()
         attempted = 0
@@ -471,6 +461,8 @@ def status(config):
                 'targets': [{k: t[k] for k in ('id', 'kind', 'enabled')} for t in config['targets']],
                 'reminders': config['reminders'],
                 'deadline_reminders': config.get('deadline_reminders', {}),
+                'initial_notifications': config.get('initial_notifications', {}),
+                'daily_digest': config.get('daily_digest', {}),
                 'tasks': 0 if conn is None else conn.execute('SELECT count(*) FROM tasks').fetchone()[0],
                 'delivery_counts': {} if conn is None else dict(conn.execute('SELECT status,count(*) FROM deliveries GROUP BY status')),
                 'deliveries': [] if conn is None else [dict(r) for r in conn.execute('SELECT id,target_id,task_id,kind,status,attempts,next_attempt,error FROM deliveries ORDER BY created_at DESC,rowid DESC LIMIT 100')],
