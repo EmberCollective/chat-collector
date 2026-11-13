@@ -41,6 +41,8 @@ result = query_rules(
 
 `selection/store.py` 继续使用原数据库和 ID 算法，事务提交断点与 outbox，文件发布失败后重试恢复。显式时间重放不会推进定时断点。独立采集进度与筛选进度分开，不能把“采集结束时间”当成所有消息都已覆盖的时间。
 
+受采集器管理的定时筛选，结束时间上限为已发布快照的 `capture_started_at`。SQL 返回的快照编号必须与附件准备阶段相同，且其时间水位仍覆盖该窗口；否则整轮失败、不推进断点。外部 `resource_db`、同目录 `hardlink.db` 及 WAL/journal 也参与快照检查。旧版本采集元数据缺少水位时先采集一轮；不补造覆盖时间。外部提供方可在快照对象实现 `selection_window_end(requested_end)` 提供自己的覆盖上限。
+
 新平台注册快照工厂：`providers.query_registry.register_query_provider(id, factory)`。工厂返回带 `snapshot_id`、`scan()`、`enrich()` 的上下文管理器；标准消息、身份、会话边界由提供方保证。合成第三来源测试执行原有 SQL，并进入现有处理和消息链路，无需修改 Pi 或消息核心。
 
 ## 公开待办接口
