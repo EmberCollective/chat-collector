@@ -159,6 +159,22 @@ def refresh(config):
     if key_mode == "raw_key_salt" and not re.fullmatch(r"[0-9a-fA-F]{96}", key):
         raise ValueError("QQ raw_key_salt must contain a 32-byte key and 16-byte salt as hex")
 
+    if config.get('snapshot_mode') == 'incremental':
+        from ..incremental import refresh_database
+        from ..native_delta import capture_rows
+        from ..qq_incremental import sync_plaintext
+        library = Path(__file__).resolve().parents[2]/'runtime-deps/native/sqlcipher-qq-pages.dll'
+        raw = destination.parent/'.incremental/qq-native.db'
+        pages = refresh_database(source, raw, platform='qq', account=config['account_id'],
+            key=key, key_mode=key_mode, work_dir=config.get('work_dir'), library=library,
+            pending_byte=0x40000000-1024, collect_changes=capture_rows)
+        candidates=pages.pop('_row_candidates',None)
+        previous_stamp=pages.pop('_previous_target_stamp',None)
+        logical=sync_plaintext(raw,destination,library,candidates=candidates,previous_raw_stamp=previous_stamp)
+        return {'changed':logical['changed'],'database':str(destination),'mode':'incremental',
+                'page_refresh':pages,'logical_sync':logical,
+                'timings_seconds':{'total':round(time.perf_counter()-started,3)}}
+
     wal = Path(str(source) + "-wal")
     marker = destination.with_suffix(".source.json")
 

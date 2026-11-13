@@ -24,6 +24,8 @@ def load_config(path):
         raise ValueError('storage.state_file and output_dir are required')
     if not isinstance(source.get('refresh', True), bool):
         raise ValueError('source.refresh must be true or false, without quotes')
+    if source.get('snapshot_mode', 'full') not in {'full', 'incremental'}:
+        raise ValueError('source.snapshot_mode must be full or incremental')
     if source.get('work_dir') and source.get('encrypted_dir'):
         work = Path(source['work_dir']).resolve()
         original = Path(source['encrypted_dir']).resolve()

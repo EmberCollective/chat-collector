@@ -6,6 +6,7 @@ encrypted_dir = 'D:\UserFolders\Documents\Tencent Files\997698095\nt_qq\nt_db'
 decrypted_dir = "../data/qq/decrypted"
 key_file = "../secrets/account-key.json"
 refresh = true
+snapshot_mode = "incremental"
 media_dir = 'D:\UserFolders\Documents\Tencent Files\997698095\nt_qq\nt_data'
 work_dir = "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\chat-collector-qq"
 

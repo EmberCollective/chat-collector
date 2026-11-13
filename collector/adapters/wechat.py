@@ -248,6 +248,12 @@ def refresh(config):
             if (root / relative).is_file():
                 files.append(root / relative)
     destination.mkdir(parents=True, exist_ok=True)
+    if source.get('snapshot_mode') == 'incremental':
+        from ..incremental import refresh_database
+        validation = [refresh_database(database, destination/database.name,
+            platform='wechat', account=account, key=key, work_dir=source.get('work_dir')) for database in files]
+        return {'updated': sum(item['changed'] for item in validation), 'databases': len(files),
+                'validation': validation, 'timings_seconds': {'total': round(time.perf_counter()-started, 3)}}
     manifest = destination / ".refresh.json"
     previous = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
     current = {}

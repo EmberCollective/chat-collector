@@ -6,6 +6,7 @@ encrypted_dir = 'D:\UserFolders\Documents\xwechat_files\wxid_jxfwv4ublsp322_a335
 decrypted_dir = "../data/wechat/decrypted"
 key_file = 'C:\Users\Administrator\.zcode\workspace\1794449445858-e81a0955-44b2-4ab7-b5c5-d3b5602a2371\WeChatDataAnalysis\output\account_keys.json'
 refresh = true
+snapshot_mode = "incremental"
 media_dir = 'D:\UserFolders\Documents\xwechat_files\wxid_jxfwv4ublsp322_a335'
 resource_db = '../data/wechat/decrypted/message_resource.db'
 image_cache_dir = 'C:\Users\Administrator\.zcode\workspace\1794449445858-e81a0955-44b2-4ab7-b5c5-d3b5602a2371\WeChatDataAnalysis\output\databases\wxid_jxfwv4ublsp322\resource'
