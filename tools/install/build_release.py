@@ -8,7 +8,7 @@ import subprocess
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_DIRS = ('common', 'collector', 'providers', 'rulesets', 'processor', 'messaging', 'automation',
+SOURCE_DIRS = ('common', 'application', 'collector', 'providers', 'selection', 'rulesets', 'processor', 'messaging', 'automation',
                'processing-rules', 'docs', 'tools/console', 'tools/automation', 'tools/install')
 SOURCE_FILES = ('contracts.py', 'README.md', 'FILTERS.md', '.env.example', 'requirements.txt',
                 'Install.cmd', 'Start.cmd', 'Configure.cmd', 'tools/qq_recover.py', 'tools/qq-recover.cmd',

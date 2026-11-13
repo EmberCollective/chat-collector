@@ -17,7 +17,9 @@ published = ingest_batch([event], "D:/opt/chat-collector/data/batches")
 
 同批重复事件只保留一份，相同批次重试复用同一文件。不同批次重复事件由处理层 `event_id` 去重；同消息新版本必须提高 `revision`。同批冲突立即拒绝，跨批冲突在处理层导入时拒绝。提供方负责稳定身份和修订；接口不自动改名、不生成修订、不调用 AI，也不推进收集检查点。每批建议不超过 1000 条，过大则由提供方分批。
 
-内置采集器仍使用 `Store` 的事务与 outbox。没有必要先写 outbox 再调用这个入口；它用于外部收集器的完整事件发布。
+内置筛选层使用 `selection.Store` 的事务与 outbox。没有必要先写 outbox 再调用这个入口；它用于外部提供方的完整事件发布。
+
+需要复用本项目 SQL 规则时，注册 `providers.query_registry.register_query_provider` 的快照工厂，由兼容层执行 SQL，`selection` 合并命中与发布。读取、附件和待办接口的实际边界见 [候选实现与迁移](architecture-implementation.md)。
 
 ## 注册附件准备函数
 

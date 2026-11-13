@@ -111,3 +111,10 @@ def test_legacy_export_import_can_switch_to_service_without_reemitting(configs):
     assert preview(messages)['total_tasks'] == 1
     with core._connect(messages) as conn:
         assert conn.execute('SELECT completed FROM local_state').fetchone()[0] == 0
+
+
+def test_feedback_cannot_update_a_different_task_source(tmp_path):
+    path = tmp_path/'messaging.toml'
+    path.write_text('[input]\nprocessor_config="one.toml"\n[feedback]\nenabled=true\nprocessor_config="two.toml"\n')
+    with pytest.raises(ValueError, match='same processor'):
+        load_config(path)

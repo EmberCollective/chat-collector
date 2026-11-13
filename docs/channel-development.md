@@ -4,6 +4,8 @@
 
 已有账号的配置见 [渠道配置](messaging-channels.md)；输入字段见 [消息层契约](messaging.md)；自动调度见 [自动运行](automation.md)。本指南说明如何接入一个新渠道。
 
+候选实现已通过 `processor.service` 读取变更和写回状态；回调只入队，提交后由自动化唤醒，完整路径与重试边界见 [架构实现](architecture-implementation.md#消息消费与回调)。不要连接正式任务数据库，也不要在渠道里新增提醒时间策略。
+
 ## 选择接入路径
 
 | 场景 | 路径 | 需要改什么 |

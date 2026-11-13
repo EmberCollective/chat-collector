@@ -110,3 +110,42 @@ def test_feedback_commit_precedes_wakeup(tmp_path, monkeypatch):
     monkeypatch.setattr(automation.wakeup, 'notify', lambda p, j: observed.append((j, feedback_status(config)['counts'])))
     enqueue_feedback(config, 'local', 'e1', 't1', 'complete', {'platform': 'local', 'user_id': 'u1', 'source': 'test'})
     assert observed == [('feedback', {'queued': 1})]
+
+
+def test_two_local_wakeup_stages_p95_under_one_second(tmp_path):
+    config = configuration(tmp_path)
+    delivered = threading.Event()
+    times, feedback_lags, delivery_lags = {}, [], []
+    def apply():
+        times['apply'] = time.monotonic()
+        feedback_lags.append(times['apply'] - times['queued'])
+        times['committed'] = time.monotonic()
+        notify(config['jobs']['processor']['config'], 'messaging')
+        return {'applied': 1}
+    def send():
+        delivery_lags.append(time.monotonic() - times['committed'])
+        delivered.set()
+        return {'sent': 1}
+    with _connect(config, write=True) as conn:
+        conn.execute('UPDATE jobs SET next_run=?', (time.time() + 3600,))
+    service = SchedulerService(config, callbacks={'feedback':apply,'messaging':send}).start()
+    try:
+        for _ in range(20):
+            delivered.clear()
+            times['queued'] = time.monotonic()
+            assert notify(config['jobs']['feedback']['config'], 'feedback')
+            assert delivered.wait(2)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                rows = [r for r in status(config)['jobs'] if r['name'] in {'feedback','messaging'}]
+                if all(r['state'] == 'idle' and r['wake_seq'] == r['wake_consumed'] for r in rows):
+                    break
+                time.sleep(.005)
+            else:
+                raise AssertionError('Jobs did not settle')
+        p95 = [sorted(values)[18] for values in (feedback_lags, delivery_lags)]
+        assert len(feedback_lags) == len(delivery_lags) == 20
+        assert max(p95) < 1
+        print('local_wakeup_p95_seconds=' + json.dumps(p95))
+    finally:
+        service.stop()

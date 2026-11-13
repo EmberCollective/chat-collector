@@ -110,6 +110,9 @@ def test_launcher_requires_ready_before_starting_workers(tmp_path):
 def test_release_payload_never_copies_accounts_keys_or_installed_node():
     build = module('build_release')
     files = build.payload(ROOT)
+    assert all(name in files for name in ('common/locking.py', 'application/collection.py',
+        'selection/__init__.py', 'providers/query.py', 'providers/content.py',
+        'providers/platforms/qq.py', 'processor/service.py', 'automation/wakeup.py'))
     assert 'tools/install/defaults/processor.toml' in files
     assert 'tools/install/console.toml' in files
     assert 'tools/console/console.toml' not in files

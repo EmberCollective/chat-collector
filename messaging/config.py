@@ -55,6 +55,8 @@ def load_config(path):
         if not isinstance(source, str) or not source:
             raise ValueError('input.processor_config must be a configuration path')
         config['input']['processor_config'] = str((path.parent / source).resolve())
+        if feedback['enabled'] and config['input']['processor_config'] != feedback['processor_config']:
+            raise ValueError('Task input and feedback must use the same processor configuration')
     feedback_state = Path(feedback['state_file'])
     if (feedback_state in {state, path, Path(config['env_file']), Path(feedback['processor_config'])}
             or any(feedback_state == root or root in feedback_state.parents for root in (incoming, assets))):
