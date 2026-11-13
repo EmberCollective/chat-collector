@@ -9,6 +9,20 @@ import zstandard
 from collector.adapters import wechat
 
 
+def test_wcdb_zero_preallocation_does_not_become_live_pages():
+    from collector.vendor.wechat.decrypt import _trim_preallocated_wal_tail
+    header = bytearray(4096)
+    header[28:32] = (2).to_bytes(4, 'big')
+    header[24:28] = header[92:96] = b'ABCD'
+    data = bytes(header) + b'x'*4096 + bytes(3*4096)
+    info = {'committed_frames': 2, 'database_pages': 5}
+    assert len(_trim_preallocated_wal_tail(data, header, 4096, info)) == 8192
+    assert info['database_pages'] == 2 and info['preallocated_tail_pages'] == 3
+    assert _trim_preallocated_wal_tail(data[:-1]+b'x', header, 4096, dict(info)) == data[:-1]+b'x'
+    header[92:96] = b'DCBA'
+    assert _trim_preallocated_wal_tail(data, header, 4096, dict(info)) == data
+
+
 def test_write_after_coherent_read_is_picked_up_next_refresh(tmp_path, monkeypatch):
     source = tmp_path / 'source'
     (source / 'message').mkdir(parents=True)

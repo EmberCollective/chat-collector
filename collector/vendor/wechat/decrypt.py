@@ -61,6 +61,19 @@ HMAC_SIZE = 64
 RESERVE_SIZE = IV_SIZE + HMAC_SIZE
 
 
+def _trim_preallocated_wal_tail(data: bytes, header: bytes, page_size: int, wal: dict) -> bytes:
+    """WCDB WAL sizes can include zero-filled allocation beyond a valid page-1 size."""
+    logical = int.from_bytes(header[28:32], "big")
+    physical = len(data) // page_size
+    if (wal.get("committed_frames") and 0 < logical < physical
+            and header[24:28] == header[92:96]
+            and not any(memoryview(data)[logical * page_size:])):
+        wal.update(physical_database_pages=physical, database_pages=logical,
+                   preallocated_tail_pages=physical - logical)
+        return data[:logical * page_size]
+    return data
+
+
 def _derive_mac_key(enc_key: bytes, salt: bytes) -> bytes:
     """Derive SQLCipher/WCDB page HMAC key."""
     mac_salt = bytes(b ^ 0x3A for b in salt)
@@ -653,6 +666,8 @@ class WeChatDatabaseDecryptor:
                 if plain_page_size < 512 or plain_page_size > 65536 or plain_page_size & (plain_page_size - 1):
                     raise ValueError("SQLite 页大小无效")
                 encrypted_data, result["wal"] = merge_wal_snapshot(encrypted_data, wal_data, plain_page_size)
+                encrypted_data = _trim_preallocated_wal_tail(
+                    encrypted_data, encrypted_data[:100], plain_page_size, result["wal"])
                 if result["wal"]["committed_frames"]:
                     merged = bytearray(encrypted_data)
                     merged[28:32] = result["wal"]["database_pages"].to_bytes(4, "big")
@@ -694,6 +709,8 @@ class WeChatDatabaseDecryptor:
                 verify_page=lambda page, pgno: hmac.compare_digest(
                     page[-HMAC_SIZE:], _compute_page_hmac(mac_key, page, pgno)),
             )
+            encrypted_data = _trim_preallocated_wal_tail(
+                encrypted_data, _decrypt_page(enc_key, encrypted_data[:PAGE_SIZE], 1), PAGE_SIZE, result["wal"])
             decrypted_data = bytearray()
             total_pages = (len(encrypted_data) + PAGE_SIZE - 1) // PAGE_SIZE
             successful_pages = 0
