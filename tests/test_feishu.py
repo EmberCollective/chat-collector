@@ -48,13 +48,45 @@ def fake_client(monkeypatch, *, fail_send=False, fail_file=False):
     return calls
 
 
-def callback(envelope, card, action='complete'):
+def callback(envelope, card, action='complete', priority='P2'):
     columns = card['body']['elements'][-1]['columns']
-    index = 1 if action == 'snooze' else 0
+    index = 1 if action in {'snooze', 'set_priority'} else 0
     value = columns[index]['elements'][0]['behaviors'][0]['value']
     return {'header': {'app_id': 'cli_test', 'event_type': 'card.action.trigger', 'event_id': 'evt1'},
-            'event': {'operator': {'open_id': 'ou_me'}, 'action': {'tag': 'button', 'value': value},
+            'event': {'operator': {'open_id': 'ou_me'}, 'action': {'tag': 'select_static' if action == 'set_priority' else 'button', 'value': value,
+                      **({'option': priority} if action == 'set_priority' else {})},
                       'context': {'open_message_id': 'om_1', 'open_chat_id': 'oc_group'}}}
+
+
+def test_priority_selector_and_authenticated_option_callback(case, monkeypatch):
+    config, target, envelope = case
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    card = json.loads(calls[0][1].content)
+    selector = card['body']['elements'][-1]['columns'][1]['elements'][0]
+    assert selector['tag'] == 'select_static'
+    assert selector['placeholder']['content'] == '调整优先级'
+    assert [item['value'] for item in selector['options']] == ['P0', 'P1', 'P2', 'P3', 'P4']
+    assert '稍后提醒' not in json.dumps(card, ensure_ascii=False)
+    queued = []
+    enqueue = lambda *args, **kwargs: queued.append((args, kwargs)) or {'status': 'queued'}
+    event = callback(envelope, card, 'set_priority', 'P4')
+    feishu.handle_callback(config, target, event, enqueue=enqueue)
+    feishu.handle_callback(config, target, event, enqueue=enqueue)
+    assert queued[0] == queued[1]
+    assert queued[0][0][4] == 'set_priority'
+    assert queued[0][1] == {'expected_revision': 1, 'priority': 'P4'}
+    event['event']['action']['option'] = 'P0'
+    feishu.handle_callback(config, target, event, enqueue=enqueue)
+    assert queued[-1][0][2] != queued[0][0][2]
+    for bad in ('P9', None, {}, True):
+        event['event']['action']['option'] = bad
+        with pytest.raises(ValueError, match='invalid_priority'):
+            feishu.handle_callback(config, target, event, enqueue=enqueue)
+    event = callback(envelope, card)
+    event['event']['action'].update(tag='select_static', option='P0')
+    with pytest.raises(ValueError, match='invalid_action'):
+        feishu.handle_callback(config, target, event, enqueue=enqueue)
 
 
 def test_app_card_create_replay_update_and_old_tokens_expire(case, monkeypatch):
@@ -182,6 +214,43 @@ def test_file_send_is_persisted_and_not_repeated_for_reminders(case, monkeypatch
     assert len([c for c in calls if c[0] == 'upload']) == 1
     assert len([c for c in calls if c[0] == 'create' and c[1].msg_type == 'file']) == 1
     assert all(len(c[1].uuid) <= 50 for c in calls if c[0] == 'create')
+
+
+def test_corrected_filename_reuploads_once_with_a_new_delivery_identity(case, monkeypatch):
+    config, target, envelope = case
+    add_file(case)
+    resource = envelope['task']['resources'][0]
+    resource['name'] = '附件'
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    envelope['delivery_id'] = 'corrected-name'
+    resource['name'] = '图片-1.jpg'
+    feishu.deliver_app(target, envelope, config)
+    assert [c[1].file_name for c in calls if c[0] == 'upload'] == ['附件', '图片-1.jpg']
+    messages = [c[1] for c in calls if c[0] == 'create' and c[1].msg_type == 'file']
+    assert len(messages) == 2 and messages[0].uuid != messages[1].uuid
+    envelope['delivery_id'] = 'later-reminder'
+    envelope['kind'] = 'reminder'
+    feishu.deliver_app(target, envelope, config)
+    assert len([c for c in calls if c[0] == 'upload']) == 2
+
+
+def test_legacy_file_cache_migration_and_unknown_outcome_not_bypassed(case, monkeypatch):
+    import sqlite3
+    config, target, envelope = case
+    with sqlite3.connect(config['feedback']['state_file']) as conn:
+        conn.executescript(feishu.SCHEMA.replace(',file_name TEXT', ''))
+    add_file(case)
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    with feishu._state(config) as conn:
+        assert 'file_name' in {r[1] for r in conn.execute('PRAGMA table_info(feishu_files)')}
+        conn.execute("UPDATE feishu_files SET status='unknown'")
+    envelope['task']['resources'][0]['name'] = 'renamed.pdf'
+    envelope['delivery_id'] = 'renamed'
+    with pytest.raises(DeliveryUncertain, match='material_delivery_unknown'):
+        feishu.deliver_app(target, envelope, config)
+    assert len([c for c in calls if c[0] == 'upload']) == 1
 
 
 def test_file_failure_preserves_successful_card_and_marks_material(case, monkeypatch):

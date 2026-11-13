@@ -34,16 +34,28 @@ def _text(value, field, maximum=200):
 
 
 def update_task_status(config, task_id, status, *, request_id, actor, expected_revision=None):
+    return _update_task(config, task_id, 'status', status, request_id=request_id,
+                        actor=actor, expected_revision=expected_revision)
+
+
+def update_task_priority(config, task_id, priority, *, request_id, actor, expected_revision=None):
+    """Persist an explicit human priority using the same audited publication path."""
+    return _update_task(config, task_id, 'priority', priority, request_id=request_id,
+                        actor=actor, expected_revision=expected_revision)
+
+
+def _update_task(config, task_id, field, value, *, request_id, actor, expected_revision=None):
     task_id = _text(task_id, 'task_id')
     request_id = _text(request_id, 'request_id')
-    if not isinstance(status, str) or status not in {'completed', 'open', 'cancelled'}:
-        raise ValueError('invalid_task_status')
+    choices = {'completed', 'open', 'cancelled'} if field == 'status' else {'P0', 'P1', 'P2', 'P3', 'P4'}
+    if not isinstance(value, str) or value not in choices:
+        raise ValueError('invalid_task_' + field)
     if not isinstance(actor, dict) or set(actor) != {'platform', 'user_id', 'source'}:
         raise ValueError('invalid_task_status_actor')
     actor = {key: _text(actor[key], 'actor_' + key, 64 if key == 'platform' else 200) for key in ('platform', 'user_id', 'source')}
     if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 1):
         raise ValueError('invalid_expected_revision')
-    request = canonical({'task_id': task_id, 'status': status, 'actor': actor, 'expected_revision': expected_revision})
+    request = canonical({'task_id': task_id, field: value, 'actor': actor, 'expected_revision': expected_revision})
     if not Path(config['storage']['state_file']).is_file():
         raise UnknownTask('task_not_found')
     lock = InstanceLock(config['storage']['state_file'])
@@ -69,15 +81,17 @@ def update_task_status(config, task_id, status, *, request_id, actor, expected_r
                         raise TaskStatusConflict('task_revision_conflict')
                     if task['status'] == 'superseded':
                         raise TaskStatusConflict('task_superseded')
-                    previous_status = task['status']
-                    changed = previous_status != status or task.get('status_control', {}).get('status') != status
+                    previous_value = task[field]
+                    changed = previous_value != value or task.get(field + '_control', {}).get(field) != value
                     now = dt.datetime.now(dt.timezone.utc).isoformat()
                     if changed:
-                        task.update(status=status, updated_at=now,
-                                    status_control={'status': status, 'request_id': request_id, 'actor': actor, 'at': now})
+                        task.update({field: value, 'updated_at': now,
+                                     field + '_control': {field: value, 'request_id': request_id, 'actor': actor, 'at': now}})
+                        if field == 'priority':
+                            task['priority_reason'] = '用户手动设置为 ' + value
                         core._save_task(conn, task)
-                    result = {'request_id': request_id, 'task_id': task_id, 'status': task['status'],
-                              'revision': task['revision'], 'previous_status': previous_status,
+                    result = {'request_id': request_id, 'task_id': task_id, field: task[field],
+                              'revision': task['revision'], 'previous_' + field: previous_value,
                               'changed': changed, 'actor': actor, 'recorded_at': now}
                     conn.execute('INSERT INTO task_status_requests VALUES(?,?,?,?)', (request_id, request, canonical(result), now))
             try:

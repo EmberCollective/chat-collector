@@ -63,7 +63,7 @@ def _until(value):
     return float(value)
 
 
-def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision=None, *, until=None):
+def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision=None, *, until=None, priority=None):
     if not config.get('feedback', {}).get('enabled', False):
         raise ValueError('feedback_disabled')
     target_id = _text(target_id, 'target_id')
@@ -72,8 +72,13 @@ def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revis
     target = next((t for t in config.get('targets', []) if t['id'] == target_id), None)
     if target is None and target_id != 'local':
         raise ValueError('feedback_target_not_registered')
-    if not isinstance(action, str) or action not in {'complete', 'reopen', 'cancel', 'snooze'}:
+    if not isinstance(action, str) or action not in {'complete', 'reopen', 'cancel', 'snooze', 'set_priority'}:
         raise ValueError('invalid_feedback_action')
+    if action == 'set_priority':
+        if not isinstance(priority, str) or priority not in {'P0', 'P1', 'P2', 'P3', 'P4'}:
+            raise ValueError('invalid_feedback_priority')
+    elif priority is not None:
+        raise ValueError('feedback_priority_only_for_set_priority')
     if not isinstance(actor, dict) or set(actor) != {'platform', 'user_id', 'source'}:
         raise ValueError('invalid_feedback_actor')
     actor = {k: _text(actor[k], 'actor_' + k, 64 if k == 'platform' else 200) for k in ('platform', 'user_id', 'source')}
@@ -85,6 +90,8 @@ def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revis
         until = _until(until)
     payload = {'target_id': target_id, 'event_id': event_id, 'task_id': task_id, 'action': action,
                'actor': actor, 'expected_revision': expected_revision, 'until': until}
+    if action == 'set_priority':
+        payload['priority'] = priority
     request = canonical(payload)
     request_id = digest(['task-feedback.v1', target_id, event_id])
     now = time.time()
@@ -110,8 +117,8 @@ def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revis
         return ack
 
 
-def enqueue_feedback(config, target_id, event_id, task_id, action, actor, *, expected_revision=None):
-    return _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision)
+def enqueue_feedback(config, target_id, event_id, task_id, action, actor, *, expected_revision=None, priority=None):
+    return _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision, priority=priority)
 
 
 def request_task_action(config, task_id, action, *, event_id=None, actor=None, expected_revision=None, until=None):
@@ -162,7 +169,7 @@ def retry_feedback(config, request_id):
 
 def _apply(config, row):
     from . import core
-    from processor import load_config, update_task_status, TaskStatusConflict, UnknownTask
+    from processor import load_config, update_task_status, update_task_priority, TaskStatusConflict, UnknownTask
     request = json.loads(row['request'])
     if request['action'] == 'snooze':
         core.sync(config)
@@ -175,8 +182,10 @@ def _apply(config, row):
         if row['snoozed_until'] <= time.time():
             return {'task_id': row['task_id'], 'status': 'snooze_expired'}
         return core.set_task_state(config, row['task_id'], 'snooze', until=row['snoozed_until'])
-    result = update_task_status(load_config(config['feedback']['processor_config']), row['task_id'],
-        {'complete': 'completed', 'reopen': 'open', 'cancel': 'cancelled'}[request['action']],
+    change_priority = request['action'] == 'set_priority'
+    update = update_task_priority if change_priority else update_task_status
+    value = request['priority'] if change_priority else {'complete': 'completed', 'reopen': 'open', 'cancel': 'cancelled'}[request['action']]
+    result = update(load_config(config['feedback']['processor_config']), row['task_id'], value,
         request_id=row['request_id'], actor=request['actor'], expected_revision=request['expected_revision'])
     core.sync(config)
     # A retried historical acknowledgement must never overwrite a newer formal status.

@@ -639,6 +639,10 @@ def run_round(config):
                     for index, task in enumerate(tasks):
                         previous = existing_by_id.get(task['task_id'])
                         if previous:
+                            if previous.get('priority_control'):
+                                task['priority_control'] = previous['priority_control']
+                                task['priority'] = previous['priority_control']['priority']
+                                task['priority_reason'] = previous['priority_reason']
                             if previous.get('status_control'):
                                 task['status_control'] = previous['status_control']
                                 if previous['status_control']['status'] in {'completed', 'cancelled'}:

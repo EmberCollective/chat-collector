@@ -6,11 +6,48 @@ import pytest
 
 from collector.__main__ import InstanceLock
 from processor import (core, update_task_status, search_tasks, TaskStatusConflict, UnknownTask,
-                       TaskStatusBusy, TaskStatusExportPending)
+                       TaskStatusBusy, TaskStatusExportPending, update_task_priority)
 from test_processor import batch, config, event, response
 
 
 ACTOR = {'platform': 'notion', 'user_id': 'verified-person', 'source': 'task-page'}
+
+
+def test_manual_priority_survives_model_update_and_keeps_completion(config, saved, monkeypatch):
+    first = update_task_priority(config, saved['task_id'], 'P4', request_id='priority:1', actor=ACTOR, expected_revision=1)
+    assert first['priority'] == 'P4' and first['revision'] == 2
+    assert update_task_priority(config, saved['task_id'], 'P4', request_id='priority:1', actor=ACTOR, expected_revision=1) == first
+    with pytest.raises(TaskStatusConflict):
+        update_task_priority(config, saved['task_id'], 'P0', request_id='priority:1', actor=ACTOR)
+    with pytest.raises(TaskStatusConflict):
+        update_task_priority(config, saved['task_id'], 'P0', request_id='priority:2', actor=ACTOR, expected_revision=1)
+    update_task_status(config, saved['task_id'], 'completed', request_id='complete:1', actor=ACTOR)
+    batch(config, 'later', event('b', timestamp=1000))
+    monkeypatch.setattr(core, '_call_model', lambda cfg, rules, group, existing:
+        response(group['primary_message_keys'], identifier=saved['task_id'], title='Updated task details'))
+    core.run_round(config)
+    task = core.list_tasks(config)[0]
+    assert task['status'] == 'completed' and task['priority'] == 'P4'
+    assert task['priority_control']['request_id'] == first['request_id']
+    assert task['priority_control']['actor'] == ACTOR
+    assert task['priority_reason'] == '用户手动设置为 P4'
+
+
+def test_priority_export_failure_replays_without_double_revision(config, saved, monkeypatch):
+    with monkeypatch.context() as patch:
+        patch.setattr(core, '_export', lambda *args: (_ for _ in ()).throw(OSError('disk')))
+        with pytest.raises(TaskStatusExportPending):
+            update_task_priority(config, saved['task_id'], 'P0', request_id='priority:1', actor=ACTOR)
+    assert core.list_tasks(config)[0]['priority'] == 'P0'
+    result = update_task_priority(config, saved['task_id'], 'P0', request_id='priority:1', actor=ACTOR)
+    assert result['revision'] == 2
+
+
+@pytest.mark.parametrize('priority', ['P5', 'p0', None, {}, True])
+def test_invalid_priority_rejected_before_storage(config, priority):
+    with pytest.raises(ValueError, match='invalid_task_priority'):
+        update_task_priority(config, 't', priority, request_id='priority:1', actor=ACTOR)
+    assert not Path(config['storage']['state_file']).exists()
 
 
 @pytest.fixture

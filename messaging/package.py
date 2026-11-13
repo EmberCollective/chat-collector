@@ -130,6 +130,14 @@ def _material(attachment, source_key, index, config, prepare):
             raise ValueError('material_outside_allowed_roots')
         if _hash(path) != sha:
             raise ValueError('material_hash_mismatch')
+        if not Path(resource['name']).suffix:
+            suffix = Path(_name(path_value)).suffix.lower()
+            if suffix in {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff',
+                          '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                          '.txt', '.md', '.csv', '.zip', '.7z', '.mp3', '.mp4', '.wav'}:
+                if not attachment.get('name'):
+                    resource['name'] = ('图片' if resource['type'] == 'image' else '附件') + f'-{index + 1}'
+                resource['name'] += suffix
         size = path.stat().st_size
         if prepare:
             path, sha, size = _store(path, config, sha)
@@ -168,7 +176,8 @@ def build_package(task, config, *, prepare=False):
             if attachment is None:
                 package['unselected_materials_count'] += 1
                 continue
-            item = _material(attachment, key, index, config, prepare)
+            item = _material(dict(attachment, name=attachment.get('name') or original.get('name')),
+                             key, index, config, prepare)
             if item['id'] in resources:
                 resources[item['id']]['source_refs'] = sorted(set(resources[item['id']]['source_refs'] + [key]))
             else:

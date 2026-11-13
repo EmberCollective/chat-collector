@@ -2,11 +2,52 @@
 import json
 from pathlib import Path
 import sqlite3
+import datetime as dt
 
 from messaging import core as messaging, feedback, feishu, load_config
 from processor import core as processing
 from test_feishu import callback, fake_client
 from test_processor import config as processor_config, batch, event, response
+from test_feedback import config as feedback_config
+
+
+def test_priority_callback_updates_existing_card_and_future_deadline_schedule(feedback_config, monkeypatch):
+    config = feedback_config
+    monkeypatch.setenv('TEST_APP_ID', 'cli_test')
+    monkeypatch.setenv('TEST_APP_SECRET', 'synthetic')
+    target = config['targets'][0]
+    target.update(kind='feishu_app', recipient_id='oc_group', app_id_env='TEST_APP_ID',
+                  app_secret_env='TEST_APP_SECRET', allowed_operator_ids=['ou_me'])
+    config['deadline_reminders'].update(enabled=True)
+    pconfig = processing.load_config(config['feedback']['processor_config'])
+    now = 1800000000
+    with processing._connect(pconfig, write=True) as conn:
+        task = json.loads(conn.execute('SELECT body FROM tasks').fetchone()[0])
+        task['priority'] = 'P1'
+        task['time'] = {'deadline': dt.datetime.fromtimestamp(now + 8 * 3600, dt.timezone.utc).isoformat()}
+        processing._save_task(conn, task)
+        conn.commit()
+        processing._export(pconfig, conn)
+    from messaging import channels
+    monkeypatch.setattr(channels, 'deliver', lambda target, envelope, config, previous=None:
+        feishu.deliver_app(target, envelope, config, previous))
+    calls = fake_client(monkeypatch)
+    assert messaging.run_round(config, now=now)['sent'] == 1
+    card = json.loads(calls[0][1].content)
+    click = callback({'task': task}, card, 'set_priority', 'P0')
+    ack = feishu.handle_callback(config, target, click)
+    assert feishu.handle_callback(config, target, click) == ack
+    assert feedback.process_pending(config)['applied'] == 1
+    assert processing.list_tasks(pconfig)[0]['priority'] == 'P0'
+    assert messaging.run_round(config, now=now + 1)['sent'] == 1
+    assert calls[-1][0] == 'patch'
+    updated = json.loads(calls[-1][1].request_body.content)
+    assert updated['header']['title']['content'].startswith('[P0]')
+    assert updated['header']['template'] != card['header']['template']
+    assert messaging.run_round(config, now=now + 2)['sent'] == 0
+    assert messaging.run_round(config, now=now + 2 * 3600)['sent'] == 1
+    assert calls[-1][0] == 'create'
+    assert messaging.run_round(config, now=now + 2 * 3600 + 1)['sent'] == 0
 
 
 def test_feishu_completion_round_trip_and_later_model_update_stay_completed(processor_config, tmp_path, monkeypatch):

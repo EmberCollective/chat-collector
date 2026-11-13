@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS feishu_actions(token TEXT PRIMARY KEY, delivery_id TE
 CREATE TABLE IF NOT EXISTS feishu_heads(scope TEXT,task_id TEXT,generation TEXT,PRIMARY KEY(scope,task_id));
 CREATE TABLE IF NOT EXISTS feishu_tests(delivery_id TEXT PRIMARY KEY,created_at REAL,clicked_at REAL,action TEXT);
 CREATE TABLE IF NOT EXISTS feishu_files(
- scope TEXT,task_id TEXT,asset_id TEXT,file_key TEXT,message_id TEXT,status TEXT,error TEXT,
+ scope TEXT,task_id TEXT,asset_id TEXT,file_key TEXT,message_id TEXT,status TEXT,error TEXT,file_name TEXT,
  PRIMARY KEY(scope,task_id,asset_id));
 '''
 
@@ -35,6 +35,10 @@ def _state(config):
     settings = dict(config, feedback=dict(config.get('feedback', {}), state_file=str(path)))
     conn = _connect(settings, write=True)
     conn.executescript(SCHEMA)
+    with conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if 'file_name' not in {r[1] for r in conn.execute('PRAGMA table_info(feishu_files)')}:
+            conn.execute('ALTER TABLE feishu_files ADD COLUMN file_name TEXT')
     return conn
 
 
@@ -187,11 +191,16 @@ def card_content(task, tokens, *, alert=False, upload_files=True, reminder=None,
         elements.append(_collapsed(f"信息来源 · {len(task.get('sources', []))} 条", '\n\n'.join(lines)))
     if tokens and not alert:
         labels = {'complete': '完成待办', 'reopen': '恢复待办', 'snooze': '稍后提醒'}
-        buttons = [{'tag': 'column', 'width': 'weighted', 'weight': 1, 'elements': [{
+        buttons = []
+        for i, (action, token) in enumerate(tokens.items()):
+            control = ({'tag': 'select_static', 'width': 'fill',
+                'placeholder': {'tag': 'plain_text', 'content': '调整优先级'},
+                'options': [{'text': {'tag': 'plain_text', 'content': p}, 'value': p} for p in ('P0', 'P1', 'P2', 'P3', 'P4')],
+                'behaviors': [{'type': 'callback', 'value': {'token': token}}]} if action == 'set_priority' else {
             'tag': 'button', 'type': 'primary_filled' if i == 0 else 'default', 'width': 'fill',
             'text': {'tag': 'plain_text', 'content': labels[action]},
-            'behaviors': [{'type': 'callback', 'value': {'token': token}}]}]}
-            for i, (action, token) in enumerate(tokens.items())]
+            'behaviors': [{'type': 'callback', 'value': {'token': token}}]})
+            buttons.append({'tag': 'column', 'width': 'weighted', 'weight': 1, 'elements': [control]})
         elements.append({'tag': 'column_set', 'flex_mode': 'none', 'columns': buttons})
     prefix = '早报' if daily_digest else '已恢复' if recovered else 'ERROR' if alert else task['priority']
     card = {'schema': '2.0', 'config': {'update_multi': True, 'width_mode': 'default', 'enable_forward': False},
@@ -221,7 +230,7 @@ def _file_delivery(client, target, task, resource, config, scope):
     key = (scope, task['task_id'], resource['id'])
     with closing(_state(config)) as conn:
         row = conn.execute('SELECT * FROM feishu_files WHERE scope=? AND task_id=? AND asset_id=?', key).fetchone()
-        if row and row['status'] in {'sent', 'unknown', 'sending'}:
+        if row and (row['status'] in {'unknown', 'sending'} or row['status'] == 'sent' and row['file_name'] == resource['name']):
             return {'id': resource['id'], 'status': 'sent' if row['status'] == 'sent' else 'unknown',
                     'message_id': row['message_id']}
     try:
@@ -229,7 +238,7 @@ def _file_delivery(client, target, task, resource, config, scope):
         limit = min(int(target.get('max_file_bytes', 30_000_000)), 30_000_000)
         if not 0 < path.stat().st_size <= limit:
             raise DeliveryRejected('feishu_file_size_unsupported')
-        file_key = row['file_key'] if row else None
+        file_key = row['file_key'] if row and row['file_name'] == name else None
         if not file_key:
             with path.open('rb') as stream:
                 body = CreateFileRequestBody.builder().file_type('stream').file_name(name).file(stream).build()
@@ -238,9 +247,9 @@ def _file_delivery(client, target, task, resource, config, scope):
             if not file_key:
                 raise DeliveryUncertain('feishu_file_receipt_missing')
         with closing(_state(config)) as conn, conn:
-            conn.execute('INSERT INTO feishu_files VALUES(?,?,?,?,?,?,?) ON CONFLICT(scope,task_id,asset_id) DO UPDATE SET file_key=excluded.file_key,status=excluded.status,error=NULL',
-                         (*key, file_key, None, 'sending', None))
-        message_id = _send(client, target, 'file', {'file_key': file_key}, 'file:' + ':'.join(key))
+            conn.execute('INSERT INTO feishu_files(scope,task_id,asset_id,file_key,message_id,status,error,file_name) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(scope,task_id,asset_id) DO UPDATE SET file_key=excluded.file_key,file_name=excluded.file_name,message_id=NULL,status=excluded.status,error=NULL',
+                         (*key, file_key, None, 'sending', None, name))
+        message_id = _send(client, target, 'file', {'file_key': file_key}, 'file:' + ':'.join((*key, name)))
         with closing(_state(config)) as conn, conn:
             conn.execute("UPDATE feishu_files SET message_id=?,status='sent',error=NULL WHERE scope=? AND task_id=? AND asset_id=?", (message_id, *key))
         return {'id': resource['id'], 'status': 'sent', 'message_id': message_id}
@@ -270,7 +279,7 @@ def deliver_app(target, envelope, config, previous=None):
         if row and row['status'] in {'sending', 'unknown'}:
             raise DeliveryUncertain('feishu_card_prior_outcome_unknown')
         if not row:
-            actions = [] if alert or envelope['kind'] == 'daily_digest' or task['status'] in {'cancelled', 'superseded'} else ['reopen'] if task['status'] in {'completed', 'done'} else ['complete', 'snooze']
+            actions = [] if alert or envelope['kind'] == 'daily_digest' or task['status'] in {'cancelled', 'superseded'} else ['reopen'] if task['status'] in {'completed', 'done'} else ['complete', 'set_priority']
             tokens = {a: secrets.token_urlsafe(24) for a in actions}
             card = card_content(task, tokens, alert=alert, upload_files=target.get('upload_files', True), reminder=envelope.get('reminder'), daily_digest=envelope['kind'] == 'daily_digest')
             conn.execute('INSERT INTO feishu_cards VALUES(?,?,?,?,?,?,?,?,?,?)',
@@ -371,7 +380,7 @@ def handle_callback(config, target, event, *, enqueue=None):
     if (operator not in target.get('allowed_operator_ids', [])
             or header.get('app_id') != _secret(target, 'app_id_env', config)
             or header.get('event_type') != 'card.action.trigger'
-            or event['event']['action'].get('tag') != 'button'
+            or event['event']['action'].get('tag') not in {'button', 'select_static'}
             or not isinstance(value, dict) or set(value) != {'token'} or not isinstance(value['token'], str)):
         raise ValueError('feishu_callback_not_authorized')
     with closing(_state(config)) as conn:
@@ -381,6 +390,13 @@ def handle_callback(config, target, event, *, enqueue=None):
             or row['message_id'] != context.get('open_message_id')
             or context.get('open_chat_id') != target.get('recipient_id')):
         raise ValueError('feishu_card_expired_or_unrecognized')
+    action = event['event']['action']
+    priority = action.get('option')
+    if row['action'] == 'set_priority':
+        if action.get('tag') != 'select_static' or not isinstance(priority, str) or priority not in {'P0', 'P1', 'P2', 'P3', 'P4'}:
+            raise ValueError('feishu_callback_invalid_priority')
+    elif action.get('tag') != 'button' or priority is not None:
+        raise ValueError('feishu_callback_invalid_action')
     with closing(_state(config)) as conn, conn:
         tested = conn.execute('UPDATE feishu_tests SET clicked_at=COALESCE(clicked_at,?),action=COALESCE(action,?) WHERE delivery_id=?',
                               (time.time(), row['action'], row['delivery_id'])).rowcount
@@ -389,9 +405,11 @@ def handle_callback(config, target, event, *, enqueue=None):
     if enqueue is None:
         from .feedback import enqueue_feedback
         enqueue = enqueue_feedback
-    return enqueue(config, target['id'], 'feishu:' + hashlib.sha256(value['token'].encode()).hexdigest(),
+    operation = value['token'] + (':' + priority if row['action'] == 'set_priority' else '')
+    options = {'priority': priority} if row['action'] == 'set_priority' else {}
+    return enqueue(config, target['id'], 'feishu:' + hashlib.sha256(operation.encode()).hexdigest(),
                    row['task_id'], row['action'], {'platform': 'feishu', 'user_id': operator, 'source': 'card'},
-                   expected_revision=row['revision'])
+                   expected_revision=row['revision'], **options)
 
 
 def dispatch_callback(config, listener_app_id, event):

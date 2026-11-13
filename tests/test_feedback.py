@@ -70,6 +70,26 @@ def request_row(config, request_id):
         return dict(conn.execute('SELECT * FROM feedback_requests WHERE request_id=?', (request_id,)).fetchone())
 
 
+def test_priority_feedback_publishes_and_keeps_stale_clicks_from_overwriting(config):
+    first = enqueue(config, action='set_priority', priority='P4', expected_revision=1)
+    assert enqueue(config, action='set_priority', priority='P4', expected_revision=1) == first
+    assert feedback.process_pending(config)['applied'] == 1
+    assert core.preview(config)['tasks'][0]['priority'] == 'P4'
+    enqueue(config, event='old-card', action='set_priority', priority='P0', expected_revision=1)
+    assert feedback.process_pending(config)['conflict'] == 1
+    assert core.preview(config)['tasks'][0]['priority'] == 'P4'
+    enqueue(config, event='new-card', action='set_priority', priority='P2', expected_revision=2)
+    assert feedback.process_pending(config)['applied'] == 1
+    assert feedback.blocked_task_ids(config) == set()
+    assert core.preview(config)['tasks'][0]['priority'] == 'P2'
+
+
+@pytest.mark.parametrize('kwargs', [dict(action='set_priority'), dict(action='set_priority', priority='P9'), dict(action='complete', priority='P0')])
+def test_invalid_priority_feedback_rejected(config, kwargs):
+    with pytest.raises(ValueError):
+        enqueue(config, **kwargs)
+
+
 def test_callback_enqueue_is_fast_and_independent_of_both_pipeline_locks(config, monkeypatch):
     def forbidden(*args):
         raise AssertionError('Callback must not import task batches')
