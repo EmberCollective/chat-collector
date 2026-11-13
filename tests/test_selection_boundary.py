@@ -114,14 +114,14 @@ def test_scheduled_selection_requires_managed_source_watermark_but_replay_works(
 
 
 def test_watermark_is_rechecked_with_query_generation_before_commit(config, monkeypatch):
-    from collector.service import collect_once
+    from collector.service import collect_once, publication_path
     register(config, 'files.sql')
     monkeypatch.setattr(selection.time, 'time', lambda: 111)
     collect_once(config)
     original = selection.query_rules
     def query_then_lower_watermark(*args):
         result = original(*args)
-        path = Path(config['storage']['state_file']+'.collection.json')
+        path = publication_path(config)
         saved = json.loads(path.read_text(encoding='utf-8'))
         saved['capture_started_at'] = 100
         path.write_text(json.dumps(saved), encoding='utf-8')
