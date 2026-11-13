@@ -29,8 +29,11 @@ def main(argv=None):
             result = run_once(config, args.job)
         elif args.mode == 'resume':
             result = resume(config, args.job)
+        elif args.mode in {'status', 'stop'}:
+            from . import control
+            result = {'status': control.status, 'stop': control.stop}[args.mode](config)
         else:
-            result = {'check': check, 'status': status, 'stop': request_stop}[args.mode](config)
+            result = check(config)
         print(json.dumps(result, ensure_ascii=False), flush=True)
         return 1 if result.get('state') in {'retry', 'paused'} else 0
     except Exception as exc:

@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY AUTOINCREMENT,job TEXT,
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);
 CREATE TABLE IF NOT EXISTS listener(id INTEGER PRIMARY KEY CHECK(id=1),state TEXT DEFAULT 'idle',attempts INTEGER DEFAULT 0,
  next_run REAL DEFAULT 0,pid INTEGER,create_time REAL,command TEXT,error TEXT);
+CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY,kind TEXT NOT NULL,job TEXT,state TEXT NOT NULL,
+ created_at REAL,updated_at REAL,process TEXT,error TEXT);
 '''
 
 
@@ -236,17 +238,29 @@ class SchedulerService:
                          ('paused' if exhausted else 'retry', 0 if exhausted else now + delay, code, code, name))
         self._alert(name, 'failure', code)
 
-    def execute(self, name, *, force=False):
-        if name not in JOBS or not self.config['enabled'] or not self.config['jobs'][name]['enabled']:
+    def execute(self, name, *, force=False, manual=False, operation_id=None):
+        if name not in JOBS:
             return {'job': name, 'state': 'disabled'}
         now = self.clock()
         with closing(_connect(self.config, write=True)) as conn, conn:
             conn.execute('BEGIN IMMEDIATE')
+            if self.lock:
+                stopping = conn.execute("SELECT value FROM settings WHERE key='stop_requested'").fetchone()
+                if self.stop_event.is_set() or (stopping and json.loads(stopping['value'])):
+                    return {'job': name, 'state': 'stopping'}
+            operation = conn.execute("SELECT id FROM operations WHERE kind='once' AND job=? AND state='queued' ORDER BY created_at LIMIT 1", (name,)).fetchone()
+            if operation_id and (operation is None or operation['id'] != operation_id):
+                return {'job': name, 'state': 'cancelled'}
+            manual = manual or operation is not None
+            if not manual and (not self.config['enabled'] or not self.config['jobs'][name]['enabled']):
+                return {'job': name, 'state': 'disabled'}
             row = conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone()
-            if row['state'] in {'running', 'paused'} or (not force and row['next_run'] > now):
+            if row['state'] in {'running', 'paused'} or (not force and not manual and row['next_run'] > now):
                 return dict(row)
             attempts = row['attempts'] + 1
             conn.execute("UPDATE jobs SET state='running',attempts=?,last_start=? WHERE name=?", (attempts, now, name))
+            if operation:
+                conn.execute("UPDATE operations SET state='running',updated_at=? WHERE id=?", (now, operation['id']))
         try:
             result = self.callbacks[name]() if name in self.callbacks else _callback(self.config, name)
             if isinstance(result, dict) and result.get('status') == 'failed':
@@ -263,8 +277,12 @@ class SchedulerService:
                 self._alert(name, 'recovery', 'recovered')
         except Exception as exc:
             self._failed(name, attempts, _error(exc))
-        with closing(_connect(self.config)) as conn:
-            return dict(conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone())
+        with closing(_connect(self.config, write=True)) as conn, conn:
+            result = dict(conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone())
+            if operation:
+                conn.execute('UPDATE operations SET state=?,updated_at=?,error=? WHERE id=?',
+                             ('succeeded' if result['state'] == 'idle' else 'failed', self.clock(), result['error'], operation['id']))
+            return result
 
     def _reconcile(self):
         if self.stop_event.is_set():
@@ -275,15 +293,17 @@ class SchedulerService:
                 self.stop_event.set()
                 return
             rows = conn.execute('SELECT * FROM jobs').fetchall()
+            manual_jobs = {r['job'] for r in conn.execute("SELECT job FROM operations WHERE kind='once' AND state='queued'")}
         for row in rows:
-            if not self.config['jobs'][row['name']]['enabled'] or row['state'] in {'running', 'paused'}:
+            manual = row['name'] in manual_jobs
+            if (not manual and not self.config['jobs'][row['name']]['enabled']) or row['state'] in {'running', 'paused'}:
                 continue
             scheduled = self.scheduler.get_job(row['name'])
-            when = max(row['next_run'], self.clock())
+            when = self.clock() if manual else max(row['next_run'], self.clock())
             if scheduled is None:
                 self.scheduler.add_job(self.execute, 'date', id=row['name'], args=[row['name']],
                     run_date=dt.datetime.fromtimestamp(when, dt.timezone.utc), max_instances=1, coalesce=True, misfire_grace_time=None)
-            elif abs(scheduled.next_run_time.timestamp() - when) > 1 and row['next_run'] <= self.clock():
+            elif abs(scheduled.next_run_time.timestamp() - when) > 1 and (manual or row['next_run'] <= self.clock()):
                 self.scheduler.reschedule_job(row['name'], trigger='date', run_date=dt.datetime.fromtimestamp(when, dt.timezone.utc))
 
     def start(self):
@@ -292,10 +312,17 @@ class SchedulerService:
         self.lock = InstanceLock(self.config['storage']['state_file'])
         self.lock.__enter__()
         try:
+            from .control import process_record, config_digest
             with closing(_connect(self.config, write=True)) as conn, conn:
-                _setting(conn, 'stop_requested', False)
-                _setting(conn, 'service', {'pid': os.getpid(), 'started_at': self.clock(), 'state': 'running'})
+                pending = conn.execute("SELECT value FROM settings WHERE key='pending_service'").fetchone()
+                stopped = conn.execute("SELECT value FROM settings WHERE key='stop_requested'").fetchone()
+                if pending and json.loads(pending['value']).get('pid') == os.getpid() and stopped and json.loads(stopped['value']):
+                    self.stop_event.set()
+                else:
+                    _setting(conn, 'stop_requested', False)
+                _setting(conn, 'service', dict(process_record(), started_at=self.clock(), state='running', config_hash=config_digest(self.config)))
                 interrupted = conn.execute("SELECT * FROM jobs WHERE state='running'").fetchall()
+                conn.execute("UPDATE operations SET state='failed',error='interrupted_execution',updated_at=? WHERE kind='once' AND state='running'", (self.clock(),))
             for row in interrupted:
                 self._failed(row['name'], row['attempts'], 'interrupted_execution')
             if self.scheduler is None:
