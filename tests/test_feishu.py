@@ -48,6 +48,34 @@ def fake_client(monkeypatch, *, fail_send=False, fail_file=False):
     return calls
 
 
+def test_listener_automatically_selects_enabled_custom_target_and_same_app_groups(case, monkeypatch):
+    config, target, _ = case
+    first = dict(target, id='my-team')
+    monkeypatch.setenv('SAME_APP_ALIAS', 'cli_test')
+    config['targets'] = [dict(target, id='disabled', enabled=False, app_id_env='UNSET_APP'), first,
+                         dict(target, id='other-group', recipient_id='oc_other', app_id_env='SAME_APP_ALIAS')]
+    assert feishu.listener_target(config) == first
+    calls = []
+    monkeypatch.setattr('messaging.config.load_config', lambda path: config)
+    monkeypatch.setattr(feishu, 'listen', lambda config, target, **kw: calls.append(target['id']))
+    assert feishu.main(['listen', '--config', 'synthetic.toml']) == 0
+    assert calls == ['my-team']
+
+
+def test_listener_rejects_ambiguous_apps_but_allows_explicit_target(case, monkeypatch, capsys):
+    config, target, _ = case
+    monkeypatch.setenv('OTHER_APP', 'cli_other')
+    config['targets'] = [target, dict(target, id='other-app', app_id_env='OTHER_APP')]
+    monkeypatch.setattr('messaging.config.load_config', lambda path: config)
+    calls = []
+    monkeypatch.setattr(feishu, 'listen', lambda config, target, **kw: calls.append(target['id']))
+    assert feishu.main(['listen', '--config', 'synthetic.toml']) == 1
+    assert 'feishu_listener_multiple_apps_not_supported' in capsys.readouterr().out
+    assert calls == []
+    assert feishu.main(['listen', '--config', 'synthetic.toml', '--target', 'other-app']) == 0
+    assert calls == ['other-app']
+
+
 def callback(envelope, card, action='complete', priority='P2'):
     columns = card['body']['elements'][-1]['columns']
     index = 1 if action in {'snooze', 'set_priority'} else 0

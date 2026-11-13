@@ -43,8 +43,8 @@ class ListenerSupervisor:
         exhausted = attempts >= self.settings['max_attempts']
         delay = min(self.settings['backoff_seconds'] * 2 ** max(0, attempts - 1), self.settings['max_backoff_seconds'])
         with closing(_connect(self.config, write=True)) as conn, conn:
-            conn.execute('UPDATE listener SET state=?,next_run=?,pid=NULL,create_time=NULL,command=NULL,error=? WHERE id=1',
-                         ('paused' if exhausted else 'retry', 0 if exhausted else self.service.clock() + delay, code))
+            conn.execute('UPDATE listener SET state=?,attempts=?,next_run=?,pid=NULL,create_time=NULL,command=NULL,error=? WHERE id=1',
+                         ('paused' if exhausted else 'retry', attempts, 0 if exhausted else self.service.clock() + delay, code))
         self.service._alert('listener', 'failure', code)
 
     def poll(self):
@@ -70,12 +70,27 @@ class ListenerSupervisor:
             return
         if row['next_run'] > self.service.clock():
             return
-        command = [sys.executable, '-m', 'messaging.feishu', 'listen', '--config', self.settings['config'], '--stop-file', str(self.stop_file)]
+        try:
+            from messaging import load_config
+            from messaging.feishu import listener_target
+            target = listener_target(load_config(self.settings['config']))
+        except Exception as exc:
+            from messaging.channels import DeliveryRejected
+            if isinstance(exc, DeliveryRejected):
+                with closing(_connect(self.config, write=True)) as conn, conn:
+                    conn.execute("UPDATE listener SET state='paused',error=? WHERE id=1", (exc.code,))
+                self.service._alert('listener', 'failure', exc.code)
+            else:
+                self._failed(row['attempts'] + 1, 'listener_start_failed')
+            return
+        legacy_command = [sys.executable, '-m', 'messaging.feishu', 'listen', '--config', self.settings['config'], '--stop-file', str(self.stop_file)]
+        command = [*legacy_command, '--target', target['id']]
         # A crash can happen between spawning the child and saving its PID.
         candidates = []
         for process in psutil.process_iter(['cmdline', 'create_time']):
             try:
-                if [p.casefold() for p in (process.info['cmdline'] or [])] == [p.casefold() for p in command]:
+                if [p.casefold() for p in (process.info['cmdline'] or [])] in [
+                        [p.casefold() for p in expected] for expected in (command, legacy_command)]:
                     candidates.append(process)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
@@ -88,7 +103,7 @@ class ListenerSupervisor:
                 process = candidates[0]
                 with closing(_connect(self.config, write=True)) as conn, conn:
                     conn.execute("UPDATE listener SET state='running',pid=?,create_time=?,command=? WHERE id=1",
-                                 (process.pid, process.info['create_time'], canonical(command)))
+                                 (process.pid, process.info['create_time'], canonical(process.info['cmdline'])))
             return
         if row['state'] == 'starting':
             self._failed(row['attempts'], 'listener_start_interrupted')

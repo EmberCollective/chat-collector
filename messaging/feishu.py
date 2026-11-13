@@ -56,6 +56,15 @@ def _scope(target, config):
     return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
+def listener_target(config):
+    targets = [t for t in config['targets'] if t['enabled'] and t['kind'] == 'feishu_app']
+    if not targets:
+        raise DeliveryRejected('feishu_listener_target_not_configured')
+    if len({_secret(t, 'app_id_env', config) for t in targets}) != 1:
+        raise DeliveryRejected('feishu_listener_multiple_apps_not_supported')
+    return targets[0]
+
+
 def check(config, target):
     missing = []
     for field in ('app_id_env', 'app_secret_env'):
@@ -524,14 +533,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Official Feishu app-bot SDK setup and callback listener.')
     parser.add_argument('mode', choices=['check', 'list-chats', 'list-members', 'listen'])
     parser.add_argument('--config', default='config/messaging.toml')
-    parser.add_argument('--target', default='feishu-assistant')
+    parser.add_argument('--target')
     parser.add_argument('--chat-id')
     parser.add_argument('--setup', action='store_true', help='Connect only, never apply callbacks.')
     parser.add_argument('--stop-file', help='Exit when this local supervisor signal file exists.')
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
-        target = next(t for t in config['targets'] if t['id'] == args.target and t['kind'] == 'feishu_app')
+        target = (next(t for t in config['targets'] if t['id'] == args.target and t['kind'] == 'feishu_app')
+                  if args.target else listener_target(config))
         if args.mode == 'check':
             result = check(config, target)
         elif args.mode == 'listen':
