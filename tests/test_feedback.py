@@ -182,7 +182,7 @@ def test_pending_export_retries_same_api_request(config, monkeypatch):
 def test_conflict_is_visible_and_new_explicit_action_supersedes_it(config):
     first = enqueue(config, expected_revision=99)
     assert feedback.process_pending(config)['conflict'] == 1
-    assert feedback.blocked_task_ids(config) == {'task-one'}
+    assert feedback.blocked_task_ids(config) == set()
     second = enqueue(config, event='corrected-click', expected_revision=1)
     result = feedback.process_pending(config)
     assert result['applied'] == 1 and result['conflict'] == 0
@@ -195,6 +195,35 @@ def test_unknown_task_is_terminal_and_alarm_count_persists(config):
     feedback.enqueue_feedback(config, 'cards', 'unknown-click', 'unknown', 'complete', ACTOR)
     assert feedback.process_pending(config)['failed'] == 1
     assert feedback.process_pending(config)['failed'] == 1
+
+
+@pytest.mark.parametrize('terminal', ['conflict', 'failed'])
+def test_terminal_feedback_refreshes_all_targets_without_overwriting_latest_task(config, monkeypatch, terminal):
+    from processor.service import update_task_priority, get_task
+    import automation.wakeup
+    config['targets'].append(dict(config['targets'][0], id='second-target'))
+    sent, wakes = [], []
+    monkeypatch.setattr(channels, 'deliver', lambda target, envelope, *a, **k:
+                        sent.append((target['id'], envelope)) or {'remote_id': target['id']})
+    monkeypatch.setattr(automation.wakeup, 'notify', lambda path, job: wakes.append(job))
+    assert core.run_round(config, now=100)['sent'] == 2
+    pconfig = processor.load_config(config['feedback']['processor_config'])
+    update_task_priority(pconfig, 'task-one', 'P1', request_id='external', actor=ACTOR, expected_revision=1)
+    request = enqueue(config, expected_revision=1)
+    if terminal == 'failed':
+        monkeypatch.setattr(feedback, '_apply', lambda *a: (_ for _ in ()).throw(ValueError('invalid')))
+    assert feedback.process_pending(config)[terminal] == 1
+    assert wakes[-1] == 'messaging'
+    assert feedback.blocked_task_ids(config) == set()
+    assert core.run_round(config, now=101)['sent'] == 2
+    assert {target for target, envelope in sent[-2:]} == {'cards', 'second-target'}
+    assert all(envelope['task']['revision'] == 2 and envelope['task']['priority'] == 'P1'
+               for _, envelope in sent[-2:])
+    assert core.run_round(config, now=102 + config['reminders']['P1'])['sent'] == 2
+    feedback.retry_feedback(config, request['request_id'])
+    assert feedback.process_pending(config)[terminal] == 1
+    latest = get_task(pconfig, 'task-one')
+    assert (latest['revision'], latest['priority'], latest['status']) == (2, 'P1', 'open')
 
 
 def test_snooze_until_is_fixed_when_duplicate_arrives_later(config, monkeypatch):
