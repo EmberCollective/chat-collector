@@ -76,3 +76,21 @@ def test_legacy_record_without_capture_watermark_does_not_delay_required_collect
     clock[0] = 120
     assert run_round(config)['status'] == 'no_enabled_rules'
     assert calls == [111, 120]
+
+
+@pytest.mark.parametrize('failure', ['corrupt_state', 'publication_error'])
+def test_selection_storage_failure_does_not_block_collection(config, monkeypatch, failure):
+    calls, _ = setup_refresh(config, monkeypatch)
+    register(config, 'files.sql')
+    if failure == 'corrupt_state':
+        Path(config['storage']['state_file']).write_bytes(b'not a SQLite database')
+        expected = sqlite3.DatabaseError
+    else:
+        def fail_export(self, output_dir):
+            raise OSError('output disk unavailable')
+        monkeypatch.setattr(selection.Store, 'export', fail_export)
+        expected = OSError
+    with pytest.raises(expected):
+        run_round(config)
+    assert calls == [111]
+    assert publication_path(config).is_file()
