@@ -1,6 +1,7 @@
 data/
 runtime-deps/
 secrets/
+/config/*.lock
 __pycache__/
 .pytest_cache/
 *.log

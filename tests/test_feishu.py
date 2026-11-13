@@ -80,6 +80,48 @@ def test_app_card_create_replay_update_and_old_tokens_expire(case, monkeypatch):
         feishu.handle_callback(config, target, event, enqueue=enqueue)
 
 
+def test_synthetic_card_callback_is_authenticated_and_never_queues_task(case, monkeypatch):
+    config, target, envelope = case
+    calls = fake_client(monkeypatch)
+    with feishu._state(config) as conn:
+        conn.execute('INSERT INTO feishu_tests(delivery_id,created_at) VALUES(?,?)', (envelope['delivery_id'], 1))
+    feishu.deliver_app(target, envelope, config)
+    event = callback(envelope, json.loads(calls[0][1].content))
+    enqueue = lambda *a, **k: pytest.fail('synthetic must not enter task queue')
+    result = feishu.handle_callback(config, target, event, enqueue=enqueue)
+    assert result == {'status': 'test_received', 'test_id': envelope['delivery_id'], 'synthetic': True}
+    with feishu._state(config) as conn:
+        saved = conn.execute('SELECT * FROM feishu_tests').fetchone()
+        assert saved['clicked_at'] and saved['action'] == 'complete'
+        assert conn.execute('SELECT count(*) FROM feedback_requests').fetchone()[0] == 0
+    feishu.handle_callback(config, target, event, enqueue=enqueue)
+    event['event']['operator']['open_id'] = 'ou_intruder'
+    with pytest.raises(ValueError, match='not_authorized'):
+        feishu.handle_callback(config, target, event, enqueue=enqueue)
+
+
+def test_same_app_multi_group_dispatch_uses_saved_target_and_rejects_cross_app(case, monkeypatch):
+    config, target, envelope = case
+    other = dict(target, id='second-group', recipient_id='oc_second')
+    config['targets'] = [target, other]
+    calls = fake_client(monkeypatch)
+    with feishu._state(config) as conn:
+        conn.execute('INSERT INTO feishu_tests(delivery_id,created_at) VALUES(?,?)', (envelope['delivery_id'], 1))
+    feishu.deliver_app(other, envelope, config)
+    event = callback(envelope, json.loads(calls[0][1].content))
+    event['event']['context']['open_chat_id'] = 'oc_second'
+    assert feishu.dispatch_callback(config, 'cli_test', event)['status'] == 'test_received'
+    with pytest.raises(ValueError, match='not_authorized'):
+        feishu.dispatch_callback(config, 'cli_other', event)
+    event['event']['context']['open_chat_id'] = 'oc_group'
+    with pytest.raises(ValueError, match='expired'):
+        feishu.dispatch_callback(config, 'cli_test', event)
+    event['event']['context']['open_chat_id'] = 'oc_second'
+    other['enabled'] = False
+    with pytest.raises(ValueError, match='disabled'):
+        feishu.dispatch_callback(config, 'cli_test', event)
+
+
 @pytest.mark.parametrize('mutation', ['operator', 'message', 'chat', 'token', 'app', 'extra_action'])
 def test_unauthorized_or_tampered_callbacks_never_queue(case, monkeypatch, mutation):
     config, target, envelope = case

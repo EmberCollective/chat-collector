@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS feishu_cards(
  generation TEXT, message_id TEXT, created_at REAL, status TEXT, card TEXT);
 CREATE TABLE IF NOT EXISTS feishu_actions(token TEXT PRIMARY KEY, delivery_id TEXT, action TEXT);
 CREATE TABLE IF NOT EXISTS feishu_heads(scope TEXT,task_id TEXT,generation TEXT,PRIMARY KEY(scope,task_id));
+CREATE TABLE IF NOT EXISTS feishu_tests(delivery_id TEXT PRIMARY KEY,created_at REAL,clicked_at REAL,action TEXT);
 CREATE TABLE IF NOT EXISTS feishu_files(
  scope TEXT,task_id TEXT,asset_id TEXT,file_key TEXT,message_id TEXT,status TEXT,error TEXT,
  PRIMARY KEY(scope,task_id,asset_id));
@@ -318,6 +319,11 @@ def handle_callback(config, target, event, *, enqueue=None):
             or row['message_id'] != context.get('open_message_id')
             or context.get('open_chat_id') != target.get('recipient_id')):
         raise ValueError('feishu_card_expired_or_unrecognized')
+    with closing(_state(config)) as conn, conn:
+        tested = conn.execute('UPDATE feishu_tests SET clicked_at=COALESCE(clicked_at,?),action=COALESCE(action,?) WHERE delivery_id=?',
+                              (time.time(), row['action'], row['delivery_id'])).rowcount
+    if tested:
+        return {'status': 'test_received', 'test_id': row['delivery_id'], 'synthetic': True}
     if enqueue is None:
         from .feedback import enqueue_feedback
         enqueue = enqueue_feedback
@@ -326,25 +332,45 @@ def handle_callback(config, target, event, *, enqueue=None):
                    expected_revision=row['revision'])
 
 
+def dispatch_callback(config, listener_app_id, event):
+    """Route only stored tokens for this connected app to the current target policy."""
+    try:
+        value = event['event']['action']['value']
+        token = value['token']
+    except (KeyError, TypeError):
+        raise ValueError('feishu_callback_invalid') from None
+    if not isinstance(token, str) or not isinstance(value, dict) or set(value) != {'token'}:
+        raise ValueError('feishu_callback_invalid')
+    with closing(_state(config)) as conn:
+        row = conn.execute('SELECT c.target_id FROM feishu_actions a JOIN feishu_cards c ON c.delivery_id=a.delivery_id WHERE a.token=?', (token,)).fetchone()
+    selected = next((t for t in config.get('targets', []) if row and t['id'] == row['target_id']), None)
+    if (not selected or selected.get('kind') != 'feishu_app'
+            or _secret(selected, 'app_id_env', config, required=False) != listener_app_id):
+        raise ValueError('feishu_callback_not_authorized')
+    return handle_callback(config, selected, event)
+
+
 def listen(config, target, *, setup=False, stop_file=None):
     import lark_oapi as lark
     from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
     if not setup and (not check(config, target)['configured'] or not config.get('enabled') or not target.get('enabled')):
         raise ValueError('feishu_listener_not_enabled_or_configured')
+    listener_app_id = _secret(target, 'app_id_env', config)
     def callback(data):
         if setup:
             return P2CardActionTriggerResponse({'toast': {'type': 'info', 'content': '连接检查中，尚未启用待办操作。'}})
         try:
             from .config import load_config
             current = load_config(config['_config_path']) if config.get('_config_path') else config
-            selected = next(t for t in current['targets'] if t['id'] == target['id'])
-            result = handle_callback(current, selected, json.loads(lark.JSON.marshal(data)))
+            result = dispatch_callback(current, listener_app_id, json.loads(lark.JSON.marshal(data)))
             message = '操作已接收，正在更新待办。' if result.get('status') != 'rejected' else '操作未接受，请刷新待办后重试。'
+            if result.get('status') == 'test_received':
+                message = '测试回调成功，未修改正式待办。'
             return P2CardActionTriggerResponse({'toast': {'type': 'info', 'content': message}})
         except Exception:
             return P2CardActionTriggerResponse({'toast': {'type': 'error', 'content': '此卡片已过期、未获授权或服务暂不可用，请使用最新卡片。'}})
     handler = lark.EventDispatcherHandler.builder('', '').register_p2_card_action_trigger(callback).build()
-    ws = lark.ws.Client(_secret(target, 'app_id_env', config), _secret(target, 'app_secret_env', config),
+    ws = lark.ws.Client(listener_app_id, _secret(target, 'app_secret_env', config),
                         event_handler=handler, log_level=lark.LogLevel.CRITICAL, auto_reconnect=True)
     from lark_oapi.ws.client import loop
     async def observe():
