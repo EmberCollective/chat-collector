@@ -3,6 +3,7 @@
 | 目标 | 文档 |
 |---|---|
 | 架构边界、Agent 分工与候选实现 | [架构契约](architecture.md)、[Agent 任务](architecture-agent-tasks.md)、[候选实现与迁移](architecture-implementation.md) |
+| 查看本轮问题、修复证据和试运行限制 | [架构审查与试运行验收](architecture-audit.md) |
 | 理解模块与运行入口 | [开发指南](development.md) |
 | 安装、一键启动与开机自启 | [安装指南](installation.md)、[安装验收](installation-acceptance.md) |
 | 接入新的收集模块 | [数据契约](data-contract.md)、[收集层开发指南](collector-development.md)、[提供方接入](provider-api.md) |
