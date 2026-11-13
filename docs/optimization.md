@@ -41,6 +41,6 @@ work_dir = 'C:\Users\Administrator\AppData\Local\Temp\chat-collector-qq'
 
 测试了 SQLCipher 原生 4 工作线程，固定快照导出约 10.415 秒，相比只消除重复读取的 10.816 秒收益有限，因此没有默认启用多进程或增加占用。加密到明文的 SQLite backup 实验不受当前引擎支持，没有替换生产导出路径。
 
-当前仍是完整快照刷新，不是数据库页级增量解密。若以后完整写入成为不可接受的瓶颈，可评估直接在稳定的加密副本上用原生 SQLCipher 查询时间窗；这会改变明文快照的交付方式，应独立验证，不能直接省略历史表或完整性校验。
+上述是 2026-11-12 的旧完整导出路径。2026-11-13 新增原生页增量模式，后续刷新复用已验证页面，详见 [增量刷新](incremental-refresh.md)。`snapshot_mode="full"` 仍保留旧路径用于兼容。
 
 微信的测量与实现见 [微信性能](wechat-performance.md)。

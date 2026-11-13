@@ -35,6 +35,8 @@ chat-collector/
 
 当前机器使用 Python 3.13；QQ 的 Windows SQLCipher wheel 已放在 `runtime-deps`，`run.cmd` 会加载它。
 
+两个平台已启用收集层增量刷新：首次建立基线，后续只解密变化页；QQ 将变化行同步到标准 SQLite。配置、原生组件构建、回滚、磁盘与内存开销见 [增量刷新说明](docs/incremental-refresh.md)。处理待办只读取已发布数据，不会隐式启动数据库刷新。
+
 QQ 首次取钥：保持 QQ 登录，**右键 `tools/qq-recover.cmd` → 以管理员身份运行**。这台机器已实际验证管理员方式成功；普通权限无法读取 QQ 进程。凭据保存在 `secrets/account-key.json`，不要发给他人。取钥完成后的日常数据库采集不需要读取 QQ 进程。
 
 ```powershell
