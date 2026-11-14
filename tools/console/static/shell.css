@@ -1,0 +1,132 @@
+/* Shared console chrome aligned with the approved redesign shell. */
+:root {
+  --secondary:#52615a;
+  --radius:8px;
+}
+
+.sidebar {
+  padding:24px 16px 16px;
+  background:#f0f3f0;
+}
+.brand {
+  gap:12px;
+  padding:0 8px 28px;
+}
+.brand strong {
+  font-weight:600;
+}
+.brand small {
+  margin-top:0;
+  font-size:11px;
+}
+.nav-caption,.nav-label {
+  margin:0 12px 8px;
+  padding:0;
+  font-size:11px;
+  color:var(--muted);
+}
+.sidebar nav {
+  gap:4px;
+  margin-bottom:28px;
+}
+.sidebar nav a {
+  min-height:36px;
+  padding:0 12px;
+  border:1px solid transparent;
+  border-radius:7px;
+  color:var(--secondary);
+  font-size:13px;
+}
+.sidebar nav a[aria-current=page] {
+  background:#fff;
+  border-color:#dce4de;
+  color:var(--green);
+  font-weight:600;
+  box-shadow:0 1px 2px #17251c05;
+}
+.sidebar nav a[aria-current=page]:before {
+  width:3px;
+  height:16px;
+  left:-17px;
+  top:calc(50% - 8px);
+  bottom:auto;
+  border-radius:0 3px 3px 0;
+}
+.sidebar-foot {
+  padding:16px 8px 0;
+  border-top:1px solid var(--line);
+}
+.topbar {
+  gap:12px;
+  background:#ffffffd9;
+}
+main {
+  padding:28px 32px 40px;
+  max-width:1700px;
+}
+.page-heading {
+  gap:20px;
+  margin-bottom:24px;
+}
+.panel {
+  border-radius:10px;
+}
+.panel-pad {
+  padding:20px;
+}
+.btn {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-height:36px;
+  padding:6px 12px;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:#fff;
+  color:var(--ink);
+  font-size:13px;
+  font-weight:500;
+  white-space:nowrap;
+  text-decoration:none;
+}
+.btn.primary {
+  border-color:var(--green);
+  background:var(--green);
+  color:#fff;
+}
+.btn.quiet {
+  border-color:transparent;
+  background:transparent;
+  color:var(--secondary);
+}
+.btn.quiet:hover:not(:disabled) {
+  background:var(--soft);
+}
+.text-btn {
+  min-height:32px;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:var(--green);
+  font-size:12px;
+  text-align:left;
+}
+.icon-btn {
+  width:36px;
+  padding:8px;
+}
+
+@media (max-width:1320px) {
+  main { padding:24px; }
+  .topbar { padding:0 24px; }
+}
+@media (max-width:1180px) {
+  .brand { gap:8px; }
+}
+@media (max-width:800px) {
+  main { padding:24px 16px; }
+  .sidebar nav a { min-height:40px; }
+  .btn { min-height:40px; }
+  .icon-btn { width:40px; }
+}
