@@ -79,6 +79,9 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     await page.locator('.problem-row button').last().click();assert.equal(await page.locator('#run-dialog').evaluate(n=>n.open),true);await page.locator('#verify-delivery').click();
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'detail overflows on mobile');
     await page.keyboard.press('Escape');
+    await page.setViewportSize({width:1440,height:1000});
+    await page.locator('nav a[href="../console-redesign/index.html#automation"]').click();
+    assert.equal(await page.locator('#view-automation').isVisible(),true);assert.equal(await page.locator('#view-automation [role="tab"]').count(),3);
     assert.deepEqual(errors,[]);assert.deepEqual(requests,[]);
     console.log('PASS overview: all error entry points, scoped details and return, safe recovery outcomes, preserved historical metrics, scenarios and resource switch, keyboard and 320–1600px, no network/errors');
   }finally{await browser.close();}

@@ -75,26 +75,36 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.locator('#rule-list .rule').count(),1);
     assert.match(await page.locator('#filter-state').textContent(),/未保存/);
 
-    // The same automation forms are reachable from one navigation entry and old shortcuts.
+    // Three task categories share state; service actions have a single home.
     assert.equal(await page.locator('.nav-item[data-view="automation"]').count(),1);
-    await page.evaluate(()=>openSettings('service'));
+    await page.evaluate(()=>openAutomation());
     assert.equal(await page.locator('#view-automation').isVisible(),true);
-    assert.equal(await page.locator('#view-automation [role="tab"]').count(),2);
-    await page.locator('[data-automation-task="delivery"]').uncheck();
-    await page.evaluate(()=>openSettings('delivery'));
-    assert.equal(await page.locator('#channel-auto-delivery').isChecked(),false);
-    await page.locator('#channel-auto-delivery').check();
-    await page.evaluate(()=>openSettings('service'));
-    assert.equal(await page.locator('[data-automation-task="delivery"]').isChecked(),true);
-    assert.match(await page.locator('#automation-task-fields').textContent(),/处理正式增量.*投递正式待办.*应用操作回写.*监听渠道操作.*检查到期提醒/s);
+    assert.equal(await page.locator('#view-automation [role="tab"]').count(),3);
+    assert.equal(await page.locator('[data-automation-task]').count(),5);
+    await page.locator('#tab-automation-collection').focus();await page.keyboard.press('ArrowRight');
+    assert.equal(await page.locator('#tab-automation-channels').getAttribute('aria-selected'),'true');
+    await page.keyboard.press('End');assert.equal(await page.locator('#automation-background').isVisible(),true);
+    await page.keyboard.press('Home');assert.equal(await page.locator('#automation-collection').isVisible(),true);
+    const bounds=await page.locator('[data-action="service-save"]').boundingBox();
+    assert.ok(bounds.y+bounds.height<1000,'save is outside the first desktop screen');
+    assert.equal(await page.locator('#view-automation [data-action="service-start"]').count(),1);
+    assert.equal(await page.locator('#automation-collection [data-action="service-start"]').count(),0);
+    assert.match(await page.locator('#automation-collection').textContent(),/外部自行管理/);
     await page.locator('[data-background-source="wechat-main"]').uncheck();
     await page.evaluate(()=>{switchSource('qq-main');switchSource('wechat-main');});
     assert.equal(await page.locator('[data-background-source="wechat-main"]').isChecked(),false);
-    assert.equal(await page.evaluate(()=>currentSource().ui.schedule),false);
     await page.locator('[data-background-source="wechat-main"]').check();
+    const hit=await page.locator('[data-background-source="wechat-main"]').locator('..').boundingBox();
+    assert.ok(hit.height>=36&&hit.width>=36,'checkbox has no usable click area');
+    await page.evaluate(()=>openAutomation('channels'));
+    await page.locator('[data-automation-task="delivery"]').uncheck();
+    assert.equal(await page.locator('#channel-auto-delivery').isChecked(),false);
+    await page.locator('#channel-auto-delivery').check();
     await page.locator('[data-automation-interval="feedback"]').fill('15');
     await page.locator('[data-automation-interval="feedback"]').dispatchEvent('change');
     assert.equal(await page.evaluate(()=>automationTasks.find(task=>task.id==='feedback').interval),15);
+    assert.match(await page.locator('#view-automation').textContent(),/其他分类的运行与通道更改/);
+    await page.evaluate(()=>openAutomation());
 
     // Discover files from the source's catalog; a name unknown to the UI stays disabled.
     await page.locator('[data-action="automation-source-rules"][data-source-id="wechat-main"]').click();
@@ -113,6 +123,9 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.locator('#dialog-confirm').click();
     assert.equal(await page.locator('#dialog').evaluate(node=>node.open),true);
     assert.match(await page.locator('#sql-params-error').textContent(),/JSON 对象/);
+    await page.locator('#sql-params-json').fill('{"new_name":{"nested":true}}');await page.locator('#dialog-confirm').click();
+    assert.equal(await page.locator('#dialog').evaluate(node=>node.open),true);assert.match(await page.locator('#sql-params-error').textContent(),/对象、数组/);
+    await page.locator('#sql-params-json').fill('{"_private":1}');await page.locator('#dialog-confirm').click();assert.match(await page.locator('#sql-params-error').textContent(),/系统保留/);
     await page.locator('#sql-recent-count').fill('12');
     await page.locator('#sql-params-json').fill('{"project":"release","minimum_count":3}');
     await page.locator('#dialog-confirm').click();
@@ -259,8 +272,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           await page.evaluate(tab=>openSettings(tab),tab);
           assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),`settings ${tab} overflows at ${width}`);
         }
-        if(view==='automation')for(const tab of ['service','delivery']){
-          await page.evaluate(tab=>openSettings(tab),tab);
+        if(view==='automation')for(const tab of ['collection','channels','background']){
+          await page.evaluate(tab=>openAutomation(tab),tab);
           assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),`automation ${tab} overflows at ${width}`);
         }
       }
@@ -283,14 +296,23 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await page.locator('#workflow-filter').selectOption('tool');
       await page.locator('#workflow-events>.workflow-event').filter({has:page.locator('summary strong',{hasText:/^read_attachment$/})}).locator('summary').first().click();
       await page.locator('.workflow-layout').screenshot({path:path.join(output,'pi-workflow.png')});
-      await page.evaluate(()=>openSettings('service'));
-      await page.screenshot({path:path.join(output,'automation.png'),fullPage:true});
+      await page.setViewportSize({width:1440,height:1000});await page.evaluate(()=>openAutomation());
+      await page.screenshot({path:path.join(output,'automation.png')});
+      await page.evaluate(()=>openAutomation('channels'));await page.screenshot({path:path.join(output,'automation-channels.png'),fullPage:true});
+      await page.setViewportSize({width:390,height:844});await page.evaluate(()=>openAutomation());await page.screenshot({path:path.join(output,'automation-mobile.png')});
+      await page.evaluate(()=>openAutomation('channels'));await page.screenshot({path:path.join(output,'automation-channels-mobile.png')});
+      await page.setViewportSize({width:1440,height:1000});
       await page.evaluate(()=>openSettings('source'));
       await page.evaluate(()=>window.scrollTo(0,document.getElementById('source-sql-settings').getBoundingClientRect().top+scrollY-80));
       await page.locator('#source-sql-settings').screenshot({path:path.join(output,'sql-rules.png')});
     }
     await page.goto(pathToFileURL(path.join(__dirname,'index.html')).href+'#automation');
     assert.equal(await page.locator('#view-automation').isVisible(),true);
+    for(const [hash,panel]of [['#automation','collection'],['#automation/channels','channels'],['#automation/service','background'],['#automation/background','background'],['#automation/tasks','collection'],['#automation/rules','collection']]){
+      await page.goto(pathToFileURL(path.join(__dirname,'index.html')).href+hash);await page.waitForFunction(id=>!document.getElementById(id).hidden,'automation-'+panel);
+      assert.equal(await page.locator('#automation-'+panel).isVisible(),true,hash);
+      if(hash.endsWith('/rules'))assert.equal(await page.locator('#automation-sql-slot #source-sql-settings').count(),1);
+    }
     assert.deepEqual(errors,[],'browser JavaScript errors');
     assert.deepEqual(network,[],'unexpected network requests');
     console.log('PASS: branding, extensible catalogs, SQL discovery and parameters, unified automation, safe delivery simulation, complete Pi workflow; seven views and settings at seven widths; no network or browser errors');
