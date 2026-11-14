@@ -1,141 +1,69 @@
-# 聊天收集与待办
+<p align="center">
+  <img src="assets/readme/logo.svg" width="88" height="88" alt="拾序 · Loose Ends Logo：聊天气泡中的完成勾">
+</p>
 
-从微信、QQ 本地消息中筛选有用内容，按本地 Markdown 规则提取待办，再整理成可以执行、携带材料的任务，交给飞书、Notion 或外部消息模块。
+<h1 align="center">拾序 · Loose Ends</h1>
 
-项目位于 `D:\opt\chat-collector`。采集和筛选不使用 AI；处理层使用 Pi 原生会话、附件工具和上下文压缩；消息层不调用模型。调试台是 `tools/console` 下的可选工具，关闭它不影响独立运行的核心。
+<p align="center"><strong>把零散信息，理成下一步。</strong></p>
+<p align="center">本地采集 · SQL 筛选 · 自定义规则 · 多渠道提醒</p>
 
-```mermaid
-flowchart LR
-    A[微信 / QQ 本地数据库] --> B[收集层：增量解密与身份资料]
-    B --> R[(已验证来源数据库)]
-    R --> P[兼容层：SQL 适配与附件内容]
-    C[筛选层：规则编排与合并去重] -->|SQL 与参数| P
-    P -->|标准消息与命中| C
-    C --> D[统一消息 JSONL]
-    D --> E[处理层：Pi + 本地 Markdown 规则]
-    E -->|按编号索取附件| P
-    E --> T[待办服务与唯一正式数据库]
-    T -->|持久变更流| G[消息层：材料与通知调度]
-    G --> H[飞书卡片与文件]
-    G --> I[Notion 资料库与日期]
-    G --> J[外部工作流 / Notion Calendar MCP]
-    H -->|完成、恢复| K[鉴权回调与持久反馈队列]
-    K -->|公开状态 API| T
-```
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="FILTERS.md">SQL 筛选</a> ·
+  <a href="processing-rules/default.md">待办规则</a> ·
+  <a href="docs/README.md">完整文档</a>
+</p>
 
-## 当前能力
+从不同来源的信息中整理个人待办，保留材料与来源。内置微信、QQ 本地采集，支持接入其他消息来源，并将结果交给飞书、Notion 或自己的应用与通知平台。
 
-| 模块 | 已实现 | 配置与说明 |
-|---|---|---|
-| 收集 | 首次完整解密、后续变化页刷新；单库失败回滚，多分片未完整发布时禁止读取混合版本并支持增量恢复 | [增量刷新](docs/incremental-refresh.md) |
-| 兼容 | 平台字段与身份适配、统一 SQL 查询、附件按需解码与解析 | [提供方契约](docs/provider-api.md) |
-| 筛选 | 每轮数据库时间窗；独立 SQL 规则；合并去重，保留命中规则 | [规则集](FILTERS.md) |
-| 处理 | P0–P4、时间、参与人员、地点、执行步骤、来源引用；Pi 按需读附件、查完整待办库 | [处理说明](docs/processing.md)、[提取规则](processing-rules/default.md) |
-| 消息 | 消费正式待办输出；材料与成果归档、优先级提醒、操作反馈回写 | [消息层契约](docs/messaging.md) |
-| 渠道 | 飞书应用卡片和文件、已授权操作回调、Notion SDK 页面和文件、统一 Webhook | [渠道配置](docs/messaging-channels.md) |
-| 自动化 | 独立调度各层，有限重试、耗尽暂停、故障去重与恢复通知 | [自动运行](docs/automation.md) |
-| 调试 | 本机面板与 OpenAPI；预览、手动处理、工具活动、材料下载与完成操作 | [调试工具](tools/console/README.md) |
+## 看看效果
 
-**人员指需要参与事项的人，不等于负责人。** 发信人单独保留在来源中；只有明确指派时才标注负责人。任务通过程序校验后直接入库，不设置人工复核流程；未知内容留空，影响执行的信息写成简短说明。界面不显示技术修订号。
+**飞书卡片与附件（合成测试）**：展示行动说明、随附材料，以及“完成待办 / 稍后提醒”入口。
 
-Notion Calendar 有两条路径：将带 Date 属性的 Notion 数据库连接到 Calendar；或让已有、经用户 OAuth 授权的 MCP 工作流创建和更新真实日历事件。本项目提供后者的统一 Webhook 接入契约，尚未配置用户授权工作流。两者不能混称为同一种同步。
+![飞书合成测试卡片：行动说明、完成待办和稍后提醒按钮，下方附带 connection-test.txt 文件](assets/readme/feishu-card.png)
 
-## 启动与日常操作
+<details>
+<summary>查看本地调试台：采集状态、SQL 预览、待办处理与任务记录</summary>
 
-新机器使用 Windows x64 预览包：解压后双击 `Install.cmd` 完成依赖、模型/飞书配置和首次最近 7 日处理；以后双击 `Start.cmd`。安装引导和调试面板均可按用户选择设置登录后自动启动。完整步骤、重试方式与兼容性边界见 [安装指南](docs/installation.md)。
+![本地调试台：微信与 QQ 采集状态、SQL 筛选与重放、模型处理、消息层和任务记录](assets/readme/console.png)
 
-在项目根目录运行。当前本机 Python 为 `C:\veighna_studio\python.exe`，可代替下列 `python`。本地 `runtime-deps` 中包含 SQLCipher 等依赖；迁移机器时需重新安装匹配版本。
+</details>
 
-```powershell
-cd D:\opt\chat-collector
-$env:PYTHONPATH="$PWD/runtime-deps"
+## 为什么用它
 
-# 各层独立运行；调试台不是依赖
-python -m collector once --config config/wechat.toml
-python -m collector once --config config/qq.toml
-python -m processor preview --config config/processor.toml
-python -m processor once --config config/processor.toml
+- **本地解密，减少账号交互**：读取本机微信、QQ 数据库，不通过聊天账号模拟收发消息。采集与筛选不使用 AI；账号风险边界见下文。
+- **各层解耦，方便接入**：采集、处理、消息投递可独立运行；通过统一契约接入新的消息平台、自定义收集器和附件提供方，也可通过 Webhook 或 Python 适配器将待办接入自己的应用、工作流或通知平台。
+- **增量处理，节省解密与 Token 开销**：首次完整解密，后续复用快照、刷新变化页；只为选中消息处理附件，模型按需读取内容，未变化的分组不重复调用模型。
+- **直接写 SQL 筛选**：用 SQLite 原生查询表达群聊、关键词、文件和上下文条件，多条规则合并去重；支持预览与重放，无需学习额外的筛选语法。详见 [SQL 规则](FILTERS.md)。
+- **消息与待办都有来源**：保留原消息身份、会话、时间和命中规则；待办关联支撑它的消息与附件证据，方便回查依据。
+- **按你的习惯安排待办**：直接编辑 [Markdown 规则](processing-rules/default.md)，自定义什么算待办、P0–P4 优先级、时间与材料提取；提醒频率也可单独调整。
 
-# 消息层预览不写状态、不联网；sync 只导入并保存本地材料
-python -m messaging preview --config config/messaging.toml
-python -m messaging sync --config config/messaging.toml
-python -m messaging status --config config/messaging.toml
+流程：**本地聊天库 → SQL 筛选 → 自定义规则 + 模型 → 带来源的待办与材料 → 通知平台**。
 
-# 自动化配置检查不会启动采集、模型或外部投递
-python -m automation check --config config/automation.toml
-python -m automation status --config config/automation.toml
+## 快速开始
 
-# 可选调试台：http://127.0.0.1:10400
-.\tools\console\start.cmd
-```
+当前提供 **Windows x64 本地使用预览包**，安装需要联网。
 
-`collector`、`processor` 和 `messaging` 可分别运行；需要统一自动运行时使用 `automation`，不要与调试台同时调度同一采集模块。`tools/automation/start.cmd` / `stop.cmd` 启动和安全停止后台服务；启用状态以配置和调试面板为准。开机自启是可选的当前用户登录任务，面板读取实际状态；关闭它不停止当前服务。详细开关、重试和恢复命令见 [自动运行](docs/automation.md)。
+1. 按 [安装指南](docs/installation.md) 准备预览包，解压后双击 `Install.cmd`，选择空目录安装。无需预装 Python、Node 或编译器。
+2. 按引导选择微信 / QQ，完成首次取钥，填写模型配置；飞书可选，稍后也能接入其他渠道。
+3. 引导首次处理最近 7 日符合 SQL 规则的消息；日常双击 `Start.cmd`，在本地调试台查看状态、预览筛选和调整规则。
 
-首次 QQ 取钥使用 `tools/qq-recover.cmd`，需要以管理员身份运行并保持 QQ 登录。已有合法密钥后的日常采集不需要反复扫描进程。微信媒体解码由采集提供方处理，处理层通过附件编号请求，不直接操作原始数据库。
+源码安装与分层运行见 [开发指南](docs/development.md)。源码目录的 `Install.cmd` 使用已有发布 ZIP，缺包时需先按安装指南构建。
 
-## 配置
+## 按需调整与扩展
 
-| 文件 | 用途 |
+| 想做什么 | 从这里开始 |
 |---|---|
-| `config/wechat.toml` / `config/qq.toml` | 数据目录、扫描间隔、刷新间隔、解码强度、SQL 注册表 |
-| `config/processor.toml` | 模型、Pi 上下文预算、处理批次、附件提供方 |
-| `processing-rules/default.md` | 行动判断、优先级、时间与参与人员、材料选择 |
-| `config/messaging.toml` | 输入、材料、P0–P4 提醒间隔、目标注册表、操作反馈队列 |
-| `config/automation.toml` | 各层开关与间隔、有限重试、监听器和故障通知 |
-| `.env` | 本地凭据；参考 [.env.example](.env.example)，不要提交真实值 |
+| 只收集指定群、关键词、文件或上下文 | [SQL 规则](FILTERS.md) |
+| 自定义待办判断、优先级与模型 | [默认规则](processing-rules/default.md) · [处理配置](docs/processing.md) |
+| 配置飞书、Notion、提醒与操作反馈 | [渠道配置](docs/messaging-channels.md) · [飞书设置](docs/feishu-setup.md) |
+| 接入其他消息来源或通知平台 | [收集层开发](docs/collector-development.md) · [数据契约](docs/data-contract.md) · [渠道开发](docs/channel-development.md) |
+| 设置自动运行、失败重试与恢复 | [自动化](docs/automation.md) |
 
-在调试面板的“自动整理待办”和“消息通道”配置定时任务、目标及提醒频率；启用状态以本机配置为准，只有明确启用的目标会投递。本地预览、材料整理和本地操作反馈无需填写外部凭据。准备投递时，安装 `messaging/requirements.txt`，填写目标并同时启用全局和目标，再运行 `python -m messaging once` 或 `run`。当前示例提醒间隔为 P0 一小时、P1 四小时、P2 一天、P3 一周、P4 不重复提醒；全部可改，`0` 表示不重复提醒。Notion 与 `mode="sync"` 工作流仅同步变化，不按提醒频率反复新建页面或日程。
+## 使用边界
 
-处理层仅消费已发布采集结果；采集失败不会自动阻止已有待办处理。消息层仅消费已发布正式待办，调试批次不会自动外发。更改 Markdown 规则会改变处理指纹，历史分组可能重新待处理并产生模型费用；本轮没有自动重跑模型。
+- **账号与兼容性**：本地解密减少了与平台服务的交互，但没有封号率实测，不能保证零风险。首次取钥涉及微信 Hook 或 QQ 进程内存读取；客户端升级可能影响兼容性。
+- **隐私与费用**：配置远程模型后，选中消息及实际读取的附件会发到该服务；启用通知渠道后，相应待办和材料会离开本机。修改待办规则可能重新处理历史分组并产生费用。
+- **结果与数据**：模型可能误判，需结合来源核对。聊天、附件和凭据均属敏感数据，请保管好 `.env`、`secrets/` 与 `data/`；已有部署请勿用新包直接覆盖。
 
-## 材料、链接与完成后的成果
-
-- 待办按“动作 → 执行步骤 → 参与人员/时间/地点 → 所需材料和链接”展示。程序补全来源，模型不能指定本地路径。
-- AI 通过 `material_refs` 选择执行所需附件；已读并引用的附件证据也关联材料。来源消息里的其他附件不自动上传，旧待办可重新处理以补齐材料关系。
-- 消息层将选中的、已验证归档复制到 `data/messaging/assets/<内容哈希前两位>/<内容哈希>`，相同内容只存一份，原文件名保留在清单。即使原聊天缓存被清理，已保存副本仍可用。
-- 链接从支撑待办的原消息提取，不自动访问网页。缺原件、密文、校验不符和缩略图都有状态提示，不冒充完整材料。
-- Notion 可托管上传的文件；首版单文件最多 20 MiB。飞书应用渠道可发送已归档文件；旧机器人 Webhook 只发送提醒。本机路径不会被包装成公网下载地址。
-- 完成、恢复和取消经过持久反馈队列调用处理层公开 API，再发布状态更新；稍后提醒由消息层管理。成果和投递回执保留，完成后停止重复提醒，不删除附件或原始来源。
-
-```powershell
-python -m messaging attach-result --task-id "待办ID" --file "D:\work\已填申请表.docx" --note "填写后的申请表"
-python -m messaging complete --task-id "待办ID"
-python -m messaging reopen --task-id "待办ID"
-python -m messaging snooze --task-id "待办ID" --until "2026-11-14T09:00:00+08:00"
-python -m messaging feedback-status
-```
-
-操作入队表示已收到，不代表已经写回。`messaging once/run` 或自动化的 `feedback` 任务负责应用队列；查看反馈状态确认结果。飞书应用需要配置允许操作的人员和目标群，文件能力使用 `im:resource`，具体权限、事件订阅和首次设置见 [渠道配置](docs/messaging-channels.md)。
-
-## 数据边界与风险
-
-| 边界 | 保证与限制 |
-|---|---|
-| 采集 → 处理 | 兼容层适配原始库并执行 SQL，筛选层合并命中并按消息身份与修订去重；Pi 只接收标准契约 |
-| 处理 → 消息 | 统一待办事件；按事件 ID 去重、按任务修订更新；乱序不回退，同修订冲突拒绝 |
-| 外部投递 | 持久记录投递 ID、目标与回执；明确失败退避，结果未知停止自动重发。不能保证所有外部平台“恰好一次” |
-| 操作反馈 | 飞书卡片和本地操作按请求 ID 去重，调用公开状态 API；冲突保留且不覆盖新状态。Notion/日历原生编辑尚未自动回流 |
-| 自动重试 | 每层故障独立退避，耗尽后持久暂停；明确恢复才重试。故障通知不含聊天正文和凭据 |
-| 隐私 | 远程模型会收到选中聊天及实际读取的附件；启用渠道后相应任务和材料会离开本机 |
-| 本地存储 | 聊天、待办、附件与凭据均为敏感数据。归档不会自动清理，需规划磁盘与备份；不要删除原项目 output 或现有 data |
-| 模型判断 | 程序校验来源和结构，不能保证语义判断永远正确；缺失信息显示说明，不设人工审批关卡 |
-
-`.env`、`secrets/`、`data/`、本地依赖和运行日志均不进入 Git。首次部署先预览，确认筛选范围和目标；外部账户、权限、配额和实际通知到达需配置后联调。
-
-## 开发与文档
-
-目录：`collector/` 原生增量收集，`providers/` SQL 适配与附件内容，`selection/` 规则编排和去重，`rulesets/` SQL 文件，`processor/` Pi 与正式待办服务，`messaging/` 通知编排、反馈和渠道，`automation/` 独立调度，`tools/console/` 可选调试台。
-
-- [文档索引](docs/README.md)
-- [提供方契约](docs/data-contract.md) · [收集层开发指南](docs/collector-development.md)
-- [消息层契约、恢复和扩展](docs/messaging.md) · [Notion/MCP 与渠道指南](docs/messaging-channels.md)
-- [渠道开发指南：Webhook、Python 适配器、重试与状态回写](docs/channel-development.md)
-- [行动输出开发说明](docs/actionable-tasks.md) · [Pi 运行时](docs/pi-runtime.md)
-- [自动运行、有限重试与故障提醒](docs/automation.md)
-
-```powershell
-$env:PYTHONPATH="$PWD/runtime-deps"
-python -m pytest tests tools/console/tests -q
-```
-
-测试使用合成数据、模拟模型或 HTTP 服务，不代替真实模型质量、平台权限及通知到达验收。
+更多说明见 [文档索引](docs/README.md)，增量机制与实测见 [增量刷新](docs/incremental-refresh.md)。
