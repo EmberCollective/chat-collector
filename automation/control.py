@@ -155,7 +155,9 @@ def _active(config):
             _update(config, row['id'], 'failed', row['error'])
             if row['kind'] == 'once':
                 with closing(core._connect(config, write=True)) as conn, conn:
-                    conn.execute("UPDATE jobs SET state='paused',error='interrupted_execution',active_error='interrupted_execution' WHERE name=? AND state='running'", (row['job'],))
+                    changed = conn.execute("UPDATE jobs SET state='paused',error='interrupted_execution',active_error='interrupted_execution' WHERE name=? AND state='running'", (row['job'],)).rowcount
+                    if changed:
+                        core.history._finish(conn, row['job'], 'interrupted', time.time(), error='interrupted_execution', interrupted=True)
     return [row for row in rows if row['state'] in ACTIVE]
 
 
