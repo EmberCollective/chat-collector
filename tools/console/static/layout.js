@@ -8,6 +8,7 @@ function activatePanel(id, focus=false) {
     document.getElementById(other.dataset.panel).hidden=!active;
   }
   if(focus)tab.focus();
+  if(id.startsWith('automation-'))document.getElementById('automation-savebar').hidden=id==='automation-background';
   if(id==='query'||id==='messages'){
     document.getElementById('preview-output').hidden=id!=='query';
     document.getElementById('message-output').hidden=id!=='messages';
@@ -34,7 +35,10 @@ function showView(){
   document.getElementById('view-label').textContent=viewLabels[view];
   document.title='拾序 · Loose Ends · '+viewLabels[view];
   if(view==='settings'&&panel)activatePanel('settings-'+panel);
-  if(view==='automation')activatePanel('automation-'+(['channels','rules'].includes(panel)?panel:'background'));
+  if(view==='automation'){
+    activatePanel('automation-'+(panel==='channels'?'channels':['background','service'].includes(panel)?'background':'collection'));
+    document.getElementById('automation-rules').hidden=panel!=='rules';
+  }
   placeRules(view);
   if(candidate==='pi-workflow')activatePanel('pi-workflow');
   setMenu(false);
