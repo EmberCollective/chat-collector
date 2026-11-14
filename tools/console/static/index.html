@@ -59,9 +59,16 @@
 </details>
 <p id="messaging-notice" role="status" aria-live="polite">尚未加载。</p><div id="messaging-output"></div>
 </section>
-<section class="history"><div class="workspace-title"><div><span class="eyebrow">ACTIVITY</span><h2>任务记录</h2></div><span id="connection" class="muted">正在连接…</span></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>模块 / 操作</th><th>触发方式</th><th>状态</th><th>详情</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
+<section class="history"><div class="workspace-title"><div><span class="eyebrow">ACTIVITY</span><h2>执行记录</h2></div><span id="connection" class="muted">正在连接…</span></div>
+<p class="muted">手动操作与后台自动任务统一显示；同一轮的重试收在详情里，总耗时包含重试等待。显示符合条件的最近 100 轮。升级前未记录的自动历史无法补回。</p>
+<div class="settings-grid">
+<label>模块<select id="activity-module"><option value="">全部模块</option><option value="wechat">微信</option><option value="qq">QQ</option><option value="processor">待办处理</option><option value="messaging">消息投递</option><option value="feedback">状态回写</option></select></label>
+<label>触发方式<select id="activity-origin"><option value="">全部方式</option><option value="manual">手动</option><option value="schedule">自动</option></select></label>
+<label>状态<select id="activity-status"><option value="">全部状态</option><option value="running">执行中</option><option value="retry">等待重试</option><option value="succeeded">已完成</option><option value="warning">完成但有异常</option><option value="failed">失败</option><option value="interrupted">执行中断</option></select></label>
+</div><p id="activity-warning" role="status" class="error"></p>
+<div class="table-wrap"><table><thead><tr><th>开始时间</th><th>模块 / 操作</th><th>触发方式</th><th>状态</th><th>耗时</th><th>尝试次数</th><th>详情</th></tr></thead><tbody id="jobs"></tbody></table></div></section>
 <footer>本机访问 · 调试台可单独关闭，采集与处理核心均可独立运行。<span id="collector-path"></span></footer>
 </main>
-<dialog id="detail-dialog"><div class="dialog-title"><h2>任务详情</h2><button id="close-detail" class="secondary">关闭</button></div><pre id="job-detail"></pre></dialog>
+<dialog id="detail-dialog"><div class="dialog-title"><h2>执行详情</h2><button id="close-detail" class="secondary">关闭</button></div><div id="activity-detail"></div></dialog>
 <dialog id="image-dialog"><div class="dialog-title"><h2>已归档图片</h2><button id="close-image" class="secondary">关闭</button></div><img id="asset-image" alt="消息的归档图片"><p class="muted">请结合消息中的质量与核验状态判断是否为原图。</p></dialog>
 <dialog id="source-dialog"><div class="dialog-title"><h2>本地原消息证据</h2><button id="close-source" class="secondary">关闭</button></div><div id="source-output"></div></dialog></body></html>

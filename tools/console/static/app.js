@@ -1,8 +1,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let token = '', currentConfig = null, pendingPreview = null, previewShown = null, imageUrl = null, refreshing = false;
-const names = {wechat:'微信', qq:'QQ',processor:'待办处理'}, actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放',processor_preview:'上下文预览',process:'提取待办'};
-const states = {running:'执行中',succeeded:'已完成',failed:'失败',interrupted:'结果未确认'};
+let token = '', currentConfig = null, pendingPreview = null, previewShown = null, imageUrl = null, refreshing = false, activityRequest = 0;
+const names = {wechat:'微信', qq:'QQ',processor:'待办处理',messaging:'消息投递',feedback:'状态回写'}, actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放',processor_preview:'上下文预览',process:'提取待办',deliver:'发送与提醒',feedback:'同步状态'};
+const states = {running:'执行中',retry:'等待重试',succeeded:'已完成',warning:'完成但有异常',failed:'失败',interrupted:'执行中断'};
+const origins = {manual:'手动',schedule:'自动'};
 const intensities = {metadata:'轻量',standard:'标准',full:'完整'};
 const assetStates = {deferred:'按强度暂缓保存',archived:'已归档',missing:'本地未找到',thumbnail_only:'仅缩略图',unverified:'内容待核验',encrypted_only:'仅保留密文',unsupported:'格式未支持'};
 const selected = () => $('module').value;
@@ -40,16 +41,46 @@ function renderStatus(data){
     $('modules').append(card);
   }
   $('collector-path').textContent='关联收集项目：'+data.collector_root;
-  $('jobs').replaceChildren();
-  for(const job of data.jobs){const tr=el('tr');tr.append(el('td',time(job.started_at)),el('td',`${names[job.module]} / ${actions[job.action]}`),el('td',job.origin==='schedule'?'定时':'手动'),el('td',states[job.status]||job.status));const td=el('td');td.append(button('查看',()=>showJob(job.id)));tr.append(td);$('jobs').append(tr);}
-  if(!data.jobs.length){const tr=el('tr'),td=el('td','本控制台尚无任务记录');td.colSpan=5;tr.append(td);$('jobs').append(tr);}
   $('connection').textContent='已连接 · '+time(Date.now()/1000);$('connection').className='muted';
+}
+function duration(seconds){return seconds===null||seconds===undefined?'—':`${Math.max(0,seconds).toFixed(1)} 秒`;}
+function runDuration(job){return duration(job.duration_seconds??(['running','retry'].includes(job.status)?Date.now()/1000-job.started_at:null));}
+async function refreshActivity(){
+  const request=++activityRequest;
+  const query=new URLSearchParams();
+  for(const key of ['module','origin','status'])if($('activity-'+key).value)query.set(key,$('activity-'+key).value);
+  const data=await api('/activity?'+query);
+  if(request!==activityRequest)return;
+  $('activity-warning').textContent=data.warnings.join('；');
+  $('jobs').replaceChildren();
+  for(const job of data.records){
+    const tr=el('tr');
+    tr.append(el('td',time(job.started_at)),el('td',`${names[job.module]||job.module} / ${actions[job.action]||job.action}`),el('td',origins[job.origin]||job.origin),el('td',states[job.status]||job.status),el('td',runDuration(job)),el('td',String(job.attempt_count)));
+    const td=el('td');td.append(button('查看',()=>showActivity(job.source,job.id)));tr.append(td);$('jobs').append(tr);
+  }
+  if(!data.records.length){const tr=el('tr'),td=el('td','没有符合条件的执行记录');td.colSpan=7;tr.append(td);$('jobs').append(tr);}
+}
+async function showActivity(source,id){
+  const job=await api(`/activity/${encodeURIComponent(source)}/${encodeURIComponent(id)}`),box=$('activity-detail');
+  box.replaceChildren();
+  box.append(el('h3',`${names[job.module]||job.module} · ${actions[job.action]||job.action}`),el('p',`${origins[job.origin]||job.origin} · ${states[job.status]||job.status} · ${runDuration(job)}`));
+  for(const attempt of job.attempts){
+    const section=el('section',undefined,'module-card');
+    section.append(el('h4',`第 ${attempt.number} 次 · ${states[attempt.status]||attempt.status}`),el('p',`${time(attempt.started_at)} → ${attempt.finished_at?time(attempt.finished_at):attempt.status==='running'?'尚未结束':'结束时间未记录'}`,'muted'));
+    if(attempt.error)section.append(el('p',attempt.error,'error'));
+    if(attempt.result&&Object.keys(attempt.result).length)section.append(el('pre',JSON.stringify(attempt.result,null,2)));
+    if(attempt.details){const details=el('details');details.append(el('summary','错误位置'),el('pre',JSON.stringify(attempt.details,null,2)));section.append(details);}
+    box.append(section);
+  }
+  const raw=el('details');raw.append(el('summary','原始记录与调试信息'),el('pre',JSON.stringify(job,null,2)));box.append(raw);
+  $('detail-dialog').showModal();
 }
 async function refresh(){
   if(refreshing)return;refreshing=true;
   try{renderStatus(await api('/status'));if(pendingPreview&&pendingPreview.module===selected()&&previewShown!==pendingPreview.id){const job=await api('/jobs/'+pendingPreview.id);if(job.status!=='running'){previewShown=job.id;if(job.status==='succeeded'){renderMessages(job.result.messages,$('preview-output'),true,pendingPreview.module);$('preview-output').prepend(el('p',`命中 ${job.result.matched} 条，显示最近 ${job.result.messages.length} 条。使用现有快照；未推进断点或归档附件。`));}else{$('preview-output').replaceChildren(el('p',job.error||'预览失败','empty'));notice(job.error||'预览失败',true);}}}}
   catch(error){$('connection').textContent='连接异常：'+error.message;$('connection').className='bad';}
   finally{refreshing=false;}
+  await guard(refreshActivity);
   await guard(pollProcessor);
 }
 const fields=[
@@ -85,7 +116,6 @@ async function saveConfig(){
   if(!confirm('保存后用于后续采集轮次。旧配置会备份，但不会移动已有文件或回放历史。确定保存？'))return;
   await api(`/modules/${selected()}/config`,'PATCH',{revision:currentConfig.revision,patch});notice('配置已校验并保存，旧版本已备份。');await loadConfig();await refresh();
 }
-async function showJob(id){const job=await api('/jobs/'+id);$('job-detail').textContent=JSON.stringify(job,null,2);$('detail-dialog').showModal();}
 function identitySummary(m){
   const identity=m.identity||{},account=identity.account||{},chat=identity.conversation||{},person=(identity.people||[]).find(p=>p.id===m.sender_id)||{};
   const sender=m.sender||person.label||person.display_name||'名称未获取';
@@ -124,6 +154,7 @@ bind('replay',async()=>{const window=windowValues();if(!confirm('重放使用已
 bind('load-messages',async()=>{const module=selected(),params=new URLSearchParams({limit:'20',keyword:$('message-keyword').value,conversation:$('message-conversation').value});const result=await api(`/modules/${module}/messages?${params}`);if(module===selected())renderMessages(result.messages,$('message-output'),false,module);});
 bind('copy-token',async()=>{await navigator.clipboard.writeText(token);notice('API 凭证已复制。在 OpenAPI 页面点击 Authorize 粘贴；服务重启后凭证失效。');});
 bind('close-detail',()=>$('detail-dialog').close());bind('close-image',()=>$('image-dialog').close());
+for(const key of ['module','origin','status'])$('activity-'+key).addEventListener('change',()=>guard(refreshActivity));
 $('image-dialog').addEventListener('close',()=>{if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=null;$('asset-image').removeAttribute('src');});
 async function switchModule(){currentConfig=null;pendingPreview=null;$('preview-output').replaceChildren(el('p','已切换模块，请重新预览。','empty'));$('message-output').replaceChildren(el('p','点击“查看最近 20 条”读取消息。','empty'));await loadConfig();}
 $('module').addEventListener('change',()=>guard(switchModule));
