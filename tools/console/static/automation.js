@@ -19,10 +19,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function action(callback) {
     if (busy) return;
+    let payload;
+    try {if(callback===saveConfig)payload=collect();}catch(error){notice(error.message);return;}
     busy = true;
     controls.forEach(({input})=>input.disabled=true);
     document.querySelectorAll('[data-ops-action]').forEach(b => b.disabled = true);
-    try {await callback();} catch (error) {notice(error.message);} finally {
+    try {await callback(payload);} catch (error) {notice(error.message);} finally {
       busy = false;
       controls.forEach(({input})=>input.disabled=false);
       document.querySelectorAll('[data-ops-action]').forEach(b => b.disabled = b.dataset.opsUnavailable === 'true');
@@ -116,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function renderConfig() {
     controls=[];
-    for(const id of ['source-fields','source-advanced','processor-fields','delivery-fields','reminder-fields','targets'])byId(id).replaceChildren();
+    for(const id of ['source-fields','source-advanced','processor-fields','processor-advanced','delivery-fields','reminder-fields','targets'])byId(id).replaceChildren();
     const entries=Object.entries(jobCatalog),collectors=entries.filter(([,description])=>description.action==='collect');
     for(const source of sourceDescriptions)sourceRow(source,collectors.find(([,description])=>description.source_id===source.id));
     for(const [name,description]of collectors){if(!sourceDescriptions.some(source=>source.id===description.source_id))sourceRow({id:name,name:jobNames[name]||name,capabilities:{}},[name,description]);jobExtra(byId('source-advanced'),name);}
@@ -129,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
     for(const [name]of additional.filter(([,description])=>description.action==='feedback'))jobRow(listener,name,'完成、取消和稍后提醒等待处理层确认保存');
     const listenerRow=node('div',null,'automation-task-row');listener.append(listenerRow);field(listenerRow,config.automation.listener,'enabled','boolean',{label:'启用渠道按钮监听'});
     for(const parent of [processor,delivery]){
-      const advanced=details(parent,'运行一轮与失败重试设置');
+      const advanced=details(parent===processor?byId('processor-advanced'):parent,'运行一轮与失败重试设置');
       for(const [name,description]of additional.filter(([,description])=>(['deliver','feedback'].includes(description.action)?delivery:processor)===parent))jobExtra(advanced,name);
       if(parent===delivery){button(advanced,'恢复监听重试',()=>operate('/jobs/listener/resume','已提交恢复监听重试。'));advanced.append(node('p','同一应用的目标可共用监听；不同应用需分别启动监听程序。监听仅用于渠道声明支持的操作。','automation-boundary'));}
     }
@@ -154,12 +156,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const interval=grid(details(reminders,'无截止时间时的间隔提醒 · 秒（0 不重复）'));for(const key of ['P0','P1','P2','P3','P4'])field(interval,config.messaging.reminders,key,'integer',{min:0,max:31536000});
     const retry=details(delivery,'单条投递与状态回写的重试上限');retry.append(node('p','整轮重试与单条消息、回写请求的重试分别设置','automation-boundary'));
     for(const section of ['schedule','feedback']){retry.append(node('h4',section==='schedule'?'消息投递':'操作回写'));const area=grid(retry);for(const key of Object.keys(config.messaging[section]).filter(key=>key!=='interval_seconds'))field(area,config.messaging[section],key,'integer',{max:key==='max_attempts'?20:key==='max_deliveries_per_round'?1000:86400});}
-    const alerts=grid(details(processor,'运行失败通知'));
+    const alerts=grid(details(byId('processor-advanced'),'运行失败通知'));
     field(alerts,config.automation.alerts,'enabled','boolean',{label:'启用运行失败通知'});field(alerts,config.automation.alerts,'target_id','string',{label:'接收通知的通道编号'});field(alerts,config.automation.alerts,'cooldown_seconds','integer',{label:'重复故障通知间隔 · 秒',max:2592000});field(alerts,config.automation.alerts,'recovery_enabled','boolean',{label:'恢复后发送通知'});
     config.messaging.targets.forEach(targetCard);byId('new-kind').replaceChildren();
     for(const [kind,description]of Object.entries(config.messaging.types||{})){const option=node('option',description.name||kind);option.value=kind;byId('new-kind').append(option);}
   }
   function collect() {
+    if(!config)throw Error('请先重新加载设置。');
     for (const {input} of controls) if (!input.checkValidity()) {
       let parent = input.parentElement; while (parent) {if (parent.tagName === 'DETAILS') parent.open = true; parent = parent.parentElement;}
       if(input.closest('#automation-channels'))activatePanel('automation-channels');else activatePanel('automation-collection');input.reportValidity(); input.focus(); throw Error('请修正标出的设置后保存。');
@@ -184,9 +187,9 @@ document.addEventListener('DOMContentLoaded', () => {
     for(const [name,description]of Object.entries(jobCatalog))jobNames[name]=description.name;
     renderConfig(); dirty = false; notice('设置已加载 · 未修改');
   }
-  async function saveConfig() {
+  async function saveConfig(payload) {
     if (!config) throw Error('请先重新加载设置。');
-    const result = await request('/config', {method: 'PUT', body: JSON.stringify(collect())});
+    const result = await request('/config', {method: 'PUT', body: JSON.stringify(payload)});
     config = {version: result.version, automation: result.automation, messaging: result.messaging};
     renderConfig(); dirty = false;
     notice(result.operation ? '已保存，运行中的服务正在按新配置重新启动或停止。' : '已保存。服务尚未运行，可点击启动后台服务。');

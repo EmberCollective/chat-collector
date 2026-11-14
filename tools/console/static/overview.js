@@ -5,13 +5,15 @@
   const statusNames={unknown:'结果未确认',unsupported:'未提供统计',running:'执行中',retry:'等待重试',paused:'已暂停',disabled:'未启用',waiting:'定时等待',idle:'等待调度',stopped:'已停止',starting:'启动中',stopping:'停止中',restarting:'重新启动中',success:'成功',failed:'失败',sent:'已发送',queued:'已排队',applied:'已回写',conflict:'状态冲突'};
   const count=value=>value==null?'—':value.toLocaleString();
   const rate=value=>value==null?'—':(value*100).toFixed(1)+'%';
-  const clock=value=>value==null?'—':new Date(value*1000).toLocaleTimeString('zh-CN',{hour12:false});
+  const clock=value=>value==null?'—':new Date(value*1000).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'});
   const stamp=value=>value==null?'未记录':time(value);
   const state=value=>statusNames[value]||states[value]||value||'状态未知';
   const nextStep=issue=>issue.next_action_label||({verify_delivery:'先按目标、内容和时间核对是否送达，再确认结果或安排重试。',retry_delivery:'核对投递错误和目标配置后，再安排重试。',retry_feedback:'核对待办的当前状态后，再安排回写。',resolve_conflict:'刷新待办后重新操作；旧请求不能覆盖较新的修改。',open_config:'打开相关配置，核对实际运行状态。'})[issue.next_action]||'核对错误记录与相关配置，再决定后续操作。';
   const serviceState=service=>!service.verified||service.state==='unknown'?'状态未知':service.state==='running'&&service.running?'运行中':state(service.state);
   const warningLabels={storage_partial:'部分存储路径尚未完成测量',state_missing:'运行数据库尚不存在',history_not_provided:'旧运行数据库未提供历史记录',not_configured:'尚未配置后台服务',console_records_unreadable:'部分本地运行记录不可读',history_window_truncated:'历史保留或读取上限可能截断当前窗口'};
-  const warningText=value=>typeof value==='string'?value:warningLabels[value.code]||((names[value.module]||value.module||'部分')+'数据暂时不可读');
+  const warningText=value=>typeof value==='string'?value:warningLabels[value.code]||((value.module==='automation'?'后台服务':names[value.module]||value.module||'部分')+'数据暂时不可读');
+  const issueLabels=new Map([['result_unknown','本轮结果尚未确认，请先核对实际输出。'],['config_changed','已保存配置与运行中服务不一致，请在后台服务中核对。'],['service_stopped','后台服务已停止，已启用的计划暂不执行。'],['service_unknown','无法确认后台进程状态，请先核对。'],['service_duplicate','发现重复后台进程，请在后台服务中检查。'],['retry','任务正在等待重试，请核对上次错误。'],['paused','任务因错误暂停，请核对原因后恢复。'],['failed','任务执行失败，请查看原始记录。'],['unknown','执行结果未知，请先核对实际输出。'],['conflict','回写与当前待办状态冲突，请刷新待办后重新操作。']]);
+  const issueText=issue=>issueLabels.get(issue.error)||issue.error||nextStep(issue);
   let snapshot=null,ready=false,loading=false,generation=0,metric='messages',scope={},records=[],current=null,returnContext=null,detailGeneration=0,listGeneration=0;
 
   async function refreshOverview(){
@@ -41,7 +43,7 @@
     heading.append(title,node('span',issues.length?'先核对失败与未知结果':summary.valid_count?'结合进程与任务状态核对':'尚不能判断运行质量','muted'));attention.append(heading);
     for(const issue of issues){
       const row=node('div',null,'problem-row'),text=node('div'),unknown=['unknown','delivery_unknown'].includes(issue.kind)||issue.status==='unknown';
-      text.append(node('strong',issue.title||(names[issue.source_id||issue.module]||issue.source_id||issue.module||'系统')+'：'+(unknown?'结果待确认':'运行异常')),node('p',issue.error||nextStep(issue)));
+      text.append(node('strong',issue.title||(names[issue.source_id||issue.module]||issue.source_id||issue.module||'系统')+'：'+(unknown?'结果待确认':'运行异常')),node('p',issueText(issue)));
       row.append(node('span',unknown?'待确认':'异常','problem-tag'+(unknown?' warn':'')),text,node('time',clock(issue.last_at)));
       const button=node('button','查看相关记录','secondary');button.dataset.issueKey=issue.key;button.addEventListener('click',()=>guard(()=>openIssue(issue)));row.append(button);attention.append(row);
     }
@@ -64,7 +66,8 @@
         const ticks=node('div',null,'run-ticks');ticks.setAttribute('role','group');ticks.setAttribute('aria-label','最近 '+source.recent.length+' 次有效轮次');
         for(const run of source.recent){const tick=node('button',null,run.outcome==='failed'?'failed':'success');tick.title=source.name+' · '+state(run.outcome)+' · '+stamp(run.started_at);tick.setAttribute('aria-label',tick.title);tick.addEventListener('click',()=>guard(()=>openOverviewJob(run.run_id,run.run_source,{module:source.id,action:'collect',label:source.name+' · 正式采集'})));ticks.append(tick);}
         success.append(ticks,node('small',`${source.success}/${source.valid_count} 成功 · 跳过 ${source.skipped}${source.unknown?' · 未确认 '+source.unknown:''}`));
-        row.append(amount,duration,success,node('td',source.last_success==null?'尚无成功':clock(source.last_success)));
+        const sameDay=source.last_success!=null&&new Date(source.last_success*1000).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'})===new Date(snapshot.generated_at*1000).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'});
+        row.append(amount,duration,success,node('td',source.last_success==null?'尚无成功':sameDay?clock(source.last_success):stamp(source.last_success)));
         const cell=node('td','—');
         if(source.failed){const button=node('button',source.failed+' 次失败 · 查看','text-button');button.dataset.sourceProblem=source.id;button.addEventListener('click',()=>guard(()=>openRuns({module:source.id,action:'collect',status:'failed',label:source.name+' · 失败记录'})));cell.replaceChildren(button);}row.append(cell);
       }
@@ -78,7 +81,7 @@
     $('system-pill').textContent='后台服务'+serviceState(service);
     $('system-pill').classList.toggle('warn',!service.running||service.verified===false);
     const collect=jobs.filter(job=>job.source_id),processor=jobs.find(job=>job.module==='processor'),delivery=jobs.find(job=>job.module==='messaging'),feedback=jobs.find(job=>job.module==='feedback');
-    const queueNote=(queue,keys)=>queue?.counts?keys.map(([key,label])=>count(queue.counts[key])+' '+label).join(' · '):'队列状态尚不可读';
+    const queueNote=(queue,keys)=>queue?.counts?keys.map(([key,label])=>count(queue.counts[key]??0)+' '+label).join(' · '):'队列状态尚不可读';
     const rows=[['collect','采集定时',collect.filter(job=>job.enabled).length+' / '+collect.length+' 已启用',sources.filter(source=>source.status==='retry').length?'有来源等待重试；点击核对记录':'按来源配置的间隔运行'],['process','待办处理',processor?processor.enabled?state(processor.state):'未启用':'状态未知',queues.processor?.pending_groups==null?'待处理分组：尚未计算':'待处理 '+queues.processor.pending_groups+' 组 · 可打开 Pi 工作流'],['delivery','消息投递',delivery?delivery.enabled?state(delivery.state):'未启用':'状态未知',queueNote(queues.messaging,[['pending','待投递'],['retry','待重试'],['unknown','结果未知']])],['feedback','状态回写',feedback?feedback.enabled?state(feedback.state):'未启用':'状态未知',queueNote(queues.feedback,[['queued','待回写'],['failed','失败'],['conflict','冲突']])]];
     $('services').replaceChildren();
     for(const [id,name,value,note]of rows){
@@ -166,7 +169,7 @@
     addFacts(detail,[['操作',actions[job.action]||job.action],['模块',names[job.module]||job.module],['触发方式',originLabels[job.origin]||job.origin],['开始时间',stamp(job.started_at)],['耗时',durationText(job.duration_seconds,!!job.finished_at)],['结果',state(job.status)],['运行编号',job.id]]);
     detail.append(node('h3','错误与当前结果'),node('p',job.error||'没有已记录的错误；保存与送达结果仍以本轮原始结果为准。'),node('h3','下一步'),node('p',job.status==='failed'?'先核对错误位置、输入与实际输出，再决定后续操作。原失败证据会保留。':job.status==='interrupted'?'结果未确认，请先核对实际输出，避免重复执行。':job.status==='running'?'当前任务仍在执行，尚不能确认最终结果。':'核对本轮结果与后续处理记录。'));
     const controls=node('div',null,'actions'),target=jobConfig(job);if(scope.module&&sourceInfo(scope.module))target.source_id=scope.module;controls.append(configButton(target));
-    const automatic=snapshot?.jobs?.find(item=>item.module===job.module||item.source_id===target.source_id);
+    const automatic=target.source_id?snapshot?.jobs?.find(item=>item.source_id===target.source_id):null;
     if(job.action==='collect'&&['failed','interrupted','warning'].includes(job.status)&&automatic&&sourceInfo(target.source_id)?.capabilities.collect){
       const retry=node('button','安排新一轮…','secondary');retry.addEventListener('click',()=>{
         if($('collection-retry-confirm'))return;
@@ -187,7 +190,7 @@
     if(issue.run_id)return openOverviewJob(issue.run_id,issue.run_source,scope);
     const request=++detailGeneration;++listGeneration;current={kind:'issue',issue};
     if(!$('run-dialog').open)$('run-dialog').showModal();
-    const detail=detailHeader(issue.title||'问题详情');detail.append(node('h3','错误与当前结果'),node('p',issue.error||'状态尚未确认'),node('h3','下一步'),node('p',nextStep(issue)));
+    const detail=detailHeader(issue.title||'问题详情');detail.append(node('h3','错误与当前结果'),node('p',issueText(issue)),node('h3','下一步'),node('p',nextStep(issue)));
     addFacts(detail,[['模块',names[issue.source_id||issue.module]||issue.module],['最后发生',stamp(issue.last_at)],['问题编号',issue.key]]);
     const controls=node('div',null,'actions');controls.append(configButton(issue));detail.append(controls);
     const target=issue.detail_target;
@@ -201,14 +204,27 @@
     detail.focus({preventScroll:true});
   }
   function addRecovery(detail,target,item){
+    const active=detailGeneration;let busy=false;
     const box=node('section',null,'run-notice');box.append(node('h3',target.kind==='delivery'?'先核实目标端结果':'回写恢复'),node('p',target.kind==='delivery'?'按目标、内容和时间核对是否已收到。重试只重新排队，不代表已经送达。':'排队后仍需处理层确认保存；状态冲突不能覆盖较新的待办。'));
     let checked=null;
     if(target.kind==='delivery'&&item.status==='unknown'){const label=node('label');checked=node('input');checked.type='checkbox';checked.id='delivery-checked';label.append(checked,document.createTextNode('我已按内容与时间核对目标端'));box.append(label);}
     const controls=node('div',null,'actions');
     for(const [action,label]of target.kind==='delivery'?(item.status==='unknown'?[['delivered','确认已收到'],['retry','核实未达后重试']]:item.status==='failed'?[['retry','重新排入投递队列']]:[]):['failed','retry'].includes(item.status)?[['retry','重试回写']]:[]){
       const button=node('button',label,'secondary');button.disabled=!!checked;
-      if(checked)checked.addEventListener('change',()=>button.disabled=!checked.checked);
-      button.addEventListener('click',()=>guard(async()=>{if(checked&&!checked.checked)return;button.disabled=true;try{await api('/operations/'+(target.kind==='delivery'?'deliveries':'feedback')+'/'+encodeURIComponent(target.id)+'/'+action,'POST');await refreshOverview();window.dispatchEvent(new Event('operations-updated'));detail.append(node('p',action==='delivered'?'已保存人工送达确认。':'已安排重试，等待后续执行确认。','run-notice'));controls.replaceChildren();}catch(error){button.disabled=false;throw error;}}));controls.append(button);
+      if(checked)checked.addEventListener('change',()=>button.disabled=busy||!checked.checked);
+      button.addEventListener('click',()=>guard(async()=>{
+        if(busy||checked&&!checked.checked)return;busy=true;
+        for(const control of box.querySelectorAll('button,input'))control.disabled=true;
+        try{
+          await api('/operations/'+(target.kind==='delivery'?'deliveries':'feedback')+'/'+encodeURIComponent(target.id)+'/'+action,'POST');
+          await refreshOverview();window.dispatchEvent(new Event('operations-updated'));
+          if(active===detailGeneration){detail.append(node('p',action==='delivered'?'已保存人工送达确认。':'已安排重试，等待后续执行确认。','run-notice'));controls.replaceChildren();}
+        }catch(error){
+          busy=false;if(active!==detailGeneration)return;
+          if(checked)checked.disabled=false;for(const control of controls.querySelectorAll('button'))control.disabled=!!checked&&!checked.checked;
+          box.append(node('p','操作未完成：'+error.message+'。请刷新并核对当前记录后再试。'));
+        }
+      }));controls.append(button);
     }
     if(item.status==='conflict')box.append(node('p','请刷新待办后重新操作；旧请求不能覆盖较新的修改。'));box.append(controls);detail.append(box);
   }
@@ -217,7 +233,7 @@
     rememberReturn();$('run-dialog').close();
     const id=target.source_id||target.config_target?.id;
     if(id&&sourceInfo(id)){$('module').value=id;await switchModule();}
-    const destination=typeof target.config_target==='string'?target.config_target:sourceInfo(id)?'settings/source':id==='processor'?'settings/model':['messaging','feedback'].includes(id)?'automation/channels':'automation/service';
+    const destination=typeof target.config_target==='string'?target.config_target:id&&sourceInfo(id)?'settings/source':id==='processor'?'settings/model':['messaging','feedback'].includes(id)?'automation/channels':'automation/service';
     location.hash=/^(settings\/(source|model)|automation(\/(background|collection|channels|service|rules))?)$/.test(destination)?destination:'automation';
   }
   async function restoreRun(){

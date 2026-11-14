@@ -60,6 +60,15 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
   await target.locator('[data-ops-key="url_env"]').fill('MIGRATION_TEST_URL');
   assert.match(await page.locator('#ops-targets details').filter({hasText:'future'}).textContent(),/当前只读/);
   assert.equal(await page.locator('#ops-targets details').filter({hasText:'reserved-kind'}).locator('input').count(),0);
+  // Validate a collapsed advanced field before locking controls for the save.
+  await page.locator('#tab-automation-collection').click();
+  const advancedSource=page.locator('#ops-source-advanced').locator('..');await advancedSource.locator('summary').first().click();
+  const attempts=page.locator('#ops-source-advanced [data-job="wechat"] [data-ops-key="max_attempts"]');
+  await attempts.fill('-1');await advancedSource.locator('summary').first().click();await page.locator('#ops-save').click();
+  await page.waitForFunction(()=>document.getElementById('ops-notice').textContent.includes('请修正标出的设置'));
+  assert.equal(saves.length,0,'invalid draft was submitted');assert.equal(await advancedSource.evaluate(node=>node.open),true);
+  assert.equal(await attempts.evaluate(node=>document.activeElement===node),true);
+  await attempts.fill(String(initial.automation.jobs.wechat.max_attempts));await advancedSource.locator('summary').first().click();await page.locator('#tab-automation-channels').click();
   conflict=true;await page.locator('#ops-save').click();await page.waitForFunction(()=>document.getElementById('ops-notice').textContent.includes('你的编辑已保留'));
   assert.equal(await p3.inputValue(),'123');assert.equal(await target.locator('[data-ops-key="url_env"]').inputValue(),'MIGRATION_TEST_URL');
   delaySave=true;await page.locator('#ops-save').click();assert.equal(await p3.isDisabled(),true,'saving must not discard new edits typed during the request');await page.waitForFunction(()=>document.getElementById('ops-notice').textContent.startsWith('已保存'));

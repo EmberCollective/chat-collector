@@ -10,6 +10,13 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
   page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>{if(request.method()!=='GET')mutations.push(request.url());});
   try{
     assert.equal((await (await page.request.get(base+'/__fixture__')).json()).synthetic,true,'Only use an isolated fixture');
+    const session=await(await page.request.get(base+'/api/session')).json();
+    const response=await page.request.get(base+'/api/overview?hours=24',{headers:{'X-Console-Token':session.token}});assert.equal(response.ok(),true);
+    const actual=await response.json();assert.equal(actual.window.hours,24);assert.equal(actual.sources.length,4);
+    assert.equal(actual.sources.find(source=>source.id==='external-example').metrics_available,false);
+    await page.goto(base+'/#overview');await page.waitForSelector('#collection-table table');
+    assert.equal(await page.locator('#kpis .metric').count(),4);assert.doesNotMatch(await page.locator('#overview-coverage').textContent(),/\[object Object\]/);
+    assert.match(await page.locator('#collection-table').textContent(),/工作账号/);
     let data=makeSnapshot(Date.now()/1000),fail=false;
     await page.route('**/api/overview?*',route=>route.fulfill({status:fail?503:200,json:fail?{detail:'fixture metrics unavailable'}:data}));
     await page.goto(base+'/#overview');await page.waitForFunction(()=>document.getElementById('kpis').textContent.includes('1,284'));
@@ -33,12 +40,18 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
     const operations=await page.evaluate(()=>api('/operations/status'));
     operations.messaging={...operations.messaging,deliveries:[{id:'fixture-unknown',status:'unknown',target_id:'work-group',title:'报告提交',error:'确认超时'}]};
     await page.route('**/api/operations/status',route=>route.fulfill({json:operations}));
-    await page.route('**/api/operations/deliveries/fixture-unknown/delivered',route=>{data.issues=data.issues.filter(issue=>issue.key!=='delivery-unknown');operations.messaging.deliveries[0].status='sent';return route.fulfill({json:{status:'sent'}});});
+    await page.route('**/api/operations/deliveries/fixture-unknown/delivered',async route=>{await new Promise(resolve=>setTimeout(resolve,250));data.issues=data.issues.filter(issue=>issue.key!=='delivery-unknown');operations.messaging.deliveries[0].status='sent';return route.fulfill({json:{status:'sent'}});});
     await page.evaluate(()=>location.hash='overview');await page.locator('[data-issue-key=delivery-unknown]').click();await page.waitForSelector('#delivery-checked');
     const received=page.getByRole('button',{name:'确认已收到',exact:true});assert.equal(await received.isEnabled(),false);
-    await page.locator('#delivery-checked').check();await received.click();await page.waitForFunction(()=>document.getElementById('run-detail').textContent.includes('已保存人工送达确认'));
+    await page.locator('#delivery-checked').check();await received.click();
+    assert.equal(await page.getByRole('button',{name:'核实未达后重试',exact:true}).isEnabled(),false);assert.equal(await page.locator('#delivery-checked').isEnabled(),false);
+    await page.waitForFunction(()=>document.getElementById('run-detail').textContent.includes('已保存人工送达确认'));
     await page.locator('#close-dialog').click();assert.equal(await page.locator('[data-issue-key=delivery-unknown]').count(),0);
     assert.deepEqual(mutations,[base+'/api/operations/deliveries/fixture-unknown/delivered']);
+    // A deleted source must not borrow the current source or a processor schedule.
+    await page.route('**/api/activity/automation/removed-source',route=>route.fulfill({json:{id:'removed-source',source:'automation',module:'removed-account',action:'collect',status:'failed',started_at:1,finished_at:2,attempts:[]}}));
+    await page.evaluate(()=>openOverviewJob('removed-source','automation',{label:'历史来源'}));
+    assert.equal(await page.getByRole('button',{name:'安排新一轮…',exact:true}).count(),0);await page.locator('#close-dialog').click();
     await page.unroute('**/api/operations/status');
     // Break the success line across missing samples; never join through a missing interval.
     data.success_bins[4].success_rate=null;data.sources[0].name='<img src=x onerror=alert(1)> '+('长名称'.repeat(30));data.sources[0].emitted=null;data.summary.emitted_complete=false;

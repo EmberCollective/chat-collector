@@ -35,6 +35,7 @@ def console(tmp_path):
     original=tomlkit.parse((ROOT/'console.toml').read_text(encoding='utf-8'))
     settings={'collector_root':str((ROOT/original['collector_root']).resolve()), 'port':10400,'modules':{}}
     settings['automation_config'] = str(tmp_path/'absent-automation.toml')
+    settings['messaging_config'] = str(tmp_path/'absent-messaging.toml')
     now=int(time.time())
     for module in ('wechat','qq'):
         folder=tmp_path/module

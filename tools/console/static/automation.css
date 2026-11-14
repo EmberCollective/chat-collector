@@ -4,6 +4,8 @@
 @media(max-width:800px){#view-automation .page-heading{flex-direction:row;align-items:flex-start;gap:12px}#view-automation .page-heading>.btn{padding:4px;white-space:nowrap}#view-automation .page-heading p{line-height:1.6}.automation-source-row.scheduled .automation-mode{display:none}.automation-source-row.scheduled>.automation-number,.automation-source-row.scheduled>.text-btn{grid-row:2}.automation-section-head>.automation-caption{display:none}}
 
 /* The approved automation layout keeps its own controls while using the shared shell. */
+#view-automation .page-heading p{margin-top:8px}#view-automation .automation-tabs button{padding:0 0 12px}#view-automation .automation-tabs button[aria-selected=true]{font-weight:600}#view-automation .automation-section-head p,#view-automation .automation-task-row p,#view-automation .automation-savebar p{margin-top:4px}
+#view-automation .automation-inline-advanced{margin-left:auto}#view-automation .automation-inline-advanced>summary{padding:4px 0;font-size:13px;color:var(--green)}#view-automation .automation-inline-advanced[open]{flex-basis:100%;margin-left:0}#view-automation .automation-inline-advanced[open]>div{padding-top:12px}#view-automation .automation-inline-advanced:not([open])>summary{white-space:nowrap}
 #view-automation{--secondary:#52615a;--soft:#f1f3f2;--green-soft:#eaf3ee;--radius:8px}
 #view-automation :is(h2,h3,h4,p){margin:0}#view-automation h3{font-size:14px;font-weight:500}
 #view-automation .row{display:flex;align-items:center;gap:12px}#view-automation .wrap{flex-wrap:wrap}
