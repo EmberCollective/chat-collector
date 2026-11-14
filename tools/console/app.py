@@ -325,6 +325,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     register_history_routes(app, jobs, authenticate, jobs.processor_history, bridge)
     from activity_routes import register_activity_routes
     register_activity_routes(app, bridge, jobs, authenticate)
+    from overview import register_overview_routes
+    register_overview_routes(app, bridge, jobs, authenticate)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
