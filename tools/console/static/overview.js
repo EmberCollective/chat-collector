@@ -9,6 +9,9 @@
   const stamp=value=>value==null?'未记录':time(value);
   const state=value=>statusNames[value]||states[value]||value||'状态未知';
   const nextStep=issue=>issue.next_action_label||({verify_delivery:'先按目标、内容和时间核对是否送达，再确认结果或安排重试。',retry_delivery:'核对投递错误和目标配置后，再安排重试。',retry_feedback:'核对待办的当前状态后，再安排回写。',resolve_conflict:'刷新待办后重新操作；旧请求不能覆盖较新的修改。',open_config:'打开相关配置，核对实际运行状态。'})[issue.next_action]||'核对错误记录与相关配置，再决定后续操作。';
+  const serviceState=service=>!service.verified||service.state==='unknown'?'状态未知':service.state==='running'&&service.running?'运行中':state(service.state);
+  const warningLabels={storage_partial:'部分存储路径尚未完成测量',state_missing:'运行数据库尚不存在',history_not_provided:'旧运行数据库未提供历史记录',not_configured:'尚未配置后台服务',console_records_unreadable:'部分本地运行记录不可读',history_window_truncated:'历史保留或读取上限可能截断当前窗口'};
+  const warningText=value=>typeof value==='string'?value:warningLabels[value.code]||((names[value.module]||value.module||'部分')+'数据暂时不可读');
   let snapshot=null,ready=false,loading=false,generation=0,metric='messages',scope={},records=[],current=null,returnContext=null,detailGeneration=0,listGeneration=0;
 
   async function refreshOverview(){
@@ -42,11 +45,11 @@
       row.append(node('span',unknown?'待确认':'异常','problem-tag'+(unknown?' warn':'')),text,node('time',clock(issue.last_at)));
       const button=node('button','查看相关记录','secondary');button.dataset.issueKey=issue.key;button.addEventListener('click',()=>guard(()=>openIssue(issue)));row.append(button);attention.append(row);
     }
-    const metrics=[['待处理问题',issues.length+' 项',issues.length?'包含当前故障与结果未确认':'包含故障与结果未确认',!!issues.length],['后台服务',service.verified===false?'状态未知':state(service.state||(service.running?'running':'unknown')),service.note||'采集 / 处理 / 投递分别核对'],['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['正式采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本']];
+    const metrics=[['待处理问题',issues.length+' 项',issues.length?'包含当前故障与结果未确认':'包含故障与结果未确认',!!issues.length],['后台服务',serviceState(service),service.note||'采集 / 处理 / 投递分别核对'],['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['正式采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本']];
     $('kpis').replaceChildren(...metrics.map(([label,value,detail,bad])=>{const item=node('div',null,'metric');item.append(node('span',label),node('strong',value,bad?'bad':''),node('small',detail));return item;}));
     renderSources();renderServices();renderChart();renderResources();
     const warnings=s.warnings||[];
-    $('overview-coverage').textContent=warnings.length?'统计范围：'+warnings.join('；'):'统计按开始时间归入窗口；仅包含本地仍保留且可读取的记录。空间为当前项目文件逻辑大小，不代表整盘或物理占用。';
+    $('overview-coverage').textContent=warnings.length?'统计范围：'+warnings.map(warningText).join('；'):'统计按开始时间归入窗口；仅包含本地仍保留且可读取的记录。空间为当前项目文件逻辑大小，不代表整盘或物理占用。';
   }
   function renderSources(){
     const table=node('table'),head=node('tr'),thead=node('thead'),body=node('tbody');
@@ -72,7 +75,7 @@
   }
   function renderServices(){
     const s=snapshot,service=s.service||{},jobs=s.jobs||[],queues=s.queues||{},sources=s.sources||[];
-    $('system-pill').textContent='后台服务'+(service.verified===false?'状态未知':state(service.state));
+    $('system-pill').textContent='后台服务'+serviceState(service);
     $('system-pill').classList.toggle('warn',!service.running||service.verified===false);
     const collect=jobs.filter(job=>job.source_id),processor=jobs.find(job=>job.module==='processor'),delivery=jobs.find(job=>job.module==='messaging'),feedback=jobs.find(job=>job.module==='feedback');
     const queueNote=(queue,keys)=>queue?.counts?keys.map(([key,label])=>count(queue.counts[key])+' '+label).join(' · '):'队列状态尚不可读';
@@ -163,6 +166,14 @@
     addFacts(detail,[['操作',actions[job.action]||job.action],['模块',names[job.module]||job.module],['触发方式',originLabels[job.origin]||job.origin],['开始时间',stamp(job.started_at)],['耗时',durationText(job.duration_seconds,!!job.finished_at)],['结果',state(job.status)],['运行编号',job.id]]);
     detail.append(node('h3','错误与当前结果'),node('p',job.error||'没有已记录的错误；保存与送达结果仍以本轮原始结果为准。'),node('h3','下一步'),node('p',job.status==='failed'?'先核对错误位置、输入与实际输出，再决定后续操作。原失败证据会保留。':job.status==='interrupted'?'结果未确认，请先核对实际输出，避免重复执行。':job.status==='running'?'当前任务仍在执行，尚不能确认最终结果。':'核对本轮结果与后续处理记录。'));
     const controls=node('div',null,'actions'),target=jobConfig(job);if(scope.module&&sourceInfo(scope.module))target.source_id=scope.module;controls.append(configButton(target));
+    const automatic=snapshot?.jobs?.find(item=>item.module===job.module||item.source_id===target.source_id);
+    if(job.action==='collect'&&['failed','interrupted','warning'].includes(job.status)&&automatic&&sourceInfo(target.source_id)?.capabilities.collect){
+      const retry=node('button','安排新一轮…','secondary');retry.addEventListener('click',()=>{
+        if($('collection-retry-confirm'))return;
+        const box=node('section',null,'run-notice');box.id='collection-retry-confirm';box.append(node('p','先核对数据库占用、已保存断点和实际输出。新一轮使用已保存配置，可能补充归档消息与附件；未保存草稿不生效。原失败记录保持原样。'));
+        const confirm=node('button','确认安排新一轮','secondary');confirm.addEventListener('click',()=>guard(async()=>{confirm.disabled=true;try{const result=await api('/operations/jobs/'+encodeURIComponent(automatic.module)+'/once','POST');box.replaceChildren(node('p',['queued','starting','running'].includes(result.state)?'请求已受理或已有任务执行，尚未确认本轮成功。':'当前状态：'+state(result.state)+'。请在自动化中核对，未确认新一轮已开始。'));window.dispatchEvent(new Event('operations-updated'));}catch(error){confirm.disabled=false;box.append(node('p','安排失败：'+error.message));}}));box.append(confirm);controls.after(box);
+      });controls.prepend(retry);
+    }
     const copy=node('button','复制完整记录','secondary');copy.addEventListener('click',()=>guard(()=>navigator.clipboard.writeText(JSON.stringify(job,null,2))));controls.append(copy);
     const workflows=job.workflow_runs||[];
     if(job.action==='process'&&job.source!=='automation')workflows.unshift({id:job.id});
@@ -204,8 +215,9 @@
   function rememberReturn(){returnContext={current,scope:{...scope},result:$('run-result-filter').value};$('overview-return-context').hidden=false;$('overview-return-label').textContent='来自运行：'+($('dialog-heading').textContent);}
   async function goConfig(target){
     rememberReturn();$('run-dialog').close();
-    if(target.source_id&&sourceInfo(target.source_id)){$('module').value=target.source_id;await switchModule();}
-    const destination=typeof target.config_target==='string'?target.config_target:'automation';
+    const id=target.source_id||target.config_target?.id;
+    if(id&&sourceInfo(id)){$('module').value=id;await switchModule();}
+    const destination=typeof target.config_target==='string'?target.config_target:sourceInfo(id)?'settings/source':id==='processor'?'settings/model':['messaging','feedback'].includes(id)?'automation/channels':'automation/service';
     location.hash=/^(settings\/(source|model)|automation(\/(background|collection|channels|service|rules))?)$/.test(destination)?destination:'automation';
   }
   async function restoreRun(){
