@@ -27,8 +27,18 @@ const states = [
   { name: 'automation-channels', hash: '#automation/channels', designHash: '#automation/channels', panel: '#automation-channels' },
   { name: 'automation-background', hash: '#automation/background', designHash: '#automation/background', panel: '#automation-background' },
 ];
+const liveOverview = process.env.DESIGN_PARITY_LIVE_OVERVIEW === '1';
+const matchApproved = process.env.DESIGN_PARITY_MATCH_APPROVED === '1';
 
-function safeName(s) { return s.replace(/[^a-z0-9-]/gi, '-').toLowerCase(); }
+async function fulfillJson(route, transform) {
+  if (route.request().method() !== 'GET') return route.fallback();
+  const response = await route.fetch();
+  if (!response.ok()) return route.fulfill({ response });
+  const data = await response.json();
+  transform(data);
+  return route.fulfill({ response, body: JSON.stringify(data) });
+}
+
 function fileUrl(file, hash) { return `${pathToFileURL(file).href}${hash}`; }
 
 async function go(page, url, state) {
@@ -73,13 +83,17 @@ async function metrics(page) {
 async function main() {
   fs.mkdirSync(output, { recursive: true });
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--force-color-profile=srgb'] });
-  const report = { generatedAt: new Date().toISOString(), fixture: origin.origin, approvedFile: approved, browser: 'Chrome', timezone: 'Asia/Shanghai', contentNotes: ['Overview API is replaced in the browser with the same synthetic overview snapshot used by verify-overview.cjs so its figures and charts are comparable.', 'Automation remains backed by the read-only fixture; its source count, sample rows and timestamps differ from the approved static demonstration and therefore contribute to raw pixel mismatch.'], comparisons: [] };
+  const contentNotes = [liveOverview ? 'Overview uses the synthetic fixture API response.' : 'Overview API is replaced in the browser with the synthetic snapshot used by verify-overview.cjs.'];
+  contentNotes.push(matchApproved ? 'For automation screenshots only, GET catalog/config/status responses are transformed in memory to show the approved three source rows and three target examples, enable demo schedules and listener, and report a running service. Real source IDs are preserved so normal fixture config requests still resolve. Fixture files are not changed; functional suites exercise the unmodified fixture. Operational wording, IDs, health checks and startup support still differ from the prototype.' : 'Automation uses the raw synthetic fixture; its source count, sample rows, channel targets, status, and timestamps differ from the approved static demonstration and contribute to raw pixel mismatch.');
+  const report = { generatedAt: new Date().toISOString(), fixture: origin.origin, approvedFile: approved, browser: 'Chrome', timezone: 'Asia/Shanghai', contentNotes, comparisons: [] };
   try {
     const probe = await fetch(`${origin.origin}/__fixture__`, { signal: AbortSignal.timeout(5000) });
     assert.equal(probe.status, 200, 'Synthetic fixture health endpoint must return HTTP 200.');
     const fixtureInfo = await probe.json();
     assert.equal(fixtureInfo.synthetic, true, 'Refuse to capture anything except the explicit synthetic fixture.');
     const page = await browser.newPage({ timezoneId: 'Asia/Shanghai', locale: 'zh-CN', colorScheme: 'light', reducedMotion: 'reduce' });
+    const pageErrors = [], outbound = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
     await page.route('**/*', route => {
       const url = route.request().url();
       if (/^https?:/.test(url) && new URL(url).origin !== origin.origin) {
@@ -88,8 +102,47 @@ async function main() {
       }
       return route.fallback();
     });
-    await page.route('**/api/overview*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(overviewSnapshot()) }));
-    const outbound = [];
+    if (!liveOverview) await page.route('**/api/overview*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(overviewSnapshot()) }));
+    if (matchApproved) {
+      await page.route('**/api/catalog', route => fulfillJson(route, catalog => {
+        catalog.sources = (catalog.sources || []).filter(source => source.id !== 'qq-work');
+        for (const source of catalog.sources) {
+          if (source.id === 'external-example') source.name = '外部信息源 · 接入示例';
+        }
+      }));
+      await page.route('**/api/operations/config', route => fulfillJson(route, config => {
+        config.automation.enabled = true;
+        for (const id of ['wechat', 'qq', 'processor', 'messaging', 'feedback']) if (config.automation.jobs?.[id]) {
+          config.automation.jobs[id].enabled = true;
+          if (id === 'wechat' || id === 'qq') config.automation.jobs[id].interval_seconds = 60;
+        }
+        if (config.automation.listener) config.automation.listener.enabled = true;
+        config.messaging.enabled = true;
+        config.messaging.feedback_enabled = true;
+        config.messaging.deadline_reminders.enabled = true;
+        config.messaging.deadline_reminders.P1 = [3600, 900, 0];
+        config.messaging.targets = [
+          { id: '产品协作群', kind: 'feishu_app', enabled: true, timeout_seconds: 30, app_id_env: 'FEISHU_APP_ID', app_secret_env: 'FEISHU_APP_SECRET', recipient_id: 'oc_demo_product_group', receive_id_type: 'chat_id', allowed_operator_ids: ['ou_demo_operator'], snooze_seconds: 3600, upload_files: true, max_file_bytes: 30000000 },
+          { id: '项目待办资料库', kind: 'notion', enabled: false, timeout_seconds: 30, token_env: 'NOTION_TOKEN', data_source_id: 'demo-project-source', properties: { title: '名称', status: '状态' } },
+          { id: '团队工作流', kind: 'webhook', enabled: false, timeout_seconds: 30, url_env: 'TEAM_WEBHOOK_URL', token_env: 'TEAM_WEBHOOK_TOKEN', mode: 'sync', purpose: '同步正式待办' },
+        ];
+        const feishu = config.messaging.types?.feishu_app;
+        if (feishu) {
+          feishu.name = '飞书应用 · feishu-assistant';
+          if (feishu.capabilities) Object.assign(feishu.capabilities, { send: false, test: false, files: true, feedback: true, listener: true, recovery: false });
+        }
+      }));
+      await page.route('**/api/operations/status', route => fulfillJson(route, status => {
+        status.service = { running: true, state: 'running', verified: true };
+        status.automation.enabled = true;
+        status.messaging.enabled = true;
+        status.feedback.enabled = true;
+        if (status.checks) {
+          status.checks.enabled = true;
+          for (const id of ['wechat', 'qq', 'processor', 'messaging', 'feedback']) if (status.checks.jobs?.[id]) Object.assign(status.checks.jobs[id], { enabled: true, ready: true, reason: '' });
+        }
+      }));
+    }
     page.on('dialog', dialog => dialog.dismiss());
     for (const device of devices) {
       await page.setViewportSize({ width: device.width, height: device.height });
@@ -98,6 +151,10 @@ async function main() {
         const designPage = await browser.newPage({ viewport: { width: device.width, height: device.height }, timezoneId: 'Asia/Shanghai', locale: 'zh-CN', colorScheme: 'light', reducedMotion: 'reduce' });
         await designPage.route('**/*', route => /^https?:/.test(route.request().url()) ? route.abort() : route.fallback());
         await go(designPage, fileUrl(approved, state.designHash), state);
+        if (state.name === 'overview') {
+          await designPage.locator('#kpis .metric').first().waitFor();
+          assert.equal(await designPage.locator('#kpis .metric').count(), 4, 'Approved overview must render all four KPI cards.');
+        }
         const designMetrics = await metrics(designPage);
         const designViewport = path.join(output, `${stem}-approved-viewport.png`);
         const designFull = path.join(output, `${stem}-approved-full.png`);
@@ -106,7 +163,20 @@ async function main() {
         await designPage.close();
 
         await go(page, `${origin.origin}/${state.hash}`, state);
+        if (state.name === 'overview') {
+          await page.locator('#kpis .metric').first().waitFor();
+          assert.equal(await page.locator('#kpis .metric').count(), 4, 'Production overview must render all four KPI cards.');
+        } else if (state.name === 'automation-collection') {
+          await page.waitForFunction(() => document.querySelectorAll('#automation-collection .automation-source-row').length >= 3);
+          if (matchApproved) assert.equal(await page.locator('#automation-collection .automation-source-row').count(), 3, 'Matched automation screenshot should show the approved three catalog rows.');
+        }
         const productionMetrics = await metrics(page);
+        if (matchApproved && state.name !== 'overview') {
+          for (const name of ['automation-status', 'automation-tabs', 'automation-panel']) {
+            for (const dimension of ['x', 'y', 'width']) assert.ok(Math.abs(productionMetrics.elements[name][dimension] - designMetrics.elements[name][dimension]) < 1, `${stem}: ${name}.${dimension} differs from approval`);
+          }
+          if (state.name === 'automation-collection') assert.ok(Math.abs(productionMetrics.elements['automation-panel'].height - designMetrics.elements['automation-panel'].height) < 1, `${stem}: collection panel height differs from approval`);
+        }
         const productionViewport = path.join(output, `${stem}-production-viewport.png`);
         const productionFull = path.join(output, `${stem}-production-full.png`);
         await page.screenshot({ path: productionViewport });
@@ -119,6 +189,7 @@ async function main() {
       }
     }
     assert.deepEqual(outbound, [], `Unexpected external requests: ${outbound.join(', ')}`);
+    assert.deepEqual(pageErrors, [], `Unexpected production page errors: ${pageErrors.join('; ')}`);
     fs.writeFileSync(path.join(output, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
     console.log(`Wrote visual evidence and report to ${output}`);
     console.log(JSON.stringify(report.comparisons.map(item => ({ state: item.state, device: item.device.name, pixels: item.pixels })), null, 2));

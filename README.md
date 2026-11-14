@@ -23,9 +23,15 @@
 ![飞书合成测试卡片：行动说明、完成待办和稍后提醒按钮，下方附带 connection-test.txt 文件](assets/readme/feishu-card.png)
 
 <details>
-<summary>查看本地调试台：采集状态、SQL 预览、待办处理与任务记录</summary>
+<summary>查看本地调试台：运行概览、自动化与 Pi 工作流</summary>
 
-![本地调试台：微信与 QQ 采集状态、SQL 筛选与重放、模型处理、消息层和任务记录](assets/readme/console.png)
+以下为已实现页面使用合成展示数据的截图，不代表本机真实运行情况。
+
+![拾序运行概览：当前故障、后台状态、入库变更、采集成功率与趋势](assets/readme/console.png)
+
+![拾序自动化：分类配置投递、提醒、监听与目标通道](assets/readme/console-automation.png)
+
+概览先显示故障与结果未知，再核对服务、积压、采集条数和耗时；来源占比可切换为文件逻辑大小占比。自动化统一配置采集与处理、投递与提醒、后台服务；SQL 规则按目录发现并勾选。运行记录可按操作、模块、触发方式和耗时筛选，Pi 工作流可追查上下文、模型可见输出与工具调用。
 
 </details>
 

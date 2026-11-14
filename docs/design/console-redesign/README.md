@@ -1,6 +1,6 @@
 # 拾序 · Loose Ends · 调试台静态设计稿
 
-基础布局已批准迁移；统一自动化、SQL 发现及错误详情的源码实现与检查范围见 [实现验收记录](IMPLEMENTATION.md)。本文描述静态稿中的示例交互；新增首页指标现已统一到本稿的运行概览，正式指标接入仍待确认。
+基础布局已批准迁移；统一自动化、SQL 发现及错误详情的源码实现与检查范围见 [实现验收记录](IMPLEMENTATION.md)。本文描述静态稿中的示例交互；新增首页指标现已统一到本稿的运行概览，用户已批准统一方案，正式源码已接入真实指标与自动化三分类；安装实例没有被自动替换。
 
 双击 [index.html](index.html) 即可打开。单个 HTML 自带样式、图标、示例数据与演示交互，不需要启动服务或联网。
 
@@ -174,4 +174,4 @@ SQL 清单来自内存示例，浏览器不会扫描真实磁盘。所有保存�
 
 “概览演示场景”只切换概览的正常、异常或空数据示例。正常 / 空数据场景旁明确提示作用范围，其他页面仍显示原运行记录与用户已核实结果；切回异常不会重新制造已核实投递。刷新仍恢复全部静态初值。
 
-概览维护源为 `../overview-dashboard/source/overview.html`、`overview.css`、`overview.js`，由无依赖 `build.cjs` 嵌入本文件。修改片段后运行 `node docs/design/overview-dashboard/build.cjs`；`--check` 检查生成内容一致性。正式页面与后端未迁移本轮静态指标。
+概览维护源为 `../overview-dashboard/source/overview.html`、`overview.css`、`overview.js`，由无依赖 `build.cjs` 嵌入本文件。修改片段后运行 `node docs/design/overview-dashboard/build.cjs`；`--check` 检查生成内容一致性。正式源码现已接入本轮概览指标；此 HTML 仍独立保留演示数据，作为视觉基线。
