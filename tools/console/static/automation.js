@@ -3,7 +3,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const node = (tag, text, cls) => {const el = document.createElement(tag); if (text != null) el.textContent = text; if (cls) el.className = cls; return el;};
   const byId = id => document.getElementById('ops-' + id);
   const jobNames = {processor: '自动处理', messaging: '自动投递', feedback: '状态回写', listener: '飞书按钮监听'};
-  const kindNames = {feishu_app: '飞书应用（交互卡片）', feishu: '飞书群机器人', notion: 'Notion / Notion Calendar', webhook: '通用 Webhook'};
   const labels = {enabled: '启用', interval_seconds: '间隔（秒）', max_attempts: '失败尝试上限', backoff_seconds: '首次重试等待（秒）', max_backoff_seconds: '最长重试等待（秒）', retry_base_seconds: '重试等待基数（秒）', max_deliveries_per_round: '每轮最多投递数', timeout_seconds: '请求超时（秒）', app_id_env: '应用 ID 环境变量名', app_secret_env: '应用密钥环境变量名', recipient_id: '目标群 chat_id', receive_id_type: '目标类型', allowed_operator_ids: '可操作人员 open_id（每行一个）', snooze_seconds: '稍后提醒等待（秒）', upload_files: '上传本地附件', max_file_bytes: '附件上传上限（字节）', url_env: 'Webhook 地址环境变量名', secret_env: '签名密钥环境变量名（可空）', token_env: '访问令牌环境变量名', data_source_id: 'Notion 数据源 ID', mode: '投递模式', purpose: '用途说明', title: '标题', task_id: '待办编号', priority: '优先级', status: '状态', date: '日期', instructions: '行动说明', files: '附件'};
   let config = null, dirty = false, busy = false, polling = false;
   let controls = [];
@@ -59,34 +58,30 @@ document.addEventListener('DOMContentLoaded', () => {
     button(actions, '恢复重试', () => operate('/jobs/' + name + '/resume', jobNames[name] + '已恢复。'));
   }
   function targetCard(target) {
-    if (target.kind === 'feishu_app') {target.max_file_bytes ??= 30000000; target.snooze_seconds ??= 3600; target.receive_id_type ??= 'chat_id'; target.upload_files ??= true;}
-    if (target.kind === 'webhook') target.mode ??= 'notify';
-    const card = node('article', null, 'message'); byId('targets').append(card);
-    card.append(node('h4', `${target.id} · ${kindNames[target.kind] || target.kind}`));
-    const schema = config.messaging.schemas[target.kind] || {};
-    const fields = grid(card);
-    for (const [key, type] of Object.entries(schema)) {
-      if (['id', 'kind', 'properties'].includes(key)) continue;
-      const options = {optional: type === 'env'};
-      if (key === 'timeout_seconds') options.max = 300;
-      if (key === 'snooze_seconds') options.max = 31536000;
-      if (key === 'max_file_bytes') options.max = 30000000;
-      if (key === 'receive_id_type') options.choices = {chat_id: '群聊 chat_id'};
-      if (key === 'mode') options.choices = {notify: '消息通知', sync: '同步更新'};
-      field(fields, target, key, type, options);
+    const description=config.messaging.types?.[target.kind];
+    const card=node('article',null,'message');byId('targets').append(card);
+    card.append(node('h4',`${target.id} · ${description?.name||target.kind}`));
+    if(!description){card.append(node('p','此类型没有可用描述，当前只读。已有配置保留在文件中，不会在保存其他设置时丢弃。','scope'));return;}
+    for(const [key,value]of Object.entries(description.defaults||{}))if(target[key]===undefined)target[key]=structuredClone(value);
+    card.append(node('p',description.description,'muted'));
+    const fields=grid(card);
+    for(const [key,definition]of Object.entries(description.fields||{})){
+      if(['id','kind'].includes(key))continue;
+      const type=definition.type,options={...definition,optional:type==='env'};
+      if(definition.fields){
+        target[key]??={};const area=grid(details(card,definition.label||key));
+        for(const [child,metadata]of Object.entries(definition.fields))field(area,target[key],child,metadata.type||'string',{...metadata,optional:true});
+      }else if(['string','strings','integer','boolean','env'].includes(type))field(fields,target,key,type,options);
+      else{card.append(node('p',(definition.label||key)+'：当前字段只读','scope'),node('pre',JSON.stringify(target[key]??null,null,2)));}
     }
-    if (target.kind === 'notion') {
-      card.append(node('p', '同步到 Notion 数据源；在 Notion Calendar 中连接该数据源的日期字段。', 'muted'));
-      target.properties ||= {};
-      const props = grid(details(card, 'Notion 属性名映射（留空沿用现有或默认值）'));
-      for (const key of ['title', 'task_id', 'priority', 'status', 'date', 'instructions', 'files']) field(props, target.properties, key, 'string', {optional: true});
-    }
-    const actions = node('div', null, 'actions'); card.append(actions);
-    button(actions, '发送测试消息…', async () => {
-      if (dirty) throw Error('请先保存设置，再测试已保存的通道。');
-      if (!window.confirm(`向 ${target.id} 发送一条测试消息？这会访问外部服务。`)) return;
-      const result = await request('/targets/' + encodeURIComponent(target.id) + '/test', {method: 'POST'});
-      notice(result.status === 'failed' ? '测试失败，请查看通道测试记录。' : result.status === 'unknown' ? '测试是否送达尚不确定，请先核对目标位置，避免重复发送。' : '测试已发送，请核对目标位置与通道测试记录。'); await refreshStatus();
+    if(!description.capabilities?.test)return;
+    const actions=node('div',null,'actions');card.append(actions);
+    button(actions,'发送测试消息…',async()=>{
+      if(!config.messaging.types?.[target.kind]?.capabilities?.test)throw Error('此通道不支持测试');
+      if(dirty)throw Error('请先保存设置，再测试已保存的通道。');
+      if(!window.confirm(`向 ${target.id} 发送一条测试消息？这会访问外部服务。`))return;
+      const result=await request('/targets/'+encodeURIComponent(target.id)+'/test',{method:'POST'});
+      notice(result.status==='failed'?'测试失败，请查看通道测试记录。':result.status==='unknown'?'测试是否送达尚不确定，请先核对目标位置，避免重复发送。':'测试已发送，请核对目标位置与通道测试记录。');await refreshStatus();
     });
   }
   function renderConfig() {
@@ -141,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     field(alerts, config.automation.alerts, 'recovery_enabled', 'boolean', {label: '恢复后发送通知'});
     config.messaging.targets.forEach(targetCard);
     byId('new-kind').replaceChildren();
-    for (const kind of Object.keys(config.messaging.schemas)) {const option = node('option', kindNames[kind] || kind); option.value = kind; byId('new-kind').append(option);}
+    for (const [kind,description] of Object.entries(config.messaging.types||{})) {const option = node('option', description.name || kind); option.value = kind; byId('new-kind').append(option);}
   }
   function collect() {
     for (const {input} of controls) if (!input.checkValidity()) {
@@ -157,7 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       object[key] = type === 'boolean' ? input.checked : type === 'integer' ? Number(input.value) : type === 'strings' ? input.value.split(/[\n,，]+/).map(x => x.trim()).filter(Boolean) : input.value.trim();
     }
-    const {schemas, ...messaging} = config.messaging;
+    const {schemas, types, ...settings} = config.messaging;
+    const messaging={...settings,targets:settings.targets.filter(target=>types?.[target.kind])};
     return {version: config.version, automation: config.automation, messaging};
   }
   async function loadConfig() {
@@ -260,9 +256,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const id = byId('new-id').value.trim(), kind = byId('new-kind').value;
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw Error('通道编号只能包含字母、数字、下划线或连字符，最多 100 字符。');
     if (config.messaging.targets.some(target => target.id === id)) throw Error('通道编号已存在。');
-    const target = {id, kind, enabled: false, timeout_seconds: 30};
-    if (kind === 'feishu_app') Object.assign(target, {receive_id_type: 'chat_id', snooze_seconds: 3600, max_file_bytes: 30000000, upload_files: true});
-    if (kind === 'webhook') target.mode = 'notify';
+    const description=config.messaging.types?.[kind];if(!description)throw Error('此通道类型没有可编辑描述');
+    const target={...structuredClone(description.defaults),id,kind,enabled:false};
     config.messaging.targets.push(target); targetCard(target); byId('new-id').value = ''; markDirty();
   }));
   window.addEventListener('beforeunload', event => {if (dirty) {event.preventDefault(); event.returnValue = '';}});
