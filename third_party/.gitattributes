@@ -1,0 +1,2 @@
+# Preserve the exact upstream license bytes and their recorded SHA-256 values.
+licenses/** -text

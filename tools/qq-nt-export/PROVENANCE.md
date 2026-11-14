@@ -1,10 +1,14 @@
 # Unmodified upstream scanner
 
 - Repository: https://github.com/q957506633/qq-nt-export
-- Source: https://raw.githubusercontent.com/q957506633/qq-nt-export/main/scripts/ntqq_key_scan.py
+- Verified upstream commit: `bec1504170f99e2752793320711c5653f3803670` (2026-11-14)
+- Source: https://raw.githubusercontent.com/q957506633/qq-nt-export/bec1504170f99e2752793320711c5653f3803670/scripts/ntqq_key_scan.py
 - Retrieved: 2026-11-12
 - License: MIT, reproduced in LICENSE
 - File SHA256: 484439bd0debe8b7797090a6d406a4c31b8fde0ff6f32fb3c06e8b40525ba91d
+
+The retrieved file and local MIT license were checked against that fixed commit.
+The source URL at initial retrieval used the repository's `main` branch.
 
 `scripts/ntqq_key_scan.py` is copied without modification. The local runner only
 orchestrates it and verifies candidates with official SQLCipher. It does not
