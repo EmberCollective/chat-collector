@@ -1,6 +1,11 @@
 ﻿'use strict';
 let historyReady=false,historyCursor=0,historyGeneration=0,historyQuery='',historyRows=[],historyLoading=false;
 const originLabels={manual:'手动',schedule:'定时',cli:'命令行',processor:'后台 / 未注明',automation:'后台服务'};
+async function openHistoryFor(module){
+  $('history-form').reset();
+  if(module){const picker=$('history-module');if(![...picker.options].some(option=>option.value===module)){const option=el('option',names[module]||module);option.value=module;picker.append(option);}picker.value=module;}
+  location.hash='history';await refreshHistory();
+}
 function historyParams(){
   const params=new URLSearchParams({limit:'30',sort:$('history-sort').value});
   for(const [id,key]of Object.entries({'history-filter':'status','history-module':'module','history-action':'action','history-origin':'origin','history-min-duration':'min_duration_seconds','history-max-duration':'max_duration_seconds','history-error':'error'}))if($(id).value)params.set(key,$(id).value);

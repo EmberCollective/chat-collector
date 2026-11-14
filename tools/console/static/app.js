@@ -14,12 +14,12 @@ const sourcePath=(id=selected())=>'/modules/'+encodeURIComponent(id);
 function fields(){return sourceInfo()?.fields||[];}
 function rememberSource(){
   const id=$('module').dataset.loaded;if(!id)return;
-  const values={};for(const input of document.querySelectorAll('#query input,#query textarea,#messages input,#config-fields input,#config-fields textarea,#config-fields select'))values[input.id]={value:input.value,checked:input.checked};
+  const values={};for(const input of document.querySelectorAll('#query input,#query textarea,#rulesets-editor input,#rulesets-editor textarea,#messages input,#config-fields input,#config-fields textarea,#config-fields select'))values[input.id]={value:input.value,checked:input.checked};
   sourceDrafts.set(id,{values,config:currentConfig,pending:pendingPreview,shown:previewShown,preview:[...$('preview-output').childNodes],messages:[...$('message-output').childNodes]});
 }
 async function loadCatalog(){
   const catalog=await api('/catalog');sourceCatalog=catalog.sources;
-  for(const id of ['module','settings-module']){$(id).replaceChildren();for(const source of sourceCatalog){names[source.id]=source.name;const option=el('option',source.name);option.value=source.id;$(id).append(option);}}
+  for(const id of ['module','settings-module','automation-module']){$(id).replaceChildren();for(const source of sourceCatalog){names[source.id]=source.name;const option=el('option',source.name);option.value=source.id;$(id).append(option);}}
 }
 
 function el(tag, text, className) { const node=document.createElement(tag); if(text!==undefined)node.textContent=text; if(className)node.className=className; return node; }
@@ -33,7 +33,7 @@ function time(value){return value?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asi
 function localValue(sec){return new Date(sec*1000+8*3600000).toISOString().slice(0,19);}
 function windowValues(){const start=Date.parse($('start').value+'+08:00')/1000,end=Date.parse($('end').value+'+08:00')/1000;if(!Number.isInteger(start)||!Number.isInteger(end)||end<=start)throw Error('请填写有效的开始与结束时间');return {start,end};}
 function ruleValues(){let rules;try{rules=JSON.parse($('filter-rulesets').value||'[]');}catch{throw Error('规则集注册表必须是有效 JSON');}if(!Array.isArray(rules))throw Error('规则集注册表必须是数组');return rules;}
-function filters(){return {rulesets:ruleValues()};}
+function filters(){validateRuleInputs();return {rulesets:ruleValues()};}
 function lastDay(){const now=Math.floor(Date.now()/1000);$('start').value=localValue(now-86400);$('end').value=localValue(now);}
 function button(text, handler, secondary=true){const node=el('button',text,secondary?'secondary':'');node.addEventListener('click',()=>guard(handler,node));return node;}
 async function guard(fn,node){if(node)node.disabled=true;try{await fn();}catch(error){notice(error.message,true);}finally{if(node)node.disabled=false;}}
@@ -63,7 +63,7 @@ function renderStatus(data){
     const top=el('div',undefined,'module-top');top.append(el('h2',source.name),el('span',source.readonly?'只读来源':state.running_job?'执行中':'手动调试就绪','pill'));card.append(top);
     if(!source.readonly){const metrics=el('div',undefined,'metrics');metrics.append(metric('已采集消息',state.messages??'—'),metric('待发布事件',state.pending_events??'—'),metric('成功时间终点',time(state.checkpoint),true),metric('快照更新时间',time(state.snapshot_updated_at),true));card.append(metrics);}
     card.append(el('p',source.readonly?source.description:`${intensities[state.intensity]||state.intensity||'—'} · ${state.refresh_interval_seconds?`数据库至少间隔 ${state.refresh_interval_seconds} 秒刷新`:'每轮刷新数据库'}${state.attachments_enabled?'':' · 附件保存关闭'} · 计划见自动化`,'muted'),sourceControls(id,state));
-    if(state.state_error||state.scheduler_error)card.append(el('p',state.state_error||state.scheduler_error,'pill error'));
+    if(state.state_error||state.scheduler_error){const issue=button((state.state_error||state.scheduler_error)+' · 查看相关记录',()=>openHistoryFor(id));issue.className='text-button error';card.append(issue);}
   }
   if(!sourceCatalog.length)$('modules').replaceChildren(el('p','尚未配置控制台来源。可先查看待办处理或在本机配置中接入来源。','empty'));
   else $('modules').querySelector(':scope>p')?.remove();
@@ -89,11 +89,7 @@ async function refresh(){
   await guard(pollProcessor);
 }
 function renderRuleSummary(){
-  const target=$('rule-summary');target.replaceChildren();let rules;
-  try{rules=JSON.parse($('filter-rulesets').value);if(!Array.isArray(rules))throw Error();}
-  catch{target.append(el('p','注册表存在格式问题，编辑内容已保留。','scope'));return;}
-  if(!rules.length)target.append(el('p','尚未注册规则集；空列表不采集，也不推进时间记录。','scope'));
-  for(const rule of rules){const row=el('p',undefined,'rule-row');row.append(el('span',rule?.enabled===false?'停用':'启用','pill'+(rule?.enabled===false?' warn':'')),el('span',typeof rule?.file==='string'?rule.file.split(/[\\/]/).pop():'文件未指定'));target.append(row);}
+  renderRules();
 }
 async function loadConfig(generation=sourceGeneration){
   if(!sourceInfo()?.capabilities.configure){currentConfig=null;$('config-fields').replaceChildren(el('p','此来源未提供可编辑配置。','scope'));$('raw-config').textContent='未提供配置描述';$('config-file').textContent='';return;}
@@ -107,7 +103,7 @@ async function loadConfig(generation=sourceGeneration){
     else{input.type=type;if(type==='checkbox')input.checked=value;else input.value=value;if(type==='number'){if(min!=null)input.min=min;if(max!=null)input.max=max;input.step=1;input.required=true;}}
     label.append(input);$('config-fields').append(label);
   }
-  $('raw-config').textContent=JSON.stringify(data.config,null,2);renderRuleSummary();
+  $('raw-config').textContent=JSON.stringify(data.config,null,2);renderRuleSummary();await discoverRules(generation);
 }
 async function saveConfig(){
   requireSource('configure');if(!currentConfig)throw Error('请先加载配置');
@@ -126,6 +122,11 @@ async function showJob(id,source){
   const job=await api(source==='automation'?'/activity/automation/'+encodeURIComponent(id):'/activity/console/'+encodeURIComponent(id)),box=$('job-detail');box.replaceChildren();
   box.append(el('h3',`${names[job.module]||job.module} · ${actions[job.action]||job.action}`),el('p',`${originLabels[job.origin]||job.origin||'未注明'} · ${states[job.status]||job.status} · ${durationText(job.duration_seconds,!!job.finished_at)}`));
   for(const attempt of job.attempts||[]){const section=el('section',undefined,'module-card');section.append(el('h4',`第 ${attempt.number} 次 · ${states[attempt.status]||attempt.status}`),el('p',`${time(attempt.started_at)} → ${attempt.finished_at?time(attempt.finished_at):'尚无结束时间'}`,'muted'));if(attempt.error)section.append(el('p',attempt.error,'error'));if(attempt.result)section.append(el('pre',JSON.stringify(attempt.result,null,2)));if(attempt.details){const detail=el('details');detail.append(el('summary','错误位置'),el('pre',JSON.stringify(attempt.details,null,2)));section.append(detail);}box.append(section);}
+  const controls=el('div',undefined,'actions');controls.append(button('复制完整记录',()=>navigator.clipboard.writeText(JSON.stringify(job,null,2))));
+  const configure=el('a','打开相关配置','button secondary');configure.href=source==='automation'?'#automation':job.module==='processor'?'#settings/model':'#settings/source';configure.addEventListener('click',()=>{$('detail-dialog').close();if(source!=='automation'&&sourceInfo(job.module)){$('module').value=job.module;guard(switchModule);}});controls.append(configure);
+  if(job.action==='process'&&source!=='automation')controls.append(button('查看 Pi 工作流',async()=>{$('detail-dialog').close();await selectWorkflow(job.id);}));
+  for(const run of job.workflow_runs||[])controls.append(button(`查看第 ${run.attempt||'?'} 次 Pi 工作流`,async()=>{$('detail-dialog').close();await selectWorkflow(run.id);}));
+  box.append(controls);
   if(job.log_tail)box.append(el('h4','运行日志'),el('pre',job.log_tail));const raw=el('details');raw.append(el('summary','完整记录'),el('pre',JSON.stringify(job,null,2)));box.append(raw);if(!$('detail-dialog').open)$('detail-dialog').showModal();
 }
 function identitySummary(m){
@@ -177,6 +178,7 @@ async function openAsset(module,seq,file,inline){
 }
 function bind(id,fn){$(id).addEventListener('click',()=>guard(fn,$(id)));}
 bind('last-day',lastDay);bind('reload-config',async()=>{if(confirm('重新加载会丢弃当前来源尚未保存的编辑，继续？'))await loadConfig();});bind('save-config',saveConfig);
+bind('rules-refresh',()=>discoverRules());bind('rules-save',saveConfig);
 bind('preview',async()=>{
   requireSource('query');const window=windowValues();if(window.end-window.start>7*86400)throw Error('预览每次最多 7 天，请缩小范围');
   const module=selected(),generation=sourceGeneration,job=await api(sourcePath(module)+'/preview','POST',{...window,...(sourceInfo()?.capabilities.sql?{filters:filters()}:{}),limit:20});
@@ -190,9 +192,9 @@ bind('copy-token',async()=>{await navigator.clipboard.writeText(token);notice('A
 bind('close-detail',()=>$('detail-dialog').close());bind('close-image',()=>$('image-dialog').close());
 $('image-dialog').addEventListener('close',()=>{if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=null;$('asset-image').removeAttribute('src');});
 async function switchModule(){
-  rememberSource();const generation=++sourceGeneration;$('module').dataset.loaded='';$('config-fields').inert=true;document.querySelector('.filter-scroll').inert=true;
+  rememberSource();const generation=++sourceGeneration;$('module').dataset.loaded='';$('config-fields').inert=true;$('rulesets-editor').inert=true;document.querySelector('.filter-scroll').inert=true;
   const id=selected(),source=sourceInfo(),draft=sourceDrafts.get(id);currentConfig=null;pendingPreview=null;previewShown=null;
-  $('settings-module').value=id;sourceSignature='';updateSourceStatus();
+  $('settings-module').value=id;$('automation-module').value=id;sourceSignature='';updateSourceStatus();
   $('processing-help').hidden=!source?.capabilities.configure;
   $('source-readonly').hidden=!source?.readonly;$('source-readonly').textContent=source?.description||'此来源未提供控制台查询能力';
   for(const [id,cap]of [['preview','query'],['replay','replay'],['load-messages','messages'],['save-config','configure'],['reload-config','configure']])$(id).hidden=!source?.capabilities?.[cap];
@@ -201,14 +203,16 @@ async function switchModule(){
   $('query').hidden=!source?.capabilities.query;$('messages').hidden=!source?.capabilities.messages;
   await loadConfig(generation);if(generation!==sourceGeneration||id!==selected())return;
   if(draft?.config)currentConfig=draft.config;
-  $('module').dataset.loaded=id;$('config-fields').inert=false;document.querySelector('.filter-scroll').inert=false;
+  $('module').dataset.loaded=id;$('config-fields').inert=false;$('rulesets-editor').inert=false;document.querySelector('.filter-scroll').inert=false;
   if(draft){for(const [id,value]of Object.entries(draft.values)){if($(id)){$(id).value=value.value;$(id).checked=value.checked;}}pendingPreview=draft.pending;previewShown=draft.shown;$('preview-output').replaceChildren(...draft.preview);$('message-output').replaceChildren(...draft.messages);}
   else{lastDay();$('message-keyword').value='';$('message-conversation').value='';$('preview-output').replaceChildren(el('p',source?.capabilities.query?'选择时间与条件，预览现有快照。':'此来源没有查询能力。','empty'));$('message-output').replaceChildren(el('p','点击“查看最近 20 条”读取消息。','empty'));}
   renderRuleSummary();$('message-inspector').replaceChildren(el('p','选择一条消息，核对来源与附件。','empty'));
+  if(draft)for(const [id,value]of Object.entries(draft.values))if(/^rule-(param|recent)-/.test(id)&&$(id))$(id).value=value.value;
   if(source?.capabilities.query)activatePanel('query');else if(source?.capabilities.messages)activatePanel('messages');else{$('preview-output').hidden=false;$('message-output').hidden=true;document.querySelector('.filter-footer').hidden=true;}
 }
 $('module').addEventListener('change',()=>guard(switchModule));
 $('settings-module').addEventListener('change',()=>{$('module').value=$('settings-module').value;guard(switchModule);});
+$('automation-module').addEventListener('change',()=>{$('module').value=$('automation-module').value;guard(switchModule);});
 function markQueryChanged(){if($('preview-output').querySelector('.message-row'))$('result-scope').textContent='条件已修改 · 结果待更新';}
 for(const id of ['start','end','filter-rulesets'])$(id).addEventListener('input',markQueryChanged);
 $('last-day').addEventListener('click',markQueryChanged);

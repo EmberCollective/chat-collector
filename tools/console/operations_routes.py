@@ -73,6 +73,24 @@ def errors():
 
 
 def register_operations_routes(app, bridge, authenticate):
+    @app.get('/api/operations/catalog', dependencies=[Depends(authenticate)])
+    def catalog():
+        from automation import load_config
+        from automation.history import ACTIONS
+        labels = {'process': '待办处理', 'deliver': '消息投递', 'feedback': '状态回写'}
+        path = bridge.root / bridge.settings.get('automation_config', 'config/automation.toml')
+        with errors():
+            cfg = load_config(path)
+            result = {}
+            for name, settings in cfg['jobs'].items():
+                source = next((identifier for identifier, file in bridge.paths.items()
+                               if file == Path(settings['config']).resolve()), None)
+                action = ACTIONS[name]
+                label = bridge.sources[source]['name'] if source else Path(settings['config']).name
+                result[name] = {'name': label + ' · 采集' if action == 'collect' else labels.get(action, action),
+                                'action': action, 'source_id': source, 'config_file': settings['config']}
+            return {'jobs': result}
+
     @app.get('/api/operations/startup', dependencies=[Depends(authenticate)])
     def read_startup():
         from tools.install.startup import startup_status

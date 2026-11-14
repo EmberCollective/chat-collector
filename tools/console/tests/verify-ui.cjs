@@ -13,12 +13,38 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
   page.on('request',request=>{if(/^https?:/.test(request.url())&&new URL(request.url()).origin!==new URL(base).origin)outbound.push(request.url());});
   page.on('dialog',dialog=>dialog.dismiss());
   try{
+    if(screenshots)fs.mkdirSync(screenshots,{recursive:true});
     assert.equal((await (await page.request.get(base+'/__fixture__')).json()).synthetic,true,'Refuse to mutate a real deployment');
     await page.goto(base);
     await page.waitForSelector('#workflow-matches',{state:'attached'});
     assert.equal(await page.locator('#module option').count(),4);
     assert.deepEqual(await page.evaluate(()=>[...document.querySelectorAll('[id]')].map(n=>n.id).filter((id,i,ids)=>ids.indexOf(id)!==i)),[]);
     await page.locator('[data-view=sources]').click();
+    await page.waitForSelector('#rule-list .rule-card');
+    const sql=page.locator('#rule-list .rule-card').filter({hasText:'new-rule.sql'});
+    assert.equal(await sql.locator('input[type=checkbox]').isChecked(),false);
+    const discovered=page.locator('#rule-list .rule-card').filter({hasText:'discovered.sql'});
+    assert.equal(await discovered.locator('input[type=checkbox]').isChecked(),false);
+    assert.equal((await page.evaluate(()=>ruleValues())).some(rule=>rule.file.endsWith('discovered.sql')),false);
+    await sql.locator('input[type=checkbox]').check();
+    await sql.locator('[data-rule-parameter=term]').fill('draft-wechat');
+    await page.locator('#rules-refresh').click();
+    assert.equal(await sql.locator('[data-rule-parameter=term]').inputValue(),'draft-wechat');
+    await page.evaluate(()=>location.hash='automation/rules');
+    await page.waitForSelector('#automation-rules-slot #rulesets-editor');
+    assert.equal(await sql.locator('[data-rule-parameter=term]').inputValue(),'draft-wechat');
+    await page.locator('#automation-module').selectOption('qq');
+    await page.waitForFunction(()=>document.getElementById('module').dataset.loaded==='qq');
+    assert.equal(await sql.locator('input[type=checkbox]').isChecked(),false);
+    await sql.locator('input[type=checkbox]').check();await sql.locator('[data-rule-parameter=term]').fill('draft-qq');
+    await page.locator('#automation-module').selectOption('wechat');
+    await page.waitForFunction(()=>document.getElementById('module').dataset.loaded==='wechat');
+    assert.equal(await sql.locator('[data-rule-parameter=term]').inputValue(),'draft-wechat');
+    if(screenshots)await page.screenshot({path:path.join(screenshots,'automation-rules.png'),fullPage:true});
+    // Clear the test-only rule, leaving the fixture's saved registrations unchanged.
+    await sql.locator('input[type=checkbox]').uncheck();
+    await page.evaluate(()=>location.hash='sources');
+    await page.waitForSelector('#source-rules-slot #rulesets-editor');
     await page.locator('#preview').click();
     await page.waitForSelector('#preview-output .message-row');
     assert.match(await page.locator('#preview-output').textContent(),/<img src=x onerror=alert\(1\)>/);
@@ -51,7 +77,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
     await page.unroute('**/api/modules/qq/config');
     // Saving A cannot reload B or discard edits made while the save was in flight.
     await page.locator('#module').selectOption('wechat');await page.waitForFunction(()=>document.getElementById('module').dataset.loaded==='wechat');
-    await page.evaluate(()=>{document.getElementById('filter-rulesets').value=JSON.stringify(currentConfig.config.filters.rulesets);document.getElementById('cfg-schedule-interval_seconds').value='11';document.getElementById('cfg-source-decrypted_dir').value=currentConfig.config.source.decrypted_dir;});
+    await page.evaluate(()=>{document.getElementById('filter-rulesets').value=JSON.stringify(currentConfig.config.filters.rulesets);document.getElementById('cfg-schedule-refresh_interval_seconds').value='11';document.getElementById('cfg-source-decrypted_dir').value=currentConfig.config.source.decrypted_dir;renderRuleSummary();});
     await page.route('**/api/modules/wechat/config',async route=>{const response=await route.fetch();if(route.request().method()==='PATCH')await new Promise(r=>setTimeout(r,250));await route.fulfill({response});});
     await page.evaluate(()=>{const confirm=window.confirm;window.confirm=()=>true;window.savedConfigCheck=saveConfig().finally(()=>window.confirm=confirm);});
     await page.locator('#module').selectOption('qq');await page.waitForFunction(()=>document.getElementById('module').dataset.loaded==='qq');
@@ -116,7 +142,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
     assert.equal(await page.locator('#processor-rules-text').inputValue(),edited);
     for(const width of [320,390,800,1024,1280,1440,1600]){
       await page.setViewportSize({width,height:1000});
-      for(const view of ['overview','sources','processor','delivery','history','settings']){
+      for(const view of ['overview','sources','processor','delivery','automation','history','settings']){
         await page.evaluate(view=>location.hash=view,view);
         await page.waitForFunction(view=>!document.getElementById('view-'+view).hidden,view);
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`overflow ${width}/${view}`);

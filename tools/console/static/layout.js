@@ -34,7 +34,8 @@ function showView(){
   document.getElementById('view-label').textContent=viewLabels[view];
   document.title='拾序 · Loose Ends · '+viewLabels[view];
   if(view==='settings'&&panel)activatePanel('settings-'+panel);
-  if(view==='automation')activatePanel('automation-'+(panel==='channels'?'channels':'background'));
+  if(view==='automation')activatePanel('automation-'+(['channels','rules'].includes(panel)?panel:'background'));
+  placeRules(view);
   if(candidate==='pi-workflow')activatePanel('pi-workflow');
   setMenu(false);
   document.getElementById('main').focus({preventScroll:true});

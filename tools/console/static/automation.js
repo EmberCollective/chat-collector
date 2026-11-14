@@ -2,7 +2,8 @@
 document.addEventListener('DOMContentLoaded', () => {
   const node = (tag, text, cls) => {const el = document.createElement(tag); if (text != null) el.textContent = text; if (cls) el.className = cls; return el;};
   const byId = id => document.getElementById('ops-' + id);
-  const jobNames = {wechat: '微信消息采集', qq: 'QQ 消息采集', processor: '待办生成（AI）', messaging: '消息投递', feedback: '待办状态回写', listener: '飞书按钮监听'};
+  const jobNames = {listener: '飞书按钮监听'};
+  let jobCatalog = {};
   const labels = {enabled: '启用', interval_seconds: '间隔（秒）', max_attempts: '失败尝试上限', backoff_seconds: '首次重试等待（秒）', max_backoff_seconds: '最长重试等待（秒）', retry_base_seconds: '重试等待基数（秒）', max_deliveries_per_round: '每轮最多投递数', timeout_seconds: '请求超时（秒）', app_id_env: '应用 ID 环境变量名', app_secret_env: '应用密钥环境变量名', recipient_id: '目标群 chat_id', receive_id_type: '目标类型', allowed_operator_ids: '可操作人员 open_id（每行一个）', snooze_seconds: '稍后提醒等待（秒）', upload_files: '上传本地附件', max_file_bytes: '附件上传上限（字节）', url_env: 'Webhook 地址环境变量名', secret_env: '签名密钥环境变量名（可空）', token_env: '访问令牌环境变量名', data_source_id: 'Notion 数据源 ID', mode: '投递模式', purpose: '用途说明', title: '标题', task_id: '待办编号', priority: '优先级', status: '状态', date: '日期', instructions: '行动说明', files: '附件'};
   let config = null, dirty = false, busy = false, polling = false;
   let controls = [];
@@ -49,9 +50,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function jobFields(parent, name) {
     const settings = config.automation.jobs[name];
-    parent = details(parent, jobNames[name]);
-    const descriptions = {wechat: '增量刷新微信数据库，按已注册 SQL 规则筛选并输出消息。', qq: '增量刷新 QQ 数据库，按已注册 SQL 规则筛选并输出消息。', processor: '读取新增候选消息，由 Pi 调用模型整理待办；没有新增内容时不调用模型。', messaging: '根据优先级、截止时间和通知计划，将待办交给启用的渠道。', feedback: '把卡片中的完成、改级等操作写回待办数据库。'};
-    parent.append(node('p', descriptions[name], 'muted')); const main = grid(parent);
+    parent = details(parent, jobNames[name] || name); parent.open = true; parent.dataset.job = name;
+    const description = jobCatalog[name];
+    parent.append(node('p', description?.config_file || '配置路径未提供', 'muted path'));
+    if(description?.action==='collect'){
+      const link=node('a','配置 SQL 采集规则','text-button');link.href='#automation/rules';
+      link.addEventListener('click',()=>{if(description.source_id){document.getElementById('module').value=description.source_id;guard(switchModule);}});if(description.source_id)parent.append(link);
+      if(!description.source_id)parent.append(node('p','该计划的配置文件未关联到面板信息源；请核对上述路径，面板中的其他账号不会代替它运行。','scope'));
+    }
+    const main = grid(parent);
     field(main, settings, 'enabled', 'boolean', {label: '定时运行' + jobNames[name]}); field(main, settings, 'interval_seconds', 'integer');
     const advanced = grid(details(parent, '失败重试设置'));
     for (const key of ['max_attempts', 'backoff_seconds', 'max_backoff_seconds']) field(advanced, settings, key, 'integer', {max: key === 'max_attempts' ? 20 : 86400});
@@ -92,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const id of ['processor-fields', 'delivery-fields', 'targets']) byId(id).replaceChildren();
     const processor = byId('processor-fields'), delivery = byId('delivery-fields');
     field(grid(processor), config.automation, 'enabled', 'boolean', {label: '启用自动运行服务'});
-    for (const name of ['wechat', 'qq', 'processor', 'messaging', 'feedback']) jobFields(processor, name);
+    for (const name of Object.keys(config.automation.jobs)) jobFields(processor, name);
     const globals = grid(delivery);
     field(globals, config.messaging, 'enabled', 'boolean', {label: '允许外部投递'});
     field(globals, config.messaging, 'feedback_enabled', 'boolean', {label: '允许操作结果回写处理层'});
@@ -159,7 +166,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function loadConfig() {
     if (dirty && !window.confirm('重新加载会放弃未保存的自动运行和通道设置。继续？')) return;
-    config = await request('/config'); renderConfig(); dirty = false; notice('设置已加载。保存只更新配置；服务未运行时需点击启动。');
+    const [settings,catalog] = await Promise.all([request('/config'),request('/catalog')]);
+    config=settings;jobCatalog=catalog.jobs;
+    for(const [name,description]of Object.entries(jobCatalog))jobNames[name]=description.name;
+    renderConfig(); dirty = false; notice('设置已加载。保存只更新配置；服务未运行时需点击启动。');
   }
   async function saveConfig() {
     if (!config) throw Error('请先重新加载设置。');
@@ -204,7 +214,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const detail = failure?.failures?.[0], frame = detail?.frames?.at(-1);
       let issue = job.active_error || job.error || (check?.ready === false ? check.reason : '') || '';
       if (detail) issue += `${issue ? ' · ' : '上次：'}${detail.code}${frame ? ` · ${frame.file}:${frame.line}` : ''}（${date(failure.at)}）`;
-      return [jobNames[job.name] || job.name, !job.enabled ? '未启用' : !active ? '服务未运行' : states[job.state] || job.state, job.attempts ?? 0, next, date(job.last_success), issue || '—'];
+      let problem=issue||'—';
+      if(issue){
+        problem=node('div');button(problem,issue+' · 查看详情',async()=>{
+          if(job.current_run_id){try{await showJob(job.current_run_id,'automation');return;}catch{}}
+          const box=document.getElementById('job-detail');box.replaceChildren(node('h3',jobNames[job.name]||job.name),node('p','尚无可关联的运行记录。以下为当前状态与配置检查，可在自动化中修正配置。','scope'),node('pre',JSON.stringify({job,check,last_failure:failure},null,2)));
+          const link=node('a','打开任务配置','button secondary');link.href='#automation';link.addEventListener('click',()=>{document.getElementById('detail-dialog').close();const target=document.querySelector('[data-job="'+job.name+'"]');if(target){target.open=true;target.scrollIntoView({block:'center'});}});box.append(link);document.getElementById('detail-dialog').showModal();
+        });
+      }
+      return [jobNames[job.name] || job.name, !job.enabled ? '未启用' : !active ? '服务未运行' : states[job.state] || job.state, job.attempts ?? 0, next, date(job.last_success), problem];
     }));
     const recovery = byId('recovery'); recovery.replaceChildren();
     recovery.append(node('h4', '投递失败与不确定结果'));

@@ -23,7 +23,15 @@ settings['sources']={'qq-work':{'kind':'qq','config':str(second_path),'name':'å·
 settings['messaging_config']=str(root/'messaging.toml')
 (root/'messaging.toml').write_text((root/'messaging.toml').read_text(encoding='utf8')+'\n[[targets]]\nid="workflow-sample"\nkind="webhook"\nenabled=false\nurl_env="UI_TEST_WEBHOOK"\n\n[[targets]]\nid="future"\nkind="new-provider"\nenabled=false\nsecret="never-output-this"\n\n[[targets]]\nid="reserved-kind"\nkind="constructor"\nenabled=false\n',encoding='utf8')
 settings['automation_config']=str(root/'automation.toml')
-(root/'automation.toml').write_text('enabled=false\n[storage]\nstate_file="automatic/state.db"\n[jobs.processor]\nconfig="processing/config.toml"\n[jobs.messaging]\nconfig="messaging.toml"\n[jobs.feedback]\nconfig="messaging.toml"\n',encoding='utf8')
+(root/'automation.toml').write_text('enabled=false\n[storage]\nstate_file="automatic/state.db"\n[jobs.wechat]\nconfig="wechat/config.toml"\n[jobs.qq]\nconfig="qq/config.toml"\n[jobs.processor]\nconfig="processing/config.toml"\n[jobs.messaging]\nconfig="messaging.toml"\n[jobs.feedback]\nconfig="messaging.toml"\n',encoding='utf8')
+rules_dir=root/'rulesets';rules_dir.mkdir()
+(rules_dir/'new-rule.sql').write_text("SELECT identity FROM candidates WHERE instr(text, :term)>0;",encoding='utf8')
+(rules_dir/'discovered.sql').write_text("SELECT identity FROM candidates WHERE conversation_id=:room;",encoding='utf8')
+for source in ('wechat','qq'):
+    source_path=root/source/'config.toml'
+    document=tomlkit.parse(source_path.read_text(encoding='utf8'))
+    document['filters']['rulesets'].append({'file':str(rules_dir/'new-rule.sql'),'enabled':False,'params':{'term':'saved-'+source}})
+    source_path.write_text(tomlkit.dumps(document),encoding='utf8')
 (root/'console.toml').write_text(tomlkit.dumps(settings),encoding='utf8')
 app=create_app(root/'console.toml',root/'runtime-ui')
 @app.middleware('http')

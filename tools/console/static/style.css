@@ -1104,6 +1104,17 @@ dialog::backdrop {
   flex:none;
   font-size:10px;
 }
+.rule-card {border-top:1px solid var(--line);padding:16px 0;overflow-wrap:anywhere;}
+.rule-toggle {display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.rule-toggle input {width:20px;height:20px;flex:none;}
+.rule-params {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:12px;margin:12px 0;}
+#rulesets-editor .settings-header {flex-wrap:wrap;gap:8px;}
+#rulesets-editor pre {max-height:280px;overflow:auto;}
+#rule-summary .scope {margin:8px 0;}
+#automation-rules {max-width:100%;}
+#automation-rules #rule-list {max-height:540px;overflow:auto;padding-right:8px;}
+#rulesets-editor>.actions {position:sticky;bottom:0;background:var(--panel,#fff);padding:12px 0;margin:0;border-top:1px solid var(--line);}
+#automation-background .actions:has(#ops-save),#automation-channels .actions:has(#ops-delivery-save) {position:sticky;bottom:0;background:var(--panel,#fff);padding:12px 0;border-top:1px solid var(--line);}
 .result-scroll>.output>p:not(.empty) {
   padding:12px 20px;
   margin:0;
