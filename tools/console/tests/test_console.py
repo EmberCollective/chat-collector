@@ -99,6 +99,67 @@ def wait_job(client,identifier):
     raise AssertionError('worker did not finish')
 
 
+def test_activity_combines_manual_and_automatic_runs_with_retry_details(console):
+    from automation import load_config, SchedulerService
+    client, app, folder, now = console
+    path = folder / 'automation.toml'
+    path.write_text('enabled=true\n[storage]\nstate_file="automation.db"\n[jobs.wechat]\nenabled=true\n', encoding='utf-8')
+    app.state.bridge.settings['automation_config'] = str(path)
+    manual = dict(id='old-manual', module='qq', action='preview', origin='manual',
+                  status='succeeded', started_at=now-10, finished_at=now-8)
+    app.state.jobs.jobs[manual['id']] = manual
+    ticks = [now]
+    calls = []
+    def collect():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError('PRIVATE_CHAT_OR_CREDENTIAL')
+        return {'messages': 4}
+    service = SchedulerService(load_config(path), callbacks={'wechat': collect}, clock=lambda: ticks[0])
+    service.execute('wechat')
+    ticks[0] += 31
+    service.execute('wechat')
+    data = client.get('/api/activity').json()
+    assert not data['warnings']
+    assert [r['source'] for r in data['records']] == ['automation', 'console']
+    run = data['records'][0]
+    assert run['status'] == 'succeeded' and run['attempt_count'] == 2
+    assert run['origin'] == 'schedule'
+    detail = client.get('/api/activity/automation/' + run['id']).json()
+    assert [a['number'] for a in detail['attempts']] == [1, 2]
+    assert detail['attempts'][0]['error'] == 'RuntimeError'
+    assert detail['attempts'][1]['result']['messages'] == 4
+    assert 'PRIVATE_CHAT_OR_CREDENTIAL' not in json.dumps(detail)
+    filtered = client.get('/api/activity?module=qq&origin=manual&status=succeeded').json()
+    assert [r['id'] for r in filtered['records']] == ['old-manual']
+    assert client.get('/api/activity?module=qq&origin=schedule').json()['records'] == []
+    assert client.get('/api/activity?limit=1').json()['records'] == [run]
+    manual_detail = client.get('/api/activity/console/old-manual').json()
+    assert manual_detail['duration_seconds'] == 2
+    assert len(manual_detail['attempts']) == 1
+    assert client.get('/api/activity/automation/missing').status_code == 404
+
+
+def test_activity_keeps_manual_records_when_automation_configuration_is_invalid(console):
+    client, app, folder, now = console
+    path = folder / 'invalid-automation.toml'
+    path.write_text('this is not toml', encoding='utf-8')
+    app.state.bridge.settings['automation_config'] = str(path)
+    app.state.jobs.jobs['manual'] = dict(id='manual', module='wechat', action='collect',
+        origin='manual', status='interrupted', started_at=now, finished_at=None)
+    response = client.get('/api/activity')
+    assert response.status_code == 200
+    assert response.json()['records'][0]['duration_seconds'] is None
+    assert response.json()['warnings']
+    assert client.get('/api/activity/automation/missing').status_code == 503
+    assert client.get('/api/activity/console/manual').status_code == 200
+    assert client.get('/api/activity?module=invalid').status_code == 422
+    assert client.get('/api/activity/invalid/manual').status_code == 422
+    client.headers.pop('X-Console-Token')
+    assert client.get('/api/activity').status_code == 401
+    assert client.get('/api/activity/console/manual').status_code == 401
+
+
 def test_security_and_local_docs(console):
     client,app,*_=console
     session = client.get('/api/session').json()

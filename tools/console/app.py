@@ -317,6 +317,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     register_messaging_routes(app, bridge, authenticate)
     from operations_routes import register_operations_routes
     register_operations_routes(app, bridge, authenticate)
+    from activity_routes import register_activity_routes
+    register_activity_routes(app, bridge, jobs, authenticate)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
