@@ -101,7 +101,7 @@ python -m automation stop --config config/automation.toml
 
 摘要字段为 `id`（UUID hex）、`module`（任务名）、`action`（`collect/process/deliver/feedback`）、`origin`（`manual/schedule`）、`status`、`started_at`、`finished_at`、`attempt_count`、`error`、`result` 和 `duration_seconds`。时间为 Unix 秒；运行中或等待重试时结束时间和耗时为空。状态包括 `running/retry/succeeded/failed/interrupted/warning`；`warning` 表示本轮完成，但下游仍需处理。详情中的每次尝试包含 `number/status/started_at/finished_at/error/result/details`。
 
-结果只保留数值统计，错误只保留安全代码；尝试详情沿用项目内调用位置和 SQLite 错误码，不保存聊天正文、凭据、SQL 或异常原文。业务结果与任务状态一起提交，之后的报警失败不会把已完成的业务执行改为失败重试。历史保留最近 1000 轮已结束记录及仍在运行、等待重试的记录；清理同时删除对应尝试。升级仅新增结构，保留原任务、配置和待执行操作，不补造升级前的历史。
+结果只保留数值统计，错误只保留安全代码；尝试详情沿用项目内调用位置和 SQLite 错误码，不保存聊天正文、凭据、SQL 或异常原文。业务结果与任务状态一起提交，之后的报警失败不会把已完成的业务执行改为失败重试。每个模块分别保留最近 1000 轮已结束记录，另保留仍在运行、等待重试的记录；现有五个模块合计最多保留 5000 轮已结束记录，高频反馈不会挤掉低频采集历史，清理同时删除对应尝试。升级仅新增结构，保留原任务、配置和待执行操作，不补造升级前的历史。
 
 ## 验证范围
 

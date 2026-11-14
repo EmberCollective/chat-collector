@@ -134,20 +134,25 @@ def test_read_only_queries_do_not_create_or_migrate_database(config):
     assert history.list_runs(config) == []
 
 
-def test_high_frequency_cleanup_bounds_terminal_runs_but_keeps_retry(config, monkeypatch):
+def test_high_frequency_cleanup_preserves_other_modules_and_pending_runs(config, monkeypatch):
     monkeypatch.setattr(history, 'MAX_TERMINAL_RUNS', 3)
     clock = Clock()
-    service = core.SchedulerService(config, callbacks={'wechat': lambda: 1 / 0, 'feedback': lambda: {'done': 1}}, clock=clock)
+    service = core.SchedulerService(config, callbacks={'wechat': lambda: {'done': 1}, 'qq': lambda: 1 / 0,
+                                                     'feedback': lambda: {'done': 1}}, clock=clock)
     service.execute('wechat')
-    identifier = history.list_runs(config, limit=3)[0]['id']
+    quiet = history.list_runs(config, limit=3)[0]['id']
+    service.execute('qq', manual=True)
+    pending = history.list_runs(config, module='qq', limit=3)[0]['id']
     for _ in range(8):
         clock.value += 1
         service.execute('feedback', manual=True)
     with closing(core._connect(config)) as conn:
-        assert conn.execute('SELECT COUNT(*) FROM runs WHERE finished_at IS NOT NULL').fetchone()[0] == 3
-        assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 4
-        assert conn.execute('SELECT COUNT(*) FROM run_attempts').fetchone()[0] == 4
-    assert history.get_run(config, identifier)['status'] == 'retry'
+        assert conn.execute('SELECT COUNT(*) FROM runs WHERE finished_at IS NOT NULL').fetchone()[0] == 4
+        assert conn.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 5
+        assert conn.execute('SELECT COUNT(*) FROM run_attempts').fetchone()[0] == 5
+    assert len(history.list_runs(config, module='feedback', limit=3)) == 3
+    assert history.get_run(config, quiet)['status'] == 'succeeded'
+    assert history.get_run(config, pending)['status'] == 'retry'
 
 
 def test_callback_completion_is_committed_before_alert_failure(config, monkeypatch):
