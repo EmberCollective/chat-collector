@@ -126,7 +126,17 @@ def test_activity_combines_manual_and_automatic_runs_with_retry_details(console)
     run = data['records'][0]
     assert run['status'] == 'succeeded' and run['attempt_count'] == 2
     assert run['origin'] == 'schedule'
+    history = client.get('/api/jobs?module=wechat&action=collect&origin=schedule').json()
+    assert history['total'] == 1 and history['jobs'][0]['id'] == run['id']
+    assert history['jobs'][0]['source'] == 'automation'
+    pi_id = 'e'*32
+    pi_folder = app.state.jobs.directory/pi_id
+    pi_folder.mkdir()
+    (pi_folder/'job.json').write_text(json.dumps(dict(id=pi_id, module='processor', action='process',
+        status='succeeded', started_at=now, finished_at=now+1, automation_run_id=run['id'], automation_attempt=2)), encoding='utf8')
+    assert pi_id not in {item['id'] for item in client.get('/api/jobs').json()['jobs']}
     detail = client.get('/api/activity/automation/' + run['id']).json()
+    assert detail['workflow_runs'] == [{'id':pi_id,'attempt':2}]
     assert [a['number'] for a in detail['attempts']] == [1, 2]
     assert detail['attempts'][0]['error'] == 'RuntimeError'
     assert detail['attempts'][1]['result']['messages'] == 4

@@ -69,7 +69,13 @@ def read_run_metadata(folder, jobs):
             if not active:
                 job['status'] = 'interrupted'
         job['id'] = folder.name
-        return {key: job.get(key) for key in ('id', 'module', 'action', 'origin', 'status', 'started_at', 'finished_at', 'error')}
+        result = {key: job.get(key) for key in ('id', 'module', 'action', 'origin', 'status', 'started_at', 'finished_at', 'error')}
+        parent = job.get('automation_run_id')
+        if isinstance(parent, str) and re.fullmatch(r'[0-9a-f]{32}', parent):
+            result['automation_run_id'] = parent
+            if type(job.get('automation_attempt')) is int and job['automation_attempt'] > 0:
+                result['automation_attempt'] = job['automation_attempt']
+        return result
     except (OSError, ValueError, TypeError):
         raise HTTPException(404, '运行元数据不可读') from None
 

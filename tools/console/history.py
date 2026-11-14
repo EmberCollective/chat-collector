@@ -82,6 +82,8 @@ def register_history_routes(app, jobs, authenticate, processor_history=None, bri
                             entries.append(record)
             except Exception as exc:
                 warnings.append('后台执行记录暂时无法读取：' + type(exc).__name__)
+        episodes = {entry['id'] for entry in entries if entry.get('source') == 'automation'}
+        entries = [entry for entry in entries if entry.get('automation_run_id') not in episodes]
         facets = {key+'s': sorted({item[key] for item in entries if item[key]})
                   for key in ('action', 'module', 'origin')}
         filters = {'action': action, 'module': module, 'origin': origin, 'status': status}

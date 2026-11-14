@@ -97,3 +97,17 @@ def test_cli_and_automation_pass_actual_origin(monkeypatch):
     automation._callback(settings, 'processor')
     automation._callback(dict(settings, _workflow_origin='manual'), 'processor')
     assert seen == ['cli', 'schedule', 'manual']
+
+
+def test_automation_episode_and_attempt_reach_pi_metadata(tmp_path, monkeypatch):
+    from automation import core
+    import processor
+    @record_round
+    def run(settings):
+        Path(settings['_progress_file']).with_name('pi-workflow.jsonl').write_text('{"type":"run_end"}\n')
+        return {'tasks_upserted': 1}
+    monkeypatch.setattr(processor, 'load_config', lambda _: {'storage': {'state_file': str(tmp_path/'state.db')}})
+    monkeypatch.setattr(processor, 'run_round', run)
+    core._callback({'jobs': {'processor': {'config':'fixture'}}, '_workflow_parent_run':'a'*32, '_workflow_attempt':2}, 'processor')
+    metadata = json.loads(next((tmp_path/'pi-runs').glob('*/job.json')).read_text(encoding='utf8'))
+    assert metadata['automation_run_id'] == 'a'*32 and metadata['automation_attempt'] == 2

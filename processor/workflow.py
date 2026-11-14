@@ -29,6 +29,8 @@ def record_round(run):
                     'origin': origin if origin in {'manual', 'schedule', 'cli'} else 'processor',
                     'status': 'running', 'started_at': time.time(), 'finished_at': None,
                     'pid': os.getpid(), 'create_time': psutil.Process().create_time()}
+        if config.get('_workflow_parent_run'):
+            metadata.update(automation_run_id=config['_workflow_parent_run'], automation_attempt=config.get('_workflow_attempt'))
         settings = dict(config, _progress_file=str(folder / 'pi-events.jsonl'))
         try:
             _write_metadata(folder, metadata)
