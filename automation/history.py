@@ -20,10 +20,10 @@ CREATE TABLE IF NOT EXISTS run_attempts(run_id TEXT NOT NULL,number INTEGER NOT 
 '''
 
 
-def _prune(conn):
-    stale = "SELECT id FROM runs WHERE finished_at IS NOT NULL ORDER BY started_at DESC,rowid DESC LIMIT -1 OFFSET ?"
-    conn.execute('DELETE FROM run_attempts WHERE run_id IN (' + stale + ')', (MAX_TERMINAL_RUNS,))
-    conn.execute('DELETE FROM runs WHERE id IN (' + stale + ')', (MAX_TERMINAL_RUNS,))
+def _prune(conn, name):
+    stale = "SELECT id FROM runs WHERE module=? AND finished_at IS NOT NULL ORDER BY started_at DESC,rowid DESC LIMIT -1 OFFSET ?"
+    conn.execute('DELETE FROM run_attempts WHERE run_id IN (' + stale + ')', (name, MAX_TERMINAL_RUNS))
+    conn.execute('DELETE FROM runs WHERE id IN (' + stale + ')', (name, MAX_TERMINAL_RUNS))
 
 
 def _begin(conn, row, origin, now):
@@ -51,7 +51,7 @@ def _finish(conn, name, status, now, *, error=None, result=None, details=None, i
                  (attempt_status, now, error, canonical(result or {}), canonical(details) if details else None, identifier))
     conn.execute('UPDATE runs SET status=?,finished_at=?,error=?,result=? WHERE id=? AND finished_at IS NULL',
                  (status, None if status == 'retry' else now, error, canonical(result or {}), identifier))
-    _prune(conn)
+    _prune(conn, name)
 
 
 def _record(row):
