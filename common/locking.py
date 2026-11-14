@@ -11,9 +11,7 @@ class InstanceLock:
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.stream = self.path.open('a+b')
-        if self.stream.tell() == 0:
-            self.stream.write(b'0')
-            self.stream.flush()
+        # Windows can lock past EOF; writing a sentinel races with the first holder.
         self.stream.seek(0)
         deadline = time.monotonic() + self.timeout
         while True:
