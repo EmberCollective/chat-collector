@@ -10,7 +10,7 @@ from Crypto.Util.Padding import pad
 from PIL import Image
 import pytest
 
-from collector.assets import AttachmentArchive
+from providers.platforms.assets import AttachmentArchive
 
 
 def test_native_decoder_config_matches_observed_32_byte_abi():

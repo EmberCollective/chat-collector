@@ -20,8 +20,7 @@ const processorFields = [
   ['context','gap_seconds','备用时间分组间隔（秒，SQL 模式不使用）','number'],
   ['context','max_messages','辅助消息条数软限（不切断关联片段）','number'],
   ['context','history_messages','每段附带的历史消息数','number'],
-  ['context','timezone','解释时间时使用的时区','text'],
-  ['schedule','interval_seconds','独立处理程序轮后等待（秒）','number']
+  ['context','timezone','解释时间时使用的时区','text']
 ];
 function processorConfigFields(){
   const kinds=[...new Set([...Object.keys(processorConfig?.config.source_descriptions||{}),...sourceCatalog.map(source=>source.kind)])];

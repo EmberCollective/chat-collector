@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">拾序 · Loose Ends</title>
+  <desc id="desc">墨绿色圆角方形中，暖白聊天气泡内的完成勾，代表从零散信息中整理出可追溯的行动。</desc>
+  <rect width="128" height="128" rx="32" fill="#12634f"/>
+  <path d="M39 29h50a15 15 0 0 1 15 15v29a15 15 0 0 1-15 15H60l-26 18V87a15 15 0 0 1-10-14V44a15 15 0 0 1 15-15Z" fill="#f4f6ef"/>
+  <path d="m45 58 13 13 25-25" fill="none" stroke="#12634f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

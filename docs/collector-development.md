@@ -26,10 +26,10 @@ flowchart LR
 | `scan(source,start,end,...,context=None,conversations=None)` | 输出标准消息，支持时间窗、会话范围和有限邻居读取 |
 | `collector/filters.py: scan_filtered` | 建公共消息表、运行注册 SQL、合并命中、维护连续性 |
 | `collector/identities.py: IdentityContext` | 只给最终选中消息补身份资料和显示名 |
-| `collector/assets.py: AttachmentArchive` | 归档、定位及复用现有媒体解码能力 |
+| `providers/platforms/assets.py: AttachmentArchive` | 兼容层的归档、定位及媒体解码；`collector/assets.py` 仅兼容导入 |
 | `collector/store.py: Store` | 稳定消息身份、修订、事务、outbox 与原子批次发布 |
 | `contracts.py` | 公共 `validate_event`、`ingest_batch`，校验与原子发布 |
-| `collector/attachment_provider.py` | 内置账号校验、实时附件定位和归档/解码 |
+| `providers/platforms/attachments.py` | 内置账号校验、实时附件定位和归档/解码；`collector/attachment_provider.py` 仅兼容导入 |
 | `providers/registry.py` | 根据本地配置加载附件提供方，消息不能选择执行代码 |
 | `providers/attachments.py` | 共用文件读取、页/块证据与覆盖状态 |
 | `processor/core.py` | 导入标准 JSONL；不是平台解析入口 |

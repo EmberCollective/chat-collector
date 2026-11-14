@@ -59,7 +59,7 @@ def test_context_initial_prompt_is_index_only_and_has_no_internal_identifiers(co
     record = event('one', attachments=[attachment])
     def forbidden(*args):
         raise AssertionError('initial model input must not parse attachment contents')
-    monkeypatch.setattr(context.AttachmentContext, '_prepare', forbidden)
+    monkeypatch.setattr(context.content.AttachmentContext, '_prepare', forbidden)
     payload, *_ = context.prepare_input(config, [group(record)])
     serialized = json.dumps(payload)
     for private in [attachment['sha256'], attachment['archive_path'], record['message_key'],

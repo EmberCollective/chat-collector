@@ -56,6 +56,8 @@
 
 默认目录 `data/messaging/assets/<sha256前两位>/<sha256>`，名称不作为存储路径。归档文件保留到用户另行管理；当前无自动垃圾回收，防止完成后误删证据。备份应同时包含 `data/messaging/state.db`、材料目录和上游正式待办 JSONL。Notion 上传收据与本地材料分离；外部副本同样不会因为本地完成而删除。
 
+对外文件名与内部哈希路径分离：优先保留附件名称，解析结果缺少名称时使用同一来源消息的文件名。仍无名称的已验证归档，根据归档扩展名生成 `图片-1.jpg`、`附件-1.pdf` 等名称；不依据哈希路径猜格式。飞书上传缓存同时记录文件名，改正名称后重新上传一次并使用新的发送去重标识，之后的提醒复用该文件。旧缓存未记录名称时会在下次投递时补传一次；结果未知的上传仍须对账，改名不能绕过此保护。
+
 ## 提醒与恢复
 
 `schedule.interval_seconds` 是检查间隔。有截止时间时，`deadline_reminders` 按优先级提供截止前节点；没有截止时间或该机制关闭时，使用 `reminders.P0..P4` 中的普通间隔，两套不会同时催办。截止提醒不调用模型。
@@ -133,6 +135,10 @@ python -m messaging retry-feedback --request-id "反馈请求ID"
 处理层公开函数为 `processor.update_task_status(config, task_id, status, request_id=..., actor=..., expected_revision=...)`。`actor` 包含 `platform/user_id/source`，`request_id` 由调用方持久保存用于重试，`expected_revision` 可用于检测过期操作。函数保存幂等回执并通过既有 outbox 发布，不请求模型，也不允许恢复已被替代的旧任务。普通接入方优先使用下方消息层排队接口。
 
 ## 公共入口
+
+飞书未完成卡片保留「完成待办」，将「稍后提醒」替换为「调整优先级」下拉菜单，选中 P0–P4 即提交。操作不调用模型；入队后由后台回写，再更新原卡片的级别、颜色和后续提醒。人工级别优先于后续 AI 对同一待办的判断。已完成卡片仍可恢复；不新增忽略或丢弃状态。不需要的事项可以使用完成停止提醒，但记录将显示为已完成。
+
+旧卡片的稍后提醒 token 和本地 snooze 接口保留兼容，避免已发卡片或已有队列突然失效；新卡片不再生成该入口。权限、群、消息、token 和修订仍须逐项校验。人工优先级公开接口见 [状态与优先级 API](task-status-api.md)。
 
 ```python
 from messaging import load_config, preview, sync, run_round, status

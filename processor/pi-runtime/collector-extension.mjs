@@ -93,15 +93,13 @@ export function collectorExtension({input, state, readAttachment, findTasks, val
         if ((args.attachment_decisions ?? []).some(item => !attachmentRefs.has(item.ref))) {
           state.error = 'invalid_source'; ctx.abort(); throw new Error('Unknown attachment reference');
         }
-        const assigned = new Set();
         for (const task of args.tasks) {
           if (!task.sources.length || task.sources.some(ref => !sourceRefs.has(ref))) {
             state.error = 'invalid_source'; ctx.abort(); throw new Error('Unknown source reference');
           }
-          if (task.task_id != null && (!taskIds.has(task.task_id) || assigned.has(task.task_id))) {
-            state.error = 'invalid_task'; ctx.abort(); throw new Error('Unknown or duplicate task reference');
+          if (task.task_id != null && !taskIds.has(task.task_id)) {
+            state.error = 'invalid_task'; ctx.abort(); throw new Error('Unknown task reference');
           }
-          if (task.task_id != null) assigned.add(task.task_id);
         }
         const validation = await validateSubmission(args, signal);
         if (validation?.accepted !== true) {

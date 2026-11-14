@@ -48,13 +48,73 @@ def fake_client(monkeypatch, *, fail_send=False, fail_file=False):
     return calls
 
 
-def callback(envelope, card, action='complete'):
+def test_listener_automatically_selects_enabled_custom_target_and_same_app_groups(case, monkeypatch):
+    config, target, _ = case
+    first = dict(target, id='my-team')
+    monkeypatch.setenv('SAME_APP_ALIAS', 'cli_test')
+    config['targets'] = [dict(target, id='disabled', enabled=False, app_id_env='UNSET_APP'), first,
+                         dict(target, id='other-group', recipient_id='oc_other', app_id_env='SAME_APP_ALIAS')]
+    assert feishu.listener_target(config) == first
+    calls = []
+    monkeypatch.setattr('messaging.config.load_config', lambda path: config)
+    monkeypatch.setattr(feishu, 'listen', lambda config, target, **kw: calls.append(target['id']))
+    assert feishu.main(['listen', '--config', 'synthetic.toml']) == 0
+    assert calls == ['my-team']
+
+
+def test_listener_rejects_ambiguous_apps_but_allows_explicit_target(case, monkeypatch, capsys):
+    config, target, _ = case
+    monkeypatch.setenv('OTHER_APP', 'cli_other')
+    config['targets'] = [target, dict(target, id='other-app', app_id_env='OTHER_APP')]
+    monkeypatch.setattr('messaging.config.load_config', lambda path: config)
+    calls = []
+    monkeypatch.setattr(feishu, 'listen', lambda config, target, **kw: calls.append(target['id']))
+    assert feishu.main(['listen', '--config', 'synthetic.toml']) == 1
+    assert 'feishu_listener_multiple_apps_not_supported' in capsys.readouterr().out
+    assert calls == []
+    assert feishu.main(['listen', '--config', 'synthetic.toml', '--target', 'other-app']) == 0
+    assert calls == ['other-app']
+
+
+def callback(envelope, card, action='complete', priority='P2'):
     columns = card['body']['elements'][-1]['columns']
-    index = 1 if action == 'snooze' else 0
+    index = 1 if action in {'snooze', 'set_priority'} else 0
     value = columns[index]['elements'][0]['behaviors'][0]['value']
     return {'header': {'app_id': 'cli_test', 'event_type': 'card.action.trigger', 'event_id': 'evt1'},
-            'event': {'operator': {'open_id': 'ou_me'}, 'action': {'tag': 'button', 'value': value},
+            'event': {'operator': {'open_id': 'ou_me'}, 'action': {'tag': 'select_static' if action == 'set_priority' else 'button', 'value': value,
+                      **({'option': priority} if action == 'set_priority' else {})},
                       'context': {'open_message_id': 'om_1', 'open_chat_id': 'oc_group'}}}
+
+
+def test_priority_selector_and_authenticated_option_callback(case, monkeypatch):
+    config, target, envelope = case
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    card = json.loads(calls[0][1].content)
+    selector = card['body']['elements'][-1]['columns'][1]['elements'][0]
+    assert selector['tag'] == 'select_static'
+    assert selector['placeholder']['content'] == '调整优先级'
+    assert [item['value'] for item in selector['options']] == ['P0', 'P1', 'P2', 'P3', 'P4']
+    assert '稍后提醒' not in json.dumps(card, ensure_ascii=False)
+    queued = []
+    enqueue = lambda *args, **kwargs: queued.append((args, kwargs)) or {'status': 'queued'}
+    event = callback(envelope, card, 'set_priority', 'P4')
+    feishu.handle_callback(config, target, event, enqueue=enqueue)
+    feishu.handle_callback(config, target, event, enqueue=enqueue)
+    assert queued[0] == queued[1]
+    assert queued[0][0][4] == 'set_priority'
+    assert queued[0][1] == {'expected_revision': 1, 'priority': 'P4'}
+    event['event']['action']['option'] = 'P0'
+    feishu.handle_callback(config, target, event, enqueue=enqueue)
+    assert queued[-1][0][2] != queued[0][0][2]
+    for bad in ('P9', None, {}, True):
+        event['event']['action']['option'] = bad
+        with pytest.raises(ValueError, match='invalid_priority'):
+            feishu.handle_callback(config, target, event, enqueue=enqueue)
+    event = callback(envelope, card)
+    event['event']['action'].update(tag='select_static', option='P0')
+    with pytest.raises(ValueError, match='invalid_action'):
+        feishu.handle_callback(config, target, event, enqueue=enqueue)
 
 
 def test_app_card_create_replay_update_and_old_tokens_expire(case, monkeypatch):
@@ -94,7 +154,7 @@ def test_synthetic_card_callback_is_authenticated_and_never_queues_task(case, mo
     with feishu._state(config) as conn:
         saved = conn.execute('SELECT * FROM feishu_tests').fetchone()
         assert saved['clicked_at'] and saved['action'] == 'complete'
-        assert conn.execute('SELECT count(*) FROM feedback_requests').fetchone()[0] == 0
+        assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name='feedback_requests'").fetchone()
     feishu.handle_callback(config, target, event, enqueue=enqueue)
     event['event']['operator']['open_id'] = 'ou_intruder'
     with pytest.raises(ValueError, match='not_authorized'):
@@ -182,6 +242,64 @@ def test_file_send_is_persisted_and_not_repeated_for_reminders(case, monkeypatch
     assert len([c for c in calls if c[0] == 'upload']) == 1
     assert len([c for c in calls if c[0] == 'create' and c[1].msg_type == 'file']) == 1
     assert all(len(c[1].uuid) <= 50 for c in calls if c[0] == 'create')
+
+
+def test_corrected_filename_reuploads_once_with_a_new_delivery_identity(case, monkeypatch):
+    config, target, envelope = case
+    add_file(case)
+    resource = envelope['task']['resources'][0]
+    resource['name'] = '附件'
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    envelope['delivery_id'] = 'corrected-name'
+    resource['name'] = '图片-1.jpg'
+    feishu.deliver_app(target, envelope, config)
+    assert [c[1].file_name for c in calls if c[0] == 'upload'] == ['附件', '图片-1.jpg']
+    messages = [c[1] for c in calls if c[0] == 'create' and c[1].msg_type == 'file']
+    assert len(messages) == 2 and messages[0].uuid != messages[1].uuid
+    envelope['delivery_id'] = 'later-reminder'
+    envelope['kind'] = 'reminder'
+    feishu.deliver_app(target, envelope, config)
+    assert len([c for c in calls if c[0] == 'upload']) == 2
+
+
+def test_legacy_file_cache_migration_and_unknown_outcome_not_bypassed(case, monkeypatch):
+    import sqlite3
+    config, target, envelope = case
+    with sqlite3.connect(config['feedback']['state_file']) as conn:
+        conn.executescript(feishu.SCHEMA.replace(',file_name TEXT', ''))
+    add_file(case)
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    with feishu._state(config) as conn:
+        assert 'file_name' in {r[1] for r in conn.execute('PRAGMA table_info(feishu_files)')}
+        conn.execute("UPDATE feishu_files SET status='unknown'")
+    envelope['task']['resources'][0]['name'] = 'renamed.pdf'
+    envelope['delivery_id'] = 'renamed'
+    with pytest.raises(DeliveryUncertain, match='material_delivery_unknown'):
+        feishu.deliver_app(target, envelope, config)
+    assert len([c for c in calls if c[0] == 'upload']) == 1
+
+
+@pytest.mark.parametrize('state', ['unknown', 'sending'])
+@pytest.mark.parametrize('name', ['report.pdf', 'renamed.pdf'])
+def test_named_resource_migration_keeps_unknown_legacy_send_protection(case, monkeypatch, state, name):
+    config, target, envelope = case
+    add_file(case)
+    calls = fake_client(monkeypatch)
+    feishu.deliver_app(target, envelope, config)
+    resource = envelope['task']['resources'][0]
+    legacy_id = resource['id']
+    with feishu._state(config) as conn:
+        conn.execute('UPDATE feishu_files SET status=?', (state,))
+    resource.update(id=hashlib.sha256((legacy_id+':'+name).encode()).hexdigest(), name=name)
+    envelope['delivery_id'] = 'named-resource-migration'
+    with pytest.raises(DeliveryUncertain, match='material_delivery_unknown'):
+        feishu.deliver_app(target, envelope, config)
+    assert len([call for call in calls if call[0] == 'upload']) == 1
+    with feishu._state(config) as conn:
+        rows = list(conn.execute('SELECT asset_id,status FROM feishu_files'))
+        assert {row['asset_id']: row['status'] for row in rows} == {legacy_id: state, resource['id']: state}
 
 
 def test_file_failure_preserves_successful_card_and_marks_material(case, monkeypatch):
@@ -393,6 +511,78 @@ max_attempts=2
     return config
 
 
+@pytest.mark.parametrize('partial', [False, True])
+def test_digest_retry_refreshes_prepared_card_or_patches_card_with_failed_material(case, monkeypatch, tmp_path, partial):
+    from messaging import core
+    from messaging.package import build_package
+    config = delivery_config(case, tmp_path, monkeypatch)
+    slot = core.dt.datetime(2026, 12, 1, 8, tzinfo=core.ZoneInfo('Asia/Shanghai')).timestamp()
+    config['daily_digest']['enabled'] = True
+    config['initial_notifications']['P1'] = False
+    monkeypatch.setattr(core, '_package', lambda task, config, prepare=False:
+                        build_package(task, config, prepare=prepare))
+    count = 30 if partial else 1
+    def batch(name, revision, status):
+        events = []
+        for index in range(count):
+            task = dict(case[2]['task'], task_id=f't{index}', revision=revision, status=status,
+                        title=f'Stale task {index}')
+            events.append(dict(schema_version=1, operation='upsert', event_id=f'e{index}-{revision}',
+                               task_id=task['task_id'], revision=revision, task=task))
+        (Path(config['input']['batches_dir']) / name).write_text('\n'.join(json.dumps(e) for e in events), encoding='utf-8')
+    (Path(config['input']['batches_dir']) / 'batch.jsonl').unlink()
+    batch('first.jsonl', 1, 'open')
+    calls = fake_client(monkeypatch)
+    if partial:
+        monkeypatch.setattr(feishu, '_file_delivery', lambda *a: {'status': 'failed', 'error': 'temporary'})
+    else:
+        def rejected(req):
+            calls.append(('rejected', req.request_body))
+            return NS(success=lambda: False, code=999, data=None)
+        original_client = feishu._client(config['targets'][0], config)
+        original_create = original_client.im.v1.message.create
+        original_client.im.v1.message.create = rejected
+    assert core.run_round(config, now=slot)['retry'] == 1
+    with feishu._state(config) as conn:
+        before = dict(conn.execute('SELECT * FROM feishu_cards').fetchone())
+    assert before['status'] == ('sent' if partial else 'prepared')
+    batch('completed.jsonl', 2, 'completed')
+    if not partial:
+        original_client.im.v1.message.create = original_create
+    assert core.run_round(config, now=slot + 61)['sent'] == 1
+    with feishu._state(config) as conn:
+        after = dict(conn.execute('SELECT * FROM feishu_cards').fetchone())
+    assert after['delivery_id'] == before['delivery_id'] and after['status'] == 'sent'
+    assert 'Stale task' not in json.dumps(json.loads(after['card']), ensure_ascii=False)
+    if partial:
+        assert after['message_id'] == before['message_id']
+        assert [kind for kind, _ in calls] == ['create', 'patch']
+        assert json.loads(calls[-1][1].request_body.content) == json.loads(after['card'])
+    else:
+        assert [kind for kind, _ in calls] == ['rejected', 'create']
+        assert calls[0][1].uuid == calls[1][1].uuid
+        assert json.loads(calls[-1][1].content) == json.loads(after['card'])
+    assert core.run_round(config, now=slot + 62)['sent'] == 0
+
+
+def test_digest_unknown_card_cache_is_not_refreshed_or_resent(case, monkeypatch):
+    from messaging.channels import deliver
+    config, target, envelope = case
+    envelope.update(kind='daily_digest', digest={'date': '2026-12-01', 'timezone': 'Asia/Shanghai',
+                    'generated_at': '2026-12-01T08:00:00+08:00', 'items': []})
+    calls = fake_client(monkeypatch, fail_send=True)
+    with pytest.raises(DeliveryUncertain):
+        deliver(target, envelope, config)
+    with feishu._state(config) as conn:
+        before = dict(conn.execute('SELECT * FROM feishu_cards').fetchone())
+    envelope['digest']['generated_at'] = '2026-12-01T08:01:00+08:00'
+    with pytest.raises(DeliveryUncertain, match='prior_outcome_unknown'):
+        deliver(target, envelope, config)
+    with feishu._state(config) as conn:
+        assert dict(conn.execute('SELECT * FROM feishu_cards').fetchone()) == before
+    assert len(calls) == 1
+
+
 def test_partial_file_failure_retries_only_missing_file_and_keeps_receipt(case, monkeypatch, tmp_path):
     from messaging import core
     add_file(case)
@@ -538,3 +728,26 @@ def test_feishu_state_refuses_other_business_database_without_mutation(case):
     with pytest.raises(ValueError, match='wrong_database'):
         feishu._state(config)
     assert path.read_bytes() == original
+
+
+def test_channel_connection_keeps_legacy_tokens_receipts_and_feedback_rows(case, monkeypatch):
+    from messaging import feedback
+    config = case[0]
+    with feedback._connect(config, write=True) as conn:
+        conn.execute("INSERT INTO feedback_requests(request_id,task_id,request,acknowledgement,status,created_at,updated_at) VALUES('q1','t1','{}','{}','queued',1,1)")
+    with feishu._state(config) as conn:
+        conn.execute("INSERT INTO feishu_cards VALUES('d1','scope','target','t1',3,'g1','om_old',1,'sent','{}')")
+        conn.execute("INSERT INTO feishu_actions VALUES('old-token','d1','complete')")
+        conn.execute("INSERT INTO feishu_heads VALUES('scope','t1','g1')")
+        conn.execute("INSERT INTO feishu_files VALUES('scope','t1','sha','file_key','om_file','unknown',NULL,'original.pdf')")
+        expected = {name: [tuple(row) for row in conn.execute('SELECT * FROM ' + name)]
+                    for name in ('feishu_cards', 'feishu_actions', 'feishu_heads', 'feishu_files', 'feedback_requests')}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('channel connection must not call the feedback connector')
+
+    monkeypatch.setattr(feedback, '_connect', forbidden)
+    with feishu._state(config) as conn:
+        assert conn.execute('PRAGMA database_list').fetchone()['file'] == str(Path(config['feedback']['state_file']).resolve())
+        for name, rows in expected.items():
+            assert [tuple(row) for row in conn.execute('SELECT * FROM ' + name)] == rows

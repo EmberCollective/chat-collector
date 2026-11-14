@@ -1,5 +1,5 @@
 ﻿'use strict';
-const viewLabels = {overview:'运行概览',sources:'信息源调试',processor:'待办处理',delivery:'行动与投递',history:'运行记录',settings:'设置'};
+const viewLabels = {overview:'运行概览',sources:'信息源调试',processor:'待办处理',delivery:'行动与投递',automation:'自动化',history:'运行记录',settings:'设置'};
 function activatePanel(id, focus=false) {
   const tab=document.querySelector(`[data-panel="${id}"]`); if(!tab)return;
   const tabs=tab.parentElement;
@@ -25,6 +25,7 @@ function setMenu(open){
   if(open)document.querySelector('#sidebar [aria-current=page]').focus();
 }
 function showView(){
+  if(['settings/channels','settings/background'].includes(location.hash.slice(1))){location.replace('#automation/'+location.hash.split('/')[1]);return;}
   const [candidate,panel]=location.hash.slice(1).split('/'),view=candidate==='pi-workflow'?'processor':viewLabels[candidate]?candidate:'overview';
   for(const section of document.querySelectorAll('main>.view'))section.hidden=section.id!=='view-'+view;
   for(const link of document.querySelectorAll('[data-view]')){
@@ -33,6 +34,7 @@ function showView(){
   document.getElementById('view-label').textContent=viewLabels[view];
   document.title='拾序 · Loose Ends · '+viewLabels[view];
   if(view==='settings'&&panel)activatePanel('settings-'+panel);
+  if(view==='automation')activatePanel('automation-'+(panel==='channels'?'channels':'background'));
   if(candidate==='pi-workflow')activatePanel('pi-workflow');
   setMenu(false);
   document.getElementById('main').focus({preventScroll:true});

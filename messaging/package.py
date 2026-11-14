@@ -19,19 +19,22 @@ def _source_archive(sources, config, prepare):
     sha = hashlib.sha256(data).hexdigest()
     root = Path(config['storage']['assets_dir']).resolve()
     path = root / sha[:2] / sha
-    if prepare and not path.exists():
-        root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=root, prefix='.sources-') as temporary:
-            original = Path(temporary) / 'sources.txt'
-            original.write_bytes(data)
-            _store(original, config, sha)
-    item = {'id': sha, 'name': '来源原文.txt', 'type': 'file', 'role': 'input',
+    item = {'id': _id(sha + ':来源原文.txt'), 'name': '来源原文.txt', 'type': 'file', 'role': 'input',
             'purpose': '完整来源原文', 'source_refs': [s['ref'] for s in sources],
             'sha256': sha, 'size_bytes': len(data), 'status': 'unavailable'}
-    if path.exists():
-        if not path.resolve().is_relative_to(root) or _hash(path) != sha:
-            raise ValueError('material_store_corrupt')
-        item.update(status='ready', local_path=str(path))
+    try:
+        if prepare and not path.exists():
+            root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=root, prefix='.sources-') as temporary:
+                original = Path(temporary) / 'sources.txt'
+                original.write_bytes(data)
+                _store(original, config, sha)
+        if path.exists():
+            if not path.resolve().is_relative_to(root) or _hash(path) != sha:
+                raise ValueError('material_store_corrupt')
+            item.update(status='ready', local_path=str(path))
+    except (OSError, ValueError) as exc:
+        item['warnings'] = [str(exc) if isinstance(exc, ValueError) else 'material_file_unavailable']
     return item
 
 
@@ -100,7 +103,7 @@ def archive_result(file_path, config):
     if not path.is_file() or path.name.startswith('.env') or 'secrets' in {p.lower() for p in path.parts} or path.suffix.lower() in {'.db', '.sqlite', '.sqlite3', '.key', '.pem'}:
         raise ValueError('result_file_not_allowed')
     dest, sha, size = _store(path, config)
-    return {'id': sha, 'name': path.name, 'type': 'file', 'status': 'ready', 'role': 'result',
+    return {'id': _id(sha + ':' + path.name), 'name': path.name, 'type': 'file', 'status': 'ready', 'role': 'result',
             'sha256': sha, 'size_bytes': size, 'local_path': str(dest)}
 
 
@@ -130,10 +133,18 @@ def _material(attachment, source_key, index, config, prepare):
             raise ValueError('material_outside_allowed_roots')
         if _hash(path) != sha:
             raise ValueError('material_hash_mismatch')
+        if not Path(resource['name']).suffix:
+            suffix = Path(_name(path_value)).suffix.lower()
+            if suffix in {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff',
+                          '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                          '.txt', '.md', '.csv', '.zip', '.7z', '.mp3', '.mp4', '.wav'}:
+                if not attachment.get('name'):
+                    resource['name'] = ('图片' if resource['type'] == 'image' else '附件') + f'-{index + 1}'
+                resource['name'] += suffix
         size = path.stat().st_size
         if prepare:
             path, sha, size = _store(path, config, sha)
-        resource.update(id=sha, sha256=sha, size_bytes=size, local_path=str(path), status='ready')
+        resource.update(id=_id(sha + ':' + resource['name']), sha256=sha, size_bytes=size, local_path=str(path), status='ready')
         if attachment.get('status') == 'thumbnail_only':
             resource['warnings'].append('thumbnail_only')
     except (OSError, ValueError) as exc:
@@ -168,7 +179,8 @@ def build_package(task, config, *, prepare=False):
             if attachment is None:
                 package['unselected_materials_count'] += 1
                 continue
-            item = _material(attachment, key, index, config, prepare)
+            item = _material(dict(attachment, name=attachment.get('name') or original.get('name')),
+                             key, index, config, prepare)
             if item['id'] in resources:
                 resources[item['id']]['source_refs'] = sorted(set(resources[item['id']]['source_refs'] + [key]))
             else:

@@ -49,7 +49,7 @@ def history_jobs(jobs, processor_history=None):
     return history
 
 
-def register_history_routes(app, jobs, authenticate, processor_history=None):
+def register_history_routes(app, jobs, authenticate, processor_history=None, bridge=None):
     @app.get('/api/jobs', dependencies=[Depends(authenticate)], summary='筛选、排序并分页查看全部持久化运行记录')
     def history(cursor: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100),
                 action: str = Query('', max_length=100), module: str = Query('', max_length=100),
@@ -66,6 +66,22 @@ def register_history_routes(app, jobs, authenticate, processor_history=None):
         if start is not None and end is not None and start >= end:
             raise HTTPException(422, '结束时间必须晚于开始时间')
         entries = history_jobs(jobs, processor_history)
+        warnings = []
+        if bridge is not None:
+            try:
+                from automation.config import load_config, JOBS
+                from automation.history import list_runs, MAX_TERMINAL_RUNS
+                path = bridge.root / bridge.settings.get('automation_config', 'config/automation.toml')
+                if path.is_file():
+                    config = load_config(path)
+                    for name in JOBS:
+                        for record in list_runs(config, module=name, limit=MAX_TERMINAL_RUNS):
+                            record.update(source='automation', duration_complete=record['finished_at'] is not None)
+                            if record['status'] in {'running', 'retry'}:
+                                record['duration_seconds'] = max(0, time.time()-record['started_at'])
+                            entries.append(record)
+            except Exception as exc:
+                warnings.append('后台执行记录暂时无法读取：' + type(exc).__name__)
         facets = {key+'s': sorted({item[key] for item in entries if item[key]})
                   for key in ('action', 'module', 'origin')}
         filters = {'action': action, 'module': module, 'origin': origin, 'status': status}
@@ -90,5 +106,5 @@ def register_history_routes(app, jobs, authenticate, processor_history=None):
             sign = -1 if sort == 'duration_desc' else 1
             matched.sort(key=lambda item: (item['duration_seconds'] is None, sign*(item['duration_seconds'] or 0)))
         page = matched[cursor:cursor+limit]
-        return {'jobs': page, 'total': len(matched), 'facets': facets,
+        return {'jobs': page, 'total': len(matched), 'facets': facets, 'warnings': warnings,
                 'next_cursor': cursor+len(page), 'has_more': cursor+len(page) < len(matched)}

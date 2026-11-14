@@ -127,7 +127,33 @@ def _fault(stage):
     """Injection point for crash/rollback regression tests."""
 
 
+def _failure_kind(exc):
+    message=str(exc).lower()
+    if isinstance(exc,PermissionError) or any(value in message for value in ('readonly','permission denied','authorization denied','unable to open')):
+        return 'permission'
+    if 'key_mismatch' in message or 'file is not a database' in message:return 'key_mismatch'
+    if 'snapshot_source' in message:return 'capture'
+    if any(value in message for value in ('disk is full','disk i/o','disk failure','disk space')) or isinstance(exc,OSError):
+        return 'io'
+    if message.startswith('native_sqlite: database disk image is malformed'):return 'malformed'
+    if message.startswith('incremental_snapshot_integrity_failed:'):return 'integrity'
+    return 'other'
+
+
 def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',work_dir=None,library=None,pending_byte=None,collect_changes=None):
+    diagnostic={'stage':'prepare','page':None,'rollback':'not_started'}
+    try:
+        return _refresh_database(source,target,platform=platform,account=account,key=key,key_mode=key_mode,
+            work_dir=work_dir,library=library,pending_byte=pending_byte,collect_changes=collect_changes,
+            diagnostic=diagnostic)
+    except Exception as exc:
+        # Native errors may contain SQL/schema details; expose only fixed categories and location.
+        detail=' '.join(f'{name}={value}' for name,value in diagnostic.items())
+        message=f"snapshot_refresh_failed database={Path(target).name} category={_failure_kind(exc)} {detail}"
+        raise (ValueError(message) if isinstance(exc,ValueError) else RuntimeError(message)) from None
+
+
+def _refresh_database(source,target,*,platform,account,key,key_mode,work_dir,library,pending_byte,collect_changes,diagnostic):
     started=time.perf_counter()
     source,target=Path(source).resolve(),Path(target).resolve()
     if source==target:raise ValueError('Snapshot cannot replace the source database')
@@ -144,6 +170,7 @@ def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',
     cache.mkdir(parents=True,exist_ok=True)
     mirror=cache/'cipher.db';state=private/'page-state.sqlite';dirty=private/'baseline-incomplete'
     phase=time.perf_counter()
+    diagnostic['stage']='capture'
     hashes,wal,written=capture(source,mirror,1024 if platform=='qq' else 0)
     committed,base_pages,wal_info=committed_wal_pages(wal,PAGE_SIZE,len(hashes))
     count=wal_info['database_pages']
@@ -152,7 +179,9 @@ def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',
     capture_seconds=time.perf_counter()-phase
     del hashes,wal,committed
     native_options={'library':library, 'pending_byte':pending_byte}
+    diagnostic['stage']='source_open'
     with NativeSQLite(mirror,readonly=True,**native_options) as encrypted:
+        diagnostic['stage']='key'
         if platform=='wechat':
             from .vendor.wechat.decrypt import _resolve_page1_key_material
             with mirror.open('rb') as stream:page1=stream.read(PAGE_SIZE)
@@ -173,6 +202,7 @@ def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',
             encrypted.execute('PRAGMA cipher_kdf_algorithm=PBKDF2_HMAC_SHA512')
         encrypted.execute('PRAGMA query_only=ON')
         encrypted.execute('BEGIN')
+        diagnostic['stage']='source_page_map'
         header=encrypted.execute('SELECT data FROM sqlite_dbpage WHERE pgno=1')[0][0]
         logical=int.from_bytes(header[28:32],'big')
         if (0<logical<count and header[24:28]==header[92:96]
@@ -183,18 +213,25 @@ def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',
         if count<1 or any(value is None for value in current):
             raise RuntimeError('snapshot_page_map_incomplete')
         identity=hashlib.sha256(json.dumps([1,str(source),platform,str(account),key,key_mode,header[20],PAGE_SIZE]).encode()).hexdigest()
+        diagnostic['stage']='metadata'
         with closing(sqlite3.connect(state)) as metadata, metadata:
             metadata.execute('CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)')
             metadata.execute('CREATE TABLE IF NOT EXISTS pages(pgno INTEGER PRIMARY KEY,hash BLOB NOT NULL)')
             old_identity=metadata.execute("SELECT value FROM settings WHERE key='identity'").fetchone()
             target_stamp=metadata.execute("SELECT value FROM settings WHERE key='target_stamp'").fetchone()
             previous=dict(metadata.execute('SELECT pgno,hash FROM pages'))
+        diagnostic['stage']='target_recovery'
         if Path(str(target)+'-journal').exists():
             with NativeSQLite(target,**native_options) as recovery:
                 recovery.execute('SELECT count(*) FROM sqlite_master')
         full=(dirty.exists() or not target.exists() or old_identity!=(identity,)
               or target_stamp!=(json.dumps(_stamp(target)),))
         previous_target_stamp=_stamp(target)
+        diagnostic.update(pages_before=len(previous),pages_after=count,
+                          schema_before=None,schema_after=int.from_bytes(header[40:44],'big'))
+        if target.exists():
+            with target.open('rb') as stream:old_header=stream.read(100)
+            diagnostic['schema_before']=int.from_bytes(old_header[40:44],'big')
         candidates=None
         changed=list(range(1,count+1)) if full else [n for n,h in enumerate(current,1) if previous.get(n)!=h]
         truncated=len(previous)>count
@@ -203,7 +240,91 @@ def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',
                     'pages_total':count,'cipher_bytes_written':written,'database':str(target),
                     'timings_seconds':{'capture':round(capture_seconds,3),'total':round(time.perf_counter()-started,3)}}
         phase=time.perf_counter()
+        recovery=None
+        if not full:
+            try:
+                diagnostic['stage']='transaction_setup'
+                with NativeSQLite(target,**native_options) as destination:
+                    if destination.execute('PRAGMA journal_mode=DELETE')!=[('delete',)]:
+                        raise RuntimeError('incremental_snapshot_requires_rollback_journal')
+                    destination.execute('PRAGMA synchronous=FULL')
+                    destination.execute("ATTACH DATABASE ? AS page_state KEY ''",(str(state),))
+                    destination.execute('PRAGMA page_state.journal_mode=DELETE')
+                    destination.execute('PRAGMA page_state.synchronous=FULL')
+                    destination.execute('BEGIN IMMEDIATE')
+                    diagnostic['rollback']='pending'
+                    try:
+                        diagnostic['stage']='read_previous'
+                        if collect_changes:
+                            dirty_pages=set(changed)|set(range(count+1,len(previous)+1))
+                            old_schema=destination.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
+                            before_rows=collect_changes(destination, dirty_pages)
+                        resized=count!=len(previous)
+                        image=None
+                        if resized:
+                            image=bytearray(count*PAGE_SIZE)
+                            for number,page in destination.iterate('SELECT pgno,data FROM sqlite_dbpage WHERE pgno<=?',(count,)):
+                                image[(number-1)*PAGE_SIZE:number*PAGE_SIZE]=page
+                        # Publish the new schema header only after its referenced pages are present.
+                        for number in sorted(set(changed)-{1})+[1]:
+                            diagnostic.update(stage='read_page',page=number)
+                            page=encrypted.execute('SELECT data FROM sqlite_dbpage WHERE pgno=?',(number,))[0][0]
+                            page=_plain_page(page,number,count)
+                            if image is not None:image[(number-1)*PAGE_SIZE:number*PAGE_SIZE]=page
+                            diagnostic['stage']='write_page'
+                            destination.execute('INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,?)',
+                                                (number,page))
+                            diagnostic['stage']='write_metadata'
+                            destination.execute('INSERT OR REPLACE INTO page_state.pages VALUES(?,?)',(number,current[number-1]))
+                        diagnostic.update(stage='truncate',page=count+1 if truncated else None)
+                        if truncated:destination.execute('INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,NULL)',(count+1,))
+                        diagnostic['stage']='write_metadata'
+                        destination.execute('DELETE FROM page_state.pages WHERE pgno>?',(count,))
+                        diagnostic.update(stage='schema_reload',page=None)
+                        destination.execute('PRAGMA writable_schema=RESET')
+                        diagnostic['stage']='verify'
+                        _fault('before_integrity_check')
+                        if image is not None:
+                            # dbpage changes the pager size at commit; check the prospective image in RAM.
+                            with NativeSQLite(':memory:',**native_options) as checked:
+                                checked.deserialize(image)
+                                _verify(checked,full=platform!='qq')
+                                if collect_changes:
+                                    after_rows=collect_changes(checked, dirty_pages)
+                                    new_schema=checked.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
+                        else:
+                            _verify(destination,full=platform!='qq')
+                            if collect_changes:
+                                after_rows=collect_changes(destination, dirty_pages)
+                                new_schema=destination.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
+                        if collect_changes and old_schema==new_schema:
+                            from .native_delta import merge_candidates
+                            candidates=merge_candidates(before_rows,after_rows)
+                        diagnostic['stage']='commit'
+                        _fault('before_commit')
+                        destination.execute('COMMIT')
+                        diagnostic['rollback']='not_needed'
+                    except BaseException:
+                        try:
+                            destination.execute('ROLLBACK')
+                        except BaseException:
+                            diagnostic['rollback']='failed'
+                            raise
+                        diagnostic['rollback']='complete'
+                        raise
+            except RuntimeError as exc:
+                if (platform!='wechat' or diagnostic['rollback']!='complete'
+                        or diagnostic['stage'] not in {'write_page','truncate','schema_reload','verify'}
+                        or _failure_kind(exc) not in {'malformed','integrity'}):
+                    raise
+                recovery={**diagnostic,'reason':_failure_kind(exc),'attempts':1}
+                diagnostic.update(stage='source_validation',page=None,recovery_attempted=True)
+                _verify(encrypted)
+                recovery['source_validation']='integrity_check'
+                full=True
+                candidates=None
         if full:
+            diagnostic.update(stage='baseline_build',page=None)
             with dirty.open('wb') as stream:
                 stream.write(b'baseline publication pending');stream.flush();os.fsync(stream.fileno())
             temporary=None
@@ -212,12 +333,15 @@ def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',
                     temporary=Path(stream.name)
                     last=0
                     for number,page in encrypted.iterate('SELECT pgno,data FROM sqlite_dbpage WHERE pgno<=? ORDER BY pgno',(count,)):
+                        diagnostic['page']=number
                         if number!=last+1 or not isinstance(page,bytes) or len(page)!=PAGE_SIZE:
                             raise RuntimeError('native_snapshot_page_missing')
                         stream.write(_plain_page(page,number,count));last=number
                     if last!=count:raise RuntimeError('native_snapshot_page_missing')
                     stream.flush();os.fsync(stream.fileno())
+                diagnostic.update(stage='baseline_verify',page=None)
                 with NativeSQLite(temporary,**native_options) as checked:_verify(checked)
+                diagnostic['stage']='baseline_publish'
                 _fault('before_baseline_publish')
                 if any(Path(str(target)+suffix).exists() for suffix in ('-wal','-shm','-journal')):
                     raise RuntimeError('snapshot_target_has_active_sidecar')
@@ -229,64 +353,13 @@ def refresh_database(source,target,*,platform,account,key,key_mode='passphrase',
                 dirty.unlink()
             finally:
                 if temporary:temporary.unlink(missing_ok=True)
-        else:
-            with NativeSQLite(target,**native_options) as destination:
-                if destination.execute('PRAGMA journal_mode=DELETE')!=[('delete',)]:
-                    raise RuntimeError('incremental_snapshot_requires_rollback_journal')
-                destination.execute('PRAGMA synchronous=FULL')
-                destination.execute("ATTACH DATABASE ? AS page_state KEY ''",(str(state),))
-                destination.execute('PRAGMA page_state.journal_mode=DELETE')
-                destination.execute('PRAGMA page_state.synchronous=FULL')
-                destination.execute('BEGIN IMMEDIATE')
-                try:
-                    if collect_changes:
-                        dirty_pages=set(changed)|set(range(count+1,len(previous)+1))
-                        old_schema=destination.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
-                        before_rows=collect_changes(destination, dirty_pages)
-                    resized=count!=len(previous)
-                    image=None
-                    if resized:
-                        image=bytearray(count*PAGE_SIZE)
-                        for number,page in destination.iterate('SELECT pgno,data FROM sqlite_dbpage WHERE pgno<=?',(count,)):
-                            image[(number-1)*PAGE_SIZE:number*PAGE_SIZE]=page
-                    # Page 1 carries the source schema; always include it for truncate-only changes.
-                    for number in sorted(set(changed)|{1}):
-                        page=encrypted.execute('SELECT data FROM sqlite_dbpage WHERE pgno=?',(number,))[0][0]
-                        page=_plain_page(page,number,count)
-                        if image is not None:image[(number-1)*PAGE_SIZE:number*PAGE_SIZE]=page
-                        destination.execute('INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,?)',
-                                            (number,page))
-                        destination.execute('INSERT OR REPLACE INTO page_state.pages VALUES(?,?)',(number,current[number-1]))
-                    if truncated:destination.execute('INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,NULL)',(count+1,))
-                    destination.execute('DELETE FROM page_state.pages WHERE pgno>?',(count,))
-                    destination.execute('PRAGMA writable_schema=RESET')
-                    _fault('before_integrity_check')
-                    if image is not None:
-                        # dbpage changes the pager size at commit; check the prospective image in RAM.
-                        with NativeSQLite(':memory:',**native_options) as checked:
-                            checked.deserialize(image)
-                            _verify(checked,full=platform!='qq')
-                            if collect_changes:
-                                after_rows=collect_changes(checked, dirty_pages)
-                                new_schema=checked.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
-                    else:
-                        _verify(destination,full=platform!='qq')
-                        if collect_changes:
-                            after_rows=collect_changes(destination, dirty_pages)
-                            new_schema=destination.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
-                    if collect_changes and old_schema==new_schema:
-                        from .native_delta import merge_candidates
-                        candidates=merge_candidates(before_rows,after_rows)
-                    _fault('before_commit')
-                    destination.execute('COMMIT')
-                except BaseException:
-                    destination.execute('ROLLBACK')
-                    raise
+        diagnostic.update(stage='metadata_publish',page=None)
         with closing(sqlite3.connect(state)) as metadata, metadata:
             metadata.execute("INSERT OR REPLACE INTO settings VALUES('target_stamp',?)",(json.dumps(_stamp(target)),))
         return {'changed':True,'mode':'baseline' if full else 'incremental','database':str(target),
+                **({'recovery':recovery} if recovery else {}),
                 **({'_row_candidates':candidates,'_previous_target_stamp':previous_target_stamp} if collect_changes else {}),
-                'pages_total':count,'pages_decrypted':len(changed)+1,'pages_written':count if full else len(set(changed)|{1}),
+                'pages_total':count,'pages_decrypted':count+1 if full else len(set(changed)|{1})+1,'pages_written':count if full else len(set(changed)|{1}),
                 'cipher_bytes_written':written,'quick_check_ok':True,
                 'validation':'integrity_check' if full or platform!='qq' else 'quick_check',
                 'timings_seconds':{'capture':round(capture_seconds,3),'update_and_verify':round(time.perf_counter()-phase,3),

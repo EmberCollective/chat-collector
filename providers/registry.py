@@ -30,7 +30,7 @@ class AttachmentProviders:
         base = Path(config['_config_path']).resolve().parent if config.get('_config_path') else Path.cwd()
         configure_providers(settings, base)
         self.entries = dict(settings.get('providers', {}))
-        self.entries.update({platform: {'factory': 'collector.attachment_provider:CollectorAttachmentProvider', 'config': path}
+        self.entries.update({platform: {'factory': 'providers.platforms.attachments:CollectorAttachmentProvider', 'config': path}
                              for platform, path in settings.get('collector_configs', {}).items()})
         self.paths = self.entries
         self.cache = Path(settings.get('cache_dir') or Path(config['storage']['state_file']).parent / 'attachment-cache')

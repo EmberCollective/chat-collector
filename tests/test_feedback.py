@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import datetime as dt
 import json
 from pathlib import Path
 import sqlite3
@@ -9,6 +10,7 @@ import pytest
 from collector.__main__ import InstanceLock
 import processor
 from processor import core as processing
+from processor import storage as task_storage
 from messaging import core, channels, feedback, load_config
 
 
@@ -70,6 +72,26 @@ def request_row(config, request_id):
         return dict(conn.execute('SELECT * FROM feedback_requests WHERE request_id=?', (request_id,)).fetchone())
 
 
+def test_priority_feedback_publishes_and_keeps_stale_clicks_from_overwriting(config):
+    first = enqueue(config, action='set_priority', priority='P4', expected_revision=1)
+    assert enqueue(config, action='set_priority', priority='P4', expected_revision=1) == first
+    assert feedback.process_pending(config)['applied'] == 1
+    assert core.preview(config)['tasks'][0]['priority'] == 'P4'
+    enqueue(config, event='old-card', action='set_priority', priority='P0', expected_revision=1)
+    assert feedback.process_pending(config)['conflict'] == 1
+    assert core.preview(config)['tasks'][0]['priority'] == 'P4'
+    enqueue(config, event='new-card', action='set_priority', priority='P2', expected_revision=2)
+    assert feedback.process_pending(config)['applied'] == 1
+    assert feedback.blocked_task_ids(config) == set()
+    assert core.preview(config)['tasks'][0]['priority'] == 'P2'
+
+
+@pytest.mark.parametrize('kwargs', [dict(action='set_priority'), dict(action='set_priority', priority='P9'), dict(action='complete', priority='P0')])
+def test_invalid_priority_feedback_rejected(config, kwargs):
+    with pytest.raises(ValueError):
+        enqueue(config, **kwargs)
+
+
 def test_callback_enqueue_is_fast_and_independent_of_both_pipeline_locks(config, monkeypatch):
     def forbidden(*args):
         raise AssertionError('Callback must not import task batches')
@@ -104,7 +126,7 @@ def test_completed_feedback_updates_processor_published_task_and_local_state(con
     saved = processor.list_tasks(pconfig)[0]
     assert saved['status'] == 'completed' and saved['revision'] == 2
     assert core.preview(config)['tasks'][0]['status'] == 'completed'
-    assert core.status(config)['local_state']['task-one']['completed'] == 1
+    assert core.status(config)['local_state']['task-one']['completed'] == 0
     assert request_row(config, request['request_id'])['status'] == 'applied'
     assert enqueue(config, expected_revision=1) == request
     assert feedback.process_pending(config)['applied'] == 0
@@ -149,7 +171,7 @@ def test_pending_export_retries_same_api_request(config, monkeypatch):
     monkeypatch.setattr(feedback.time, 'time', lambda: 100)
     request = enqueue(config, expected_revision=1)
     with monkeypatch.context() as patch:
-        patch.setattr(processing, '_export', lambda *args: (_ for _ in ()).throw(OSError('disk unavailable')))
+        patch.setattr(task_storage, '_export', lambda *args: (_ for _ in ()).throw(OSError('disk unavailable')))
         assert feedback.process_pending(config)['retry'] == 1
     assert request_row(config, request['request_id'])['error'] == 'task_status_export_pending'
     feedback.retry_feedback(config, request['request_id'])
@@ -161,7 +183,7 @@ def test_pending_export_retries_same_api_request(config, monkeypatch):
 def test_conflict_is_visible_and_new_explicit_action_supersedes_it(config):
     first = enqueue(config, expected_revision=99)
     assert feedback.process_pending(config)['conflict'] == 1
-    assert feedback.blocked_task_ids(config) == {'task-one'}
+    assert feedback.blocked_task_ids(config) == set()
     second = enqueue(config, event='corrected-click', expected_revision=1)
     result = feedback.process_pending(config)
     assert result['applied'] == 1 and result['conflict'] == 0
@@ -174,6 +196,35 @@ def test_unknown_task_is_terminal_and_alarm_count_persists(config):
     feedback.enqueue_feedback(config, 'cards', 'unknown-click', 'unknown', 'complete', ACTOR)
     assert feedback.process_pending(config)['failed'] == 1
     assert feedback.process_pending(config)['failed'] == 1
+
+
+@pytest.mark.parametrize('terminal', ['conflict', 'failed'])
+def test_terminal_feedback_refreshes_all_targets_without_overwriting_latest_task(config, monkeypatch, terminal):
+    from processor.service import update_task_priority, get_task
+    import automation.wakeup
+    config['targets'].append(dict(config['targets'][0], id='second-target'))
+    sent, wakes = [], []
+    monkeypatch.setattr(channels, 'deliver', lambda target, envelope, *a, **k:
+                        sent.append((target['id'], envelope)) or {'remote_id': target['id']})
+    monkeypatch.setattr(automation.wakeup, 'notify', lambda path, job: wakes.append(job))
+    assert core.run_round(config, now=100)['sent'] == 2
+    pconfig = processor.load_config(config['feedback']['processor_config'])
+    update_task_priority(pconfig, 'task-one', 'P1', request_id='external', actor=ACTOR, expected_revision=1)
+    request = enqueue(config, expected_revision=1)
+    if terminal == 'failed':
+        monkeypatch.setattr(feedback, '_apply', lambda *a: (_ for _ in ()).throw(ValueError('invalid')))
+    assert feedback.process_pending(config)[terminal] == 1
+    assert wakes[-1] == 'messaging'
+    assert feedback.blocked_task_ids(config) == set()
+    assert core.run_round(config, now=101)['sent'] == 2
+    assert {target for target, envelope in sent[-2:]} == {'cards', 'second-target'}
+    assert all(envelope['task']['revision'] == 2 and envelope['task']['priority'] == 'P1'
+               for _, envelope in sent[-2:])
+    assert core.run_round(config, now=102 + config['reminders']['P1'])['sent'] == 2
+    feedback.retry_feedback(config, request['request_id'])
+    assert feedback.process_pending(config)[terminal] == 1
+    latest = get_task(pconfig, 'task-one')
+    assert (latest['revision'], latest['priority'], latest['status']) == (2, 'P1', 'open')
 
 
 def test_snooze_until_is_fixed_when_duplicate_arrives_later(config, monkeypatch):
@@ -215,10 +266,44 @@ def test_new_feedback_arriving_after_delivery_queue_was_built_still_blocks_send(
     assert core.run_round(config, now=100)['sent'] == 0
 
 
-def test_disabled_feedback_preserves_local_completion_behavior(config):
+def test_feedback_arriving_during_delivery_defers_digest_until_formal_status_refresh(config, monkeypatch):
+    now = 1_800_000_000
+    config['daily_digest'].update(enabled=True, timezone='UTC', catch_up_minutes=60,
+                                 time=dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime('%H:%M'))
+    sent = []
+
+    def deliver(target, envelope, settings, **kwargs):
+        sent.append(envelope)
+        if envelope['kind'] == 'upsert' and envelope['task']['status'] == 'open':
+            enqueue(settings, expected_revision=1)
+        return {'remote_id': 'mock'}
+
+    monkeypatch.setattr(channels, 'deliver', deliver)
+    assert core.run_round(config, now=now)['sent'] == 1
+    assert feedback.blocked_task_ids(config) == {'task-one'}
+    assert [item['kind'] for item in sent] == ['upsert']
+    with core._connect(config) as conn:
+        pending = dict(conn.execute("SELECT * FROM deliveries WHERE kind='daily_digest'").fetchone())
+    assert pending['status'] == 'pending' and pending['attempts'] == 0
+    assert pending['next_attempt'] == 0 and pending['transport_started_at'] is None
+    assert [item['task_id'] for item in json.loads(pending['body'])['digest']['items']] == ['task-one']
+
+    assert feedback.process_pending(config)['applied'] == 1
+    core.run_round(config, now=now + 1)
+    digests = [item for item in sent if item['kind'] == 'daily_digest']
+    assert len(digests) == 1 and digests[0]['digest']['items'] == []
+    with core._connect(config) as conn:
+        finished = dict(conn.execute('SELECT * FROM deliveries WHERE id=?', (pending['id'],)).fetchone())
+    assert finished['status'] == 'sent' and finished['attempts'] == 1
+    assert json.loads(finished['body'])['digest']['items'] == []
+
+
+def test_disabling_feedback_queue_keeps_service_as_formal_status_owner(config):
     config['feedback']['enabled'] = False
     result = feedback.request_task_action(config, 'task-one', 'complete')
-    assert result['completed'] == 1
+    assert result['status'] == 'completed'
+    from processor.service import get_task
+    assert get_task(processor.load_config(config['feedback']['processor_config']), 'task-one')['status'] == 'completed'
     assert feedback.process_pending(config) == {'applied': 0, 'retry': 0, 'failed': 0, 'conflict': 0, 'pending': 0}
 
 

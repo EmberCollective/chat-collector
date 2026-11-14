@@ -6,7 +6,6 @@ import re
 SOURCE_KINDS = {'wechat': '微信', 'qq': 'QQ'}
 SOURCE_CAPABILITIES = ('query', 'sql', 'collect', 'replay', 'schedule', 'configure', 'files', 'messages')
 SOURCE_FIELDS = [
-    {'section': 'schedule', 'key': 'interval_seconds', 'label': '扫描间隔：轮后等待秒数', 'type': 'number', 'min': 5, 'max': 86400},
     {'section': 'schedule', 'key': 'refresh_interval_seconds', 'label': '数据库刷新最小间隔（秒，0 为每轮）', 'type': 'number', 'min': 0},
     {'section': 'processing', 'key': 'intensity', 'label': '附件抓取解码强度', 'type': 'select', 'options': {'metadata': '轻量', 'standard': '标准', 'full': '完整'}},
     {'section': 'schedule', 'key': 'initial_lookback_seconds', 'label': '首次回溯时长（秒）', 'type': 'number', 'min': 1, 'max': 2678400},

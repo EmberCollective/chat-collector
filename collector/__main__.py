@@ -1,6 +1,4 @@
 import argparse
-import datetime
-import importlib
 import json
 import logging
 from pathlib import Path
@@ -8,84 +6,10 @@ import sys
 import time
 
 from .config import load_config
-from .store import Store
-from .assets import AttachmentArchive
-from .filters import scan_filtered, load_rulesets
+from application.collection import run_round  # Legacy composition entry point.
 
 
-class InstanceLock:
-    def __init__(self, path, timeout=0):
-        self.path = Path(str(path) + '.lock')
-        self.timeout = timeout
-
-    def __enter__(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.stream = self.path.open('a+b')
-        if self.stream.tell() == 0:
-            self.stream.write(b'0')
-            self.stream.flush()
-        self.stream.seek(0)
-        deadline = time.monotonic() + self.timeout
-        while True:
-            try:
-                if sys.platform == 'win32':
-                    import msvcrt
-                    msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(self.stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    self.stream.close()
-                    raise RuntimeError('Another collector is using this state file') from None
-                time.sleep(min(.1, remaining))
-        return self
-
-    def __exit__(self, *args):
-        self.stream.close()
-
-
-def run_round(config, *, start=None, end=None):
-    source = config['source']
-    adapter = importlib.import_module('collector.adapters.' + config['platform'])
-    storage = config['storage']
-    with InstanceLock(storage['state_file']):
-        store = Store(storage['state_file'], config['platform'], source['account_id'])
-        try:
-            recovered = store.export(storage['output_dir'])
-            rulesets = load_rulesets(config)
-            if not rulesets:
-                return {'platform': config['platform'], 'status': 'no_enabled_rules',
-                        'matched': 0, 'emitted': 0, 'duplicates': 0, 'batches': recovered}
-            window_end = int(time.time()) if end is None else end
-            previous = store.get('window_end')
-            window_start = start if start is not None else (int(previous) if previous else window_end - config['schedule']['initial_lookback_seconds'])
-            if window_start >= window_end:
-                if start is not None:
-                    raise ValueError('start must be before end')
-                return {'platform': config['platform'], 'status': 'no_new_time_window', 'batches': recovered}
-            refresh_interval = config['schedule'].get('refresh_interval_seconds', 0)
-            if source.get('refresh', True) and start is None and end is None and previous:
-                remaining = refresh_interval - (window_end - int(previous))
-                if remaining > 0:
-                    # Never advance the message window using a deliberately stale snapshot.
-                    return {'platform': config['platform'], 'status': 'waiting_for_refresh',
-                            'retry_after_seconds': remaining, 'batches': recovered}
-            refresh_result = adapter.refresh(source) if source.get('refresh', True) else {'mode': 'decrypted_only'}
-            messages = scan_filtered(config, window_start, window_end, rulesets=rulesets)
-            archive = AttachmentArchive(config, config['platform'], source['account_id'])
-            messages = (archive.enrich(message) for message in messages)
-            result = store.ingest(messages, window_start, window_end,
-                                  datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                                  advance=start is None and end is None)
-            result.update(platform=config['platform'], start=window_start, end=window_end,
-                          intensity=archive.intensity, attachments_enabled=archive.enabled,
-                          refresh=refresh_result, batches=recovered + store.export(storage['output_dir']))
-            return result
-        finally:
-            store.close()
+from common.locking import InstanceLock  # Legacy import path.
 
 
 def main(argv=None):

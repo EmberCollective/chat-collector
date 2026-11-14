@@ -6,9 +6,9 @@ def test_catalog_and_unknown_schedule_are_guarded_before_scheduler_mutation(cons
     assert client.get('/api/catalog',headers={'X-Console-Token':'invalid'}).status_code==401
     sources=client.get('/api/catalog').json()['sources']
     assert {s['id'] for s in sources}=={'wechat','qq'}
-    before=dict(app.state.jobs.enabled)
+    assert not hasattr(app.state.jobs, 'enabled')
     assert client.post('/api/modules/missing/schedule',json={'enabled':True}).status_code==400
-    assert app.state.jobs.enabled==before
+    assert client.post('/api/modules/wechat/schedule',json={'enabled':True}).status_code==410
     assert client.post('/api/modules/missing/collect').status_code==400
 
 

@@ -190,6 +190,7 @@ class TaskLookup:
             if filters.get('platforms') is not None and origin['platform'] not in filters['platforms']:
                 raise ValueError('platform_and_reference_filters_conflict')
             filters.update(platforms=[origin.pop('platform')], **origin)
+        from .service import search_tasks
         result = search_tasks(self.config, **filters)
         rows = []
         for task in result['tasks']:

@@ -19,7 +19,7 @@ function renderHistoryRows(){
   for(const job of historyRows){
     const row=el('tr');row.append(el('td',time(job.started_at)),el('td',names[job.module]||job.module||'未注明'),el('td',actions[job.action]||job.action||'未注明'),el('td',originLabels[job.origin]||job.origin||'未注明'),el('td',states[job.status]||job.status||'未注明'));
     const duration=el('td',durationText(job.duration_seconds,job.duration_complete));if(job.status==='running'&&job.started_at)duration.dataset.runningStart=String(job.started_at);row.append(duration);
-    row.append(el('td',job.error||'—','history-error-cell'));const controls=el('td'),group=el('div',undefined,'row');group.append(button('详情',()=>showJob(job.id)));if(job.action==='process')group.append(button('Pi 工作流',()=>selectWorkflow(job.id)));controls.append(group);row.append(controls);$('jobs').append(row);
+    row.append(el('td',job.error||'—','history-error-cell'));const controls=el('td'),group=el('div',undefined,'row');group.append(button('详情',()=>showJob(job.id,job.source)));if(job.action==='process'&&job.source!=='automation')group.append(button('Pi 工作流',()=>selectWorkflow(job.id)));controls.append(group);row.append(controls);$('jobs').append(row);
   }
   if(!historyRows.length){const row=el('tr'),cell=el('td','此范围内没有运行记录。调整筛选条件或等待首次执行。','empty');cell.colSpan=8;row.append(cell);$('jobs').append(row);}
 }
@@ -42,6 +42,7 @@ async function refreshHistory(append=false){
     const result=await api('/jobs?'+params);if(generation!==historyGeneration)return;
     historyQuery=query;historyCursor=result.next_cursor;historyRows=append?[...historyRows,...result.jobs]:result.jobs;historyFacets(result.facets);renderHistoryRows();
     $('history-summary').textContent=`已显示 ${historyRows.length} / ${result.total} 条 · 耗时包含工作进程启动及本轮操作；执行中显示已耗时，缺少终点不推算总耗时 · 浏览器本地时间`;
+    if(result.warnings?.length)$('history-summary').textContent+=' · '+result.warnings.join('；');
     $('history-more').hidden=!result.has_more;
   }finally{if(generation===historyGeneration)historyLoading=false;}
 }

@@ -1,6 +1,6 @@
 # 待办状态反馈接口
 
-消息层接收用户明确操作后，通过处理层公开函数更新待办，不能直接修改处理层 SQLite。它只改变状态并发布原有 `upsert` 契约；来源、附件、行动步骤和参与人员保持不变。
+消息层接收用户明确操作后，通过处理层公开函数更新待办状态或优先级，不能直接修改处理层 SQLite。两种操作均发布原有 `upsert` 契约；来源、附件、行动步骤和参与人员保持不变。
 
 ```python
 from processor import load_config, update_task_status
@@ -43,6 +43,10 @@ result = update_task_status(
 
 ## 人工状态与后续 AI 更新
 
+优先级使用 `processor.update_task_priority(config, task_id, priority, request_id=..., actor=..., expected_revision=...)`，只接受 `P0`–`P4`。身份、幂等、版本检查、实例锁、失败重试与状态接口相同，共用 `task_status_requests` 审计表和 outbox。返回字段使用 `priority`、`previous_priority`，其余字段与状态接口一致。
+
+人工优先级保存为 `priority_control`，包含级别、操作者、操作编号和时间，`priority_reason` 标记为用户手动设置。模型后续更新同一待办时保留此级别及说明；再次人工调整可覆盖。它不修改完成状态。消息层消费新修订后淘汰旧修订的未发投递，更新已有卡片，按新级别安排后续节点，不额外补发过去的提醒。人工控制按 `task_id` 保存，不宣称可以自动识别所有语义相同但被模型误建为不同编号的事项。
+
 人工完成或取消写入任务的 `status_control`。模型后续复用同 `task_id` 时可以补充内容、来源和材料，但不能自动重开人工关闭的事项；重新分组也不把这类历史记录自动替代。只有用户通过该接口明确设为 `open` 才释放人工关闭状态。
 
 查重公开接口与 Pi `find_related_tasks` 支持 `statuses=["completed"]`，默认查询也包含已完成事项，避免模型因看不到历史而重复创建。Pi 的 `submit_tasks` 仍只允许 `open` / `cancelled`，模型不能代用户确认完成。
@@ -63,7 +67,7 @@ queued = enqueue_feedback(
 summary = process_pending(config)
 ```
 
-`action` 支持 `complete`、`reopen`、`cancel`、`snooze`。入队只执行超时上限为 1 秒的 SQLite 短事务，不等待处理层或消息层实例锁、不扫描批次。事件编号和目标共同派生处理层请求 ID；重复内容返回原来的入队确认，不再次应用动作，同事件不同内容拒绝。授权及平台签名校验属于调用方职责。
+`action` 支持 `complete`、`reopen`、`cancel`、`snooze`、`set_priority`。`set_priority` 必须额外提供 `priority="P0"`–`"P4"`；其他动作不接受此参数。入队只执行超时上限为 1 秒的 SQLite 短事务，不等待处理层或消息层实例锁、不扫描批次。事件编号和目标共同派生处理层请求 ID；重复内容返回原来的入队确认，不再次应用动作，同事件不同内容拒绝。授权及平台签名校验属于调用方职责。
 
 配置位于消息层配置的 `[feedback]`：
 

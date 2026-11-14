@@ -77,7 +77,7 @@ def test_failure_rolls_back_both_plaintext_and_page_fingerprints(fixture,monkeyp
         if stage=='before_commit':raise RuntimeError('injected disk failure')
     with monkeypatch.context() as patch:
         patch.setattr(incremental,'_fault',fail)
-        with pytest.raises(RuntimeError,match='injected'):refresh()
+        with pytest.raises(RuntimeError,match='category=io stage=commit page=None rollback=complete'):refresh()
     assert target.read_bytes()==before
     result=refresh();assert result['pages_written']>0
     assert rows(target)==source.execute('SELECT id,text FROM messages ORDER BY id').fetchall()
@@ -299,3 +299,181 @@ def test_capture_still_retries_three_times_when_main_pages_change(tmp_path,monke
     with pytest.raises(RuntimeError,match='snapshot_source_changed_during_capture'):
         incremental.capture(source,tmp_path/'private/cipher.db')
     assert calls==3
+
+
+def page_state(target):
+    with sqlite3.connect(target.parent/'.incremental'/target.name/'page-state.sqlite') as db:
+        return db.execute('SELECT pgno,hash FROM pages ORDER BY pgno').fetchall()
+
+
+def test_multi_page_schema_and_index_growth_publishes_header_last(fixture,monkeypatch):
+    source,target,refresh=fixture
+    source.execute('BEGIN')
+    for number in range(94):
+        source.execute(f'CREATE TABLE conversation_{number}(id INTEGER PRIMARY KEY,body TEXT,created INTEGER,extra BLOB)')
+        source.execute(f'CREATE INDEX conversation_time_{number} ON conversation_{number}(created,body)')
+        source.execute(f'INSERT INTO conversation_{number} VALUES(1,?,7,NULL)',('old-'+str(number),))
+    source.execute('COMMIT')
+    first=refresh()
+    with NativeSQLite(target) as db:
+        assert len(db.execute("SELECT pageno FROM dbstat WHERE name='sqlite_schema'"))>1
+        assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='table'")==[(95,)]
+    source.execute('BEGIN')
+    source.execute('CREATE TABLE new_conversation(id INTEGER PRIMARY KEY,body TEXT,created INTEGER)')
+    source.execute('CREATE INDEX new_time ON new_conversation(created,body)')
+    source.execute("INSERT INTO new_conversation VALUES(9,'new conversation',42)")
+    source.executemany('INSERT INTO messages VALUES(?,?)',[(i,'growth'*800) for i in range(9000,9030)])
+    source.execute('COMMIT')
+    writes=[]
+    original=NativeSQLite.execute
+    def execute(db,sql,parameters=()):
+        if sql=='INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,?)':writes.append(parameters[0])
+        return original(db,sql,parameters)
+    monkeypatch.setattr(NativeSQLite,'execute',execute)
+    result=refresh()
+    assert result['mode']=='incremental' and 'recovery' not in result
+    assert result['pages_total']>first['pages_total']
+    assert len(writes)>2 and writes[-1]==1 and 1 not in writes[:-1]
+    assert rows(target)==source.execute('SELECT id,text FROM messages ORDER BY id').fetchall()
+    with sqlite3.connect(target) as db:
+        assert db.execute('SELECT * FROM new_conversation').fetchall()==[(9,'new conversation',42)]
+        assert db.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name').fetchall()==source.execute(
+            'SELECT type,name,sql FROM sqlite_master ORDER BY type,name').fetchall()
+    assert refresh()['pages_written']==0
+
+
+def test_only_wechat_recovers_once_after_rollback_and_source_validation(fixture,monkeypatch):
+    source,target,refresh=fixture
+    refresh()
+    before=target.read_bytes();fingerprints=page_state(target)
+    source.execute("UPDATE messages SET text='recovery-test' WHERE id=700")
+    original_execute=NativeSQLite.execute
+    original_verify=incremental._verify
+    events=[]
+    def execute(db,sql,parameters=()):
+        if sql=='INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,?)':
+            result=original_execute(db,sql,parameters)
+            events.append('write')
+            raise RuntimeError('native_sqlite: database disk image is malformed')
+        if sql=='ROLLBACK':events.append('rollback')
+        return original_execute(db,sql,parameters)
+    def verify(db,**kwargs):
+        if original_execute(db,'PRAGMA query_only')==[(1,)]:
+            assert target.read_bytes()==before and page_state(target)==fingerprints
+            assert events==['write','rollback']
+            events.append('source_validation')
+        else:events.append('baseline_validation')
+        return original_verify(db,**kwargs)
+    monkeypatch.setattr(NativeSQLite,'execute',execute)
+    monkeypatch.setattr(incremental,'_verify',verify)
+    if source.execute('PRAGMA cipher_hmac_algorithm').fetchone()[0]=='HMAC_SHA1':
+        with pytest.raises(RuntimeError,match=r'category=malformed stage=write_page page=\d+ rollback=complete'):refresh()
+        assert events==['write','rollback']
+        assert target.read_bytes()==before and page_state(target)==fingerprints
+    else:
+        result=refresh()
+        assert result['mode']=='baseline' and result['pages_written']==result['pages_total']
+        assert result['recovery']['stage']=='write_page' and result['recovery']['page']>1
+        assert result['recovery']['rollback']=='complete' and result['recovery']['attempts']==1
+        assert result['recovery']['reason']=='malformed'
+        assert result['recovery']['source_validation']=='integrity_check'
+        assert events==['write','rollback','source_validation','baseline_validation']
+        assert rows(target)==source.execute('SELECT id,text FROM messages ORDER BY id').fetchall()
+        assert refresh()['pages_written']==0
+
+
+@pytest.mark.parametrize('failure',[
+    'native_sqlite: database or disk is full',
+    'native_sqlite: disk I/O error',
+    'native_sqlite: attempt to write a readonly database',
+    'key_mismatch',
+    'snapshot_source_changed_during_capture',
+])
+def test_operational_failures_never_start_rebuild(fixture,monkeypatch,failure):
+    source,target,refresh=fixture
+    refresh();before=target.read_bytes();fingerprints=page_state(target)
+    source.execute("UPDATE messages SET text='operational-failure' WHERE id=700")
+    original=NativeSQLite.execute
+    def execute(db,sql,parameters=()):
+        result=original(db,sql,parameters)
+        if sql=='INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,?)':raise RuntimeError(failure)
+        return result
+    monkeypatch.setattr(NativeSQLite,'execute',execute)
+    monkeypatch.setattr(incremental,'_verify',lambda *args,**kwargs: pytest.fail('unexpected rebuild'))
+    with pytest.raises(RuntimeError,match='stage=write_page .*rollback=complete'):refresh()
+    assert target.read_bytes()==before and page_state(target)==fingerprints
+    assert not (target.parent/'.incremental'/target.name/'baseline-incomplete').exists()
+
+
+@pytest.mark.parametrize('failure_stage',['source_validation','baseline_verify','baseline_publish'])
+def test_recovery_failure_preserves_old_database_and_stops(fixture,monkeypatch,failure_stage):
+    source,target,refresh=fixture
+    if source.execute('PRAGMA cipher_hmac_algorithm').fetchone()[0]=='HMAC_SHA1':pytest.skip('WeChat recovery only')
+    refresh();before=target.read_bytes();fingerprints=page_state(target)
+    source.execute("UPDATE messages SET text='recovery-failure' WHERE id=700")
+    original_execute=NativeSQLite.execute
+    original_verify=incremental._verify
+    writes=[];verifies=[]
+    def execute(db,sql,parameters=()):
+        result=original_execute(db,sql,parameters)
+        if sql=='INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,?)':
+            writes.append(parameters[0])
+            raise RuntimeError('native_sqlite: database disk image is malformed')
+        return result
+    def verify(db,**kwargs):
+        stage='source_validation' if original_execute(db,'PRAGMA query_only')==[(1,)] else 'baseline_verify'
+        verifies.append(stage)
+        if stage==failure_stage:raise RuntimeError('incremental_snapshot_integrity_failed: synthetic failure')
+        return original_verify(db,**kwargs)
+    def fault(stage):
+        if stage=='before_baseline_publish' and failure_stage=='baseline_publish':raise PermissionError('synthetic failure')
+    monkeypatch.setattr(NativeSQLite,'execute',execute)
+    monkeypatch.setattr(incremental,'_verify',verify)
+    monkeypatch.setattr(incremental,'_fault',fault)
+    with pytest.raises(RuntimeError,match=f'stage={failure_stage} .*rollback=complete .*recovery_attempted=True'):refresh()
+    assert len(writes)==1 and len(verifies)<=2
+    assert target.read_bytes()==before and page_state(target)==fingerprints
+    private=target.parent/'.incremental'/target.name
+    assert list(private.glob('baseline-*.db'))==[]
+
+
+def test_rollback_failure_never_attempts_recovery(fixture,monkeypatch):
+    source,target,refresh=fixture
+    refresh();before=target.read_bytes();fingerprints=page_state(target)
+    source.execute("UPDATE messages SET text='rollback-failure' WHERE id=700")
+    original=NativeSQLite.execute
+    def execute(db,sql,parameters=()):
+        if sql=='ROLLBACK':raise RuntimeError('native_sqlite: disk I/O error')
+        result=original(db,sql,parameters)
+        if sql=='INSERT INTO sqlite_dbpage(pgno,data) VALUES(?,?)':
+            raise RuntimeError('native_sqlite: database disk image is malformed')
+        return result
+    monkeypatch.setattr(NativeSQLite,'execute',execute)
+    monkeypatch.setattr(incremental,'_verify',lambda *args,**kwargs: pytest.fail('unexpected recovery'))
+    with pytest.raises(RuntimeError,match='category=io stage=write_page .*rollback=failed'):refresh()
+    assert target.read_bytes()==before and page_state(target)==fingerprints
+
+
+@pytest.mark.parametrize('failure,category',[
+    (RuntimeError('snapshot_source_changed_during_capture'),'capture'),
+    (PermissionError('private source detail'),'permission'),
+])
+def test_capture_errors_include_safe_database_context(fixture,monkeypatch,failure,category):
+    source,target,refresh=fixture
+    def capture(*args,**kwargs):raise failure
+    monkeypatch.setattr(incremental,'capture',capture)
+    with pytest.raises(RuntimeError) as caught:refresh()
+    assert str(caught.value)==f'snapshot_refresh_failed database=messages.db category={category} stage=capture page=None rollback=not_started'
+    assert 'private source detail' not in str(caught.value)
+
+
+def test_wrong_wechat_key_keeps_old_database_without_rebuild(fixture,monkeypatch):
+    source,target,refresh=fixture
+    if source.execute('PRAGMA cipher_hmac_algorithm').fetchone()[0]=='HMAC_SHA1':pytest.skip('WeChat key validation only')
+    refresh();before=target.read_bytes();fingerprints=page_state(target)
+    monkeypatch.setattr(incremental,'_verify',lambda *args,**kwargs: pytest.fail('unexpected rebuild'))
+    original=target.parent.parent/'source/source.db'
+    with pytest.raises(ValueError,match='database=messages.db category=key_mismatch stage=key'):
+        incremental.refresh_database(original,target,platform='wechat',account='test',key='b2'*32)
+    assert target.read_bytes()==before and page_state(target)==fingerprints
+    assert not (target.parent/'.incremental'/target.name/'baseline-incomplete').exists()

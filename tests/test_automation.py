@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -11,7 +12,15 @@ from automation import core
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(tmp_path, monkeypatch):
+    monkeypatch.setenv('TEST_AUTOMATION_APP', 'cli_automation')
+    (tmp_path / 'messaging.toml').write_text('''enabled=true
+[[targets]]
+id="custom-team"
+kind="feishu_app"
+enabled=true
+app_id_env="TEST_AUTOMATION_APP"
+''', encoding='utf-8')
     path = tmp_path / 'automation.toml'
     path.write_text('''enabled = true
 [storage]
@@ -99,6 +108,87 @@ def test_one_job_failure_does_not_block_another(config):
     assert service.execute('wechat')['state'] == 'retry'
     assert service.execute('qq')['state'] == 'idle'
     assert json.loads(job(config, 'qq')['result']) == {'emitted': 2}
+
+
+def test_real_sqlite_contention_keeps_safe_diagnostics_after_recovery(config, tmp_path):
+    path = tmp_path / 'PRIVATE_DATABASE_NAME.db'
+    owner = sqlite3.connect(path)
+    owner.execute('CREATE TABLE private_messages(body TEXT)')
+    owner.execute('BEGIN IMMEDIATE')
+    clock = Clock()
+    def write():
+        connection = sqlite3.connect(path, timeout=0)
+        try:
+            connection.execute("INSERT INTO private_messages VALUES('PRIVATE_CHAT_CONTENT')")
+            connection.commit()
+        finally:
+            connection.close()
+        return {'sent': 0}
+    service = SchedulerService(config, callbacks={'wechat': write}, clock=clock)
+    try:
+        result = service.execute('wechat')
+        assert result['state'] == 'retry'
+        assert result['error'] == 'sqlite_busy'
+        recorded = status(config)['service']['last_failure:wechat']
+        assert recorded['at'] == 100
+        detail = recorded['failures'][0]
+        assert detail['sqlite_errorcode'] == sqlite3.SQLITE_BUSY
+        assert detail['frames'][-1]['file'] == 'tests/test_automation.py'
+        assert detail['frames'][-1]['function'] == 'write'
+        assert 'PRIVATE_' not in json.dumps(status(config))
+        owner.rollback()
+        clock.value = 110
+        assert service.execute('wechat')['state'] == 'idle'
+        assert job(config)['error'] is None
+        assert status(config)['service']['last_failure:wechat'] == recorded
+    finally:
+        owner.close()
+
+
+def test_diagnostics_explain_wrapped_failure_without_sql_or_exception_text(config):
+    def fail():
+        try:
+            with sqlite3.connect(':memory:') as connection:
+                connection.execute('SELECT PRIVATE_SQL_TOKEN FROM missing_table')
+        except sqlite3.Error as exc:
+            raise RuntimeError('PRIVATE_CHAT_AND_API_KEY') from exc
+    result = SchedulerService(config, callbacks={'wechat': fail}, clock=Clock()).execute('wechat')
+    assert result['error'] == 'RuntimeError'
+    details = status(config)['service']['last_failure:wechat']
+    assert [item['code'] for item in details['failures']] == ['RuntimeError', 'sqlite_error']
+    assert 'PRIVATE_' not in json.dumps(status(config))
+
+
+def test_status_reads_last_commit_during_another_worker_write(config):
+    with closing(core._connect(config, write=True)) as writer:
+        assert writer.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
+        writer.execute('BEGIN EXCLUSIVE')
+        writer.execute("UPDATE jobs SET error='uncommitted' WHERE name='wechat'")
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(status, config)
+            try:
+                snapshot = future.result(timeout=2)
+                assert next(row for row in snapshot['jobs'] if row['name'] == 'wechat')['error'] is None
+            finally:
+                writer.rollback()
+
+
+def test_legacy_automation_migration_preserves_state_and_serializes_initializers(config):
+    path = config['storage']['state_file']
+    with sqlite3.connect(path) as conn:
+        conn.executescript(core.SCHEMA)
+        conn.execute(f'PRAGMA application_id={core.APPLICATION_ID}')
+        conn.execute("INSERT INTO jobs(name,state,attempts) VALUES('wechat','paused',3)")
+        conn.execute("INSERT INTO settings VALUES('retained','true')")
+    def initialize(_):
+        with closing(core._connect(config, write=True)) as conn:
+            return tuple(conn.execute("SELECT state,attempts FROM jobs WHERE name='wechat'").fetchone())
+    with ThreadPoolExecutor(8) as pool:
+        assert list(pool.map(initialize, range(16))) == [('paused', 3)] * 16
+    assert status(config)['service']['retained'] is True
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == core.SCHEMA_VERSION
+        assert conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
 
 
 def test_concurrent_requests_never_execute_same_job_twice(config):
@@ -207,6 +297,27 @@ def test_disabled_check_and_once_never_call_callbacks_or_network(config):
     assert result['state'] == 'disabled'
 
 
+def test_check_rejects_multiple_listener_apps_before_start(config, monkeypatch):
+    import messaging
+    from messaging import feishu
+    for entry in config['jobs'].values():
+        entry['enabled'] = False
+    config['listener']['enabled'] = True
+    monkeypatch.setenv('APP_ONE', 'cli_one')
+    monkeypatch.setenv('APP_TWO', 'cli_two')
+    targets = [{'id': 'team-one', 'kind': 'feishu_app', 'enabled': True, 'app_id_env': 'APP_ONE'},
+               {'id': 'team-two', 'kind': 'feishu_app', 'enabled': True, 'app_id_env': 'APP_TWO'}]
+    monkeypatch.setattr(messaging, 'load_config', lambda path: {'enabled': True, 'targets': targets})
+    monkeypatch.setattr(feishu, 'check', lambda *args: {'configured': True})
+    result = check(config)
+    assert not result['ready']
+    assert result['jobs']['listener']['reason'] == 'feishu_listener_multiple_apps_not_supported'
+    targets.pop()
+    assert check(config)['ready']
+    monkeypatch.setattr(feishu, 'check', lambda *args: {'configured': False})
+    assert not check(config)['ready']
+
+
 def test_scheduler_recovery_counts_interrupted_execution_and_prevents_duplicate_instances(config):
     clock = Clock()
     with core._connect(config, write=True) as conn:
@@ -280,7 +391,8 @@ def test_listener_restart_budget_is_not_reset_by_monitor_poll(config, monkeypatc
     assert status(config)['listener']['attempts'] == 3
 
 
-def test_listener_recovers_unrecorded_child_instead_of_launching_twice(config, monkeypatch):
+@pytest.mark.parametrize('legacy', [True, False])
+def test_listener_recovers_unrecorded_child_instead_of_launching_twice(config, monkeypatch, legacy):
     from automation.listener import ListenerSupervisor
     import automation.listener as module
     service = SchedulerService(config, clock=Clock())
@@ -288,12 +400,92 @@ def test_listener_recovers_unrecorded_child_instead_of_launching_twice(config, m
         conn.execute("UPDATE listener SET state='starting',attempts=1 WHERE id=1")
     supervisor = ListenerSupervisor(service)
     command = [module.sys.executable, '-m', 'messaging.feishu', 'listen', '--config', config['listener']['config'], '--stop-file', str(supervisor.stop_file)]
+    if not legacy:
+        command += ['--target', 'custom-team']
     process = type('Process', (), {'pid': 123, 'info': {'cmdline': command, 'create_time': 1.0}})()
     monkeypatch.setattr(module.psutil, 'process_iter', lambda *args: [process])
     monkeypatch.setattr(module.subprocess, 'Popen', lambda *args, **kwargs: pytest.fail('Must adopt existing child'))
     supervisor.poll()
     assert status(config)['listener']['state'] == 'running'
     assert status(config)['listener']['pid'] == 123
+    assert json.loads(status(config)['listener']['command']) == command
+
+
+def test_listener_reports_multiple_apps_before_spawning(config, monkeypatch):
+    from automation.listener import ListenerSupervisor
+    import automation.listener as module
+    message_config = Path(config['listener']['config'])
+    message_config.write_text('''enabled=true
+[[targets]]
+id="custom-team"
+kind="feishu_app"
+enabled=true
+app_id_env="LISTENER_APP_ONE"
+[[targets]]
+id="another-app"
+kind="feishu_app"
+enabled=true
+app_id_env="LISTENER_APP_TWO"
+''', encoding='utf-8')
+    monkeypatch.setenv('LISTENER_APP_ONE', 'cli_one')
+    monkeypatch.setenv('LISTENER_APP_TWO', 'cli_two')
+    service = SchedulerService(config, clock=Clock())
+    with core._connect(config, write=True):
+        pass
+    monkeypatch.setattr(module.psutil, 'process_iter', lambda *args: [])
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda *a, **kw: pytest.fail('Must reject ambiguous apps'))
+    ListenerSupervisor(service).poll()
+    listener = status(config)['listener']
+    assert listener['state'] == 'paused'
+    assert listener['error'] == 'feishu_listener_multiple_apps_not_supported'
+
+
+def test_listener_spawns_custom_target_explicitly(config, monkeypatch):
+    from types import SimpleNamespace
+    from automation.listener import ListenerSupervisor
+    import automation.listener as module
+    service = SchedulerService(config, clock=Clock())
+    with core._connect(config, write=True):
+        pass
+    commands = []
+    monkeypatch.setattr(module.psutil, 'process_iter', lambda *args: [])
+    monkeypatch.setattr(module.psutil, 'Process', lambda pid: SimpleNamespace(create_time=lambda: 1.0))
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda command, **kw:
+                        commands.append(command) or SimpleNamespace(pid=123))
+    ListenerSupervisor(service).poll()
+    assert commands[0][-2:] == ['--target', 'custom-team']
+    assert status(config)['listener']['state'] == 'running'
+
+
+def test_running_listener_reports_new_app_configuration_without_killing_or_duplicating(config, monkeypatch):
+    from automation.listener import ListenerSupervisor
+    from messaging.management import read_settings, save_settings
+    import automation.listener as module
+    service = SchedulerService(config, clock=Clock())
+    with core._connect(config, write=True) as conn:
+        conn.execute("UPDATE listener SET state='running',pid=123,attempts=1 WHERE id=1")
+    supervisor, alerts = ListenerSupervisor(service), []
+    monkeypatch.setattr(supervisor, '_owned', lambda row: object())
+    monkeypatch.setattr(service, '_alert', lambda *args: alerts.append(args))
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must retain existing connection'))
+    supervisor.poll()
+    path = config['listener']['config']
+    monkeypatch.setenv('OTHER_LISTENER_APP', 'cli_other')
+    current = read_settings(path)
+    save_settings(path, {'targets': [{'id': 'other-app', 'kind': 'feishu_app', 'enabled': True,
+        'app_id_env': 'OTHER_LISTENER_APP', 'app_secret_env': 'OTHER_LISTENER_SECRET',
+        'recipient_id': 'oc_other', 'allowed_operator_ids': ['ou_tester']}]}, current['version'])
+    supervisor.poll()
+    supervisor.poll()
+    listener = status(config)['listener']
+    assert (listener['state'], listener['pid'], listener['attempts']) == ('running', 123, 1)
+    assert listener['error'] == 'feishu_listener_multiple_apps_not_supported'
+    assert alerts == [('listener', 'failure', 'feishu_listener_multiple_apps_not_supported')]
+    assert not supervisor.stop_file.exists()
+    save_settings(path, {'targets': [{'id': 'other-app', 'enabled': False}]}, read_settings(path)['version'])
+    supervisor.poll()
+    assert status(config)['listener']['error'] is None
+    assert alerts[-1] == ('listener', 'recovery', 'listener_configuration_restored')
 
 
 def test_listener_stop_timeout_keeps_process_for_graceful_shutdown(config, monkeypatch):

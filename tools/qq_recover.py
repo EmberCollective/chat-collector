@@ -6,7 +6,6 @@ credentials are accepted only after official SQLCipher authenticates a snapshot.
 from pathlib import Path
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "runtime-deps"))
 sys.path.insert(0, str(ROOT))
 from collector.config import load_config
+from collector.adapters.qq import _capture_snapshot
 CONFIG = load_config(ROOT / "config/qq.toml")
 SOURCE = Path(CONFIG["source"]["encrypted_dir"]) / "nt_msg.db"
 ACCOUNT = CONFIG["source"]["account_id"]
@@ -27,9 +27,9 @@ def source_stamp():
     for path in (SOURCE, Path(str(SOURCE) + "-wal")):
         try:
             stat = path.stat()
-            result.append((stat.st_size, stat.st_mtime_ns))
+            result.append([str(path), stat.st_size, stat.st_mtime_ns])
         except FileNotFoundError:
-            result.append(None)
+            result.append([str(path), None, None])
     return result
 
 
@@ -68,24 +68,11 @@ def main():
     print("找到候选凭据；正在通过 SQLCipher 验证数据库副本。")
     with tempfile.TemporaryDirectory(prefix="verify-", dir=PRIVATE) as temp:
         snapshot = Path(temp) / "encrypted.db"
-        snapshot_wal = Path(str(snapshot) + "-wal")
-        for attempt in range(3):
-            before = source_stamp()
-            with SOURCE.open("rb") as src, snapshot.open("wb") as dst:
-                src.seek(1024)
-                shutil.copyfileobj(src, dst, 8 * 1024 * 1024)
-            snapshot_wal.unlink(missing_ok=True)
-            try:
-                wal = Path(str(SOURCE) + "-wal")
-                if wal.exists():
-                    shutil.copyfile(wal, snapshot_wal)
-            except FileNotFoundError:
-                continue
-            if before == source_stamp():
-                break
-        else:
-            print("QQ 数据库持续变化，未完成稳定副本验证。请稍后再运行一次。")
-            return 1
+        try:
+            _capture_snapshot(SOURCE, snapshot, source_stamp)
+        except RuntimeError:
+            print("QQ 正在重写或切换数据库，暂未取得一致副本；不是权限或登录失败。请保持登录，稍后继续安装。")
+            return 2
         for key in sorted(candidates):
             if len(key) != 96 or any(c not in "0123456789abcdef" for c in key):
                 continue

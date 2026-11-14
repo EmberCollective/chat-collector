@@ -1,8 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let token = '', currentConfig = null, pendingPreview = null, previewShown = null, imageUrl = null, refreshing = false;
-const names = Object.assign(Object.create(null),{processor:'待办处理'}), actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放',processor_preview:'上下文预览',process:'提取待办'};
-const states = {running:'执行中',succeeded:'已完成',failed:'失败',interrupted:'结果未确认'};
+const names = Object.assign(Object.create(null),{processor:'待办处理',messaging:'消息投递',feedback:'状态回写'}), actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放',processor_preview:'上下文预览',process:'提取待办',deliver:'发送与提醒',feedback:'同步状态'};
+const states = {running:'执行中',retry:'等待重试',succeeded:'已完成',warning:'完成但有异常',failed:'失败',interrupted:'结果未确认'};
 const intensities = {metadata:'轻量',standard:'标准',full:'完整'};
 const assetStates = {deferred:'按强度暂缓保存',archived:'已归档',missing:'本地未找到',thumbnail_only:'仅缩略图',unverified:'内容待核验',encrypted_only:'仅保留密文',unsupported:'格式未支持'};
 let sourceCatalog=[], lastStatus=null, sourceSignature='', sourceGeneration=0;
@@ -41,7 +41,7 @@ function metric(title,value,small=false){const node=el('div',undefined,'metric')
 function sourceControls(id,state,compact=false){
   const source=sourceInfo(id),controls=el('div',undefined,'actions'),running=!!state.running_job;
   if(source.capabilities.collect){const run=button('执行一轮',async()=>{if(!sourceInfo(id)?.capabilities.collect)throw Error('此来源不支持采集');const job=await api(sourcePath(id)+'/collect','POST');notice(`${source.name}采集已启动：${job.id.slice(0,8)}`);await refresh();},false);run.disabled=running;controls.append(run);}
-  if(source.capabilities.schedule)controls.append(button(state.scheduler_enabled?'暂停定时':'恢复定时',async()=>{if(!sourceInfo(id)?.capabilities.schedule)throw Error('此来源不支持定时');await api(sourcePath(id)+'/schedule','POST',{enabled:!state.scheduler_enabled});notice('控制台定时设置已更新；正在执行的任务会继续完成');await refresh();}));
+  if(source.capabilities.schedule){const link=el('a','自动化设置','button secondary');link.href='#automation';controls.append(link);}
   if(!compact)controls.append(button('查看来源',async()=>{$('module').value=id;await switchModule();location.hash='sources';}));
   return controls;
 }
@@ -60,9 +60,9 @@ function renderStatus(data){
     const id=source.id,state=data.modules[id]||{},signature=JSON.stringify({...state,next_run_in:undefined});let card=$('source-card-'+id);
     if(!card){card=el('article',undefined,'module-card');card.id='source-card-'+id;$('modules').append(card);}
     if(card.dataset.signature===signature)continue;card.dataset.signature=signature;card.replaceChildren();
-    const top=el('div',undefined,'module-top');top.append(el('h2',source.name),el('span',source.readonly?'只读来源':state.running_job?'执行中':state.scheduler_enabled?'定时采集中':'定时已暂停','pill'+(state.scheduler_enabled?'':' warn')));card.append(top);
+    const top=el('div',undefined,'module-top');top.append(el('h2',source.name),el('span',source.readonly?'只读来源':state.running_job?'执行中':'手动调试就绪','pill'));card.append(top);
     if(!source.readonly){const metrics=el('div',undefined,'metrics');metrics.append(metric('已采集消息',state.messages??'—'),metric('待发布事件',state.pending_events??'—'),metric('成功时间终点',time(state.checkpoint),true),metric('快照更新时间',time(state.snapshot_updated_at),true));card.append(metrics);}
-    card.append(el('p',source.readonly?source.description:`轮后等待 ${state.interval_seconds??'—'} 秒 · ${intensities[state.intensity]||state.intensity||'—'}${state.attachments_enabled?'':' · 附件保存关闭'}`,'muted'),sourceControls(id,state));
+    card.append(el('p',source.readonly?source.description:`${intensities[state.intensity]||state.intensity||'—'} · ${state.refresh_interval_seconds?`数据库至少间隔 ${state.refresh_interval_seconds} 秒刷新`:'每轮刷新数据库'}${state.attachments_enabled?'':' · 附件保存关闭'} · 计划见自动化`,'muted'),sourceControls(id,state));
     if(state.state_error||state.scheduler_error)card.append(el('p',state.state_error||state.scheduler_error,'pill error'));
   }
   if(!sourceCatalog.length)$('modules').replaceChildren(el('p','尚未配置控制台来源。可先查看待办处理或在本机配置中接入来源。','empty'));
@@ -122,7 +122,12 @@ async function saveConfig(){
   const draft=sourceDrafts.get(id);if(draft)draft.config=config;
   notice(`${names[id]||id}配置已保存并备份；保存期间的新编辑保留在表单中。`);await refresh();
 }
-async function showJob(id){const job=await api('/jobs/'+encodeURIComponent(id));$('job-detail').textContent=JSON.stringify(job,null,2);$('detail-dialog').showModal();}
+async function showJob(id,source){
+  const job=await api(source==='automation'?'/activity/automation/'+encodeURIComponent(id):'/activity/console/'+encodeURIComponent(id)),box=$('job-detail');box.replaceChildren();
+  box.append(el('h3',`${names[job.module]||job.module} · ${actions[job.action]||job.action}`),el('p',`${originLabels[job.origin]||job.origin||'未注明'} · ${states[job.status]||job.status} · ${durationText(job.duration_seconds,!!job.finished_at)}`));
+  for(const attempt of job.attempts||[]){const section=el('section',undefined,'module-card');section.append(el('h4',`第 ${attempt.number} 次 · ${states[attempt.status]||attempt.status}`),el('p',`${time(attempt.started_at)} → ${attempt.finished_at?time(attempt.finished_at):'尚无结束时间'}`,'muted'));if(attempt.error)section.append(el('p',attempt.error,'error'));if(attempt.result)section.append(el('pre',JSON.stringify(attempt.result,null,2)));if(attempt.details){const detail=el('details');detail.append(el('summary','错误位置'),el('pre',JSON.stringify(attempt.details,null,2)));section.append(detail);}box.append(section);}
+  if(job.log_tail)box.append(el('h4','运行日志'),el('pre',job.log_tail));const raw=el('details');raw.append(el('summary','完整记录'),el('pre',JSON.stringify(job,null,2)));box.append(raw);if(!$('detail-dialog').open)$('detail-dialog').showModal();
+}
 function identitySummary(m){
   const identity=m.identity||{},account=identity.account||{},chat=identity.conversation||{},person=(identity.people||[]).find(p=>p.id===m.sender_id)||{};
   const sender=m.sender||person.label||person.display_name||'名称未获取';

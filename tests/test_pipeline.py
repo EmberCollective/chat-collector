@@ -69,6 +69,61 @@ def test_legacy_state_migrates_without_rewriting_old_events(tmp_path):
         store.close()
 
 
+def test_continuity_digest_upgrade_does_not_republish_unchanged_events(tmp_path):
+    from common.codec import digest
+    record = message()
+    record['source']['selection_context'] = {'previous_message_key': 'before', 'previous_known': True}
+    path = tmp_path/'legacy.db'
+    store = Store(path, 'wechat', 'account')
+    try:
+        store.ingest([record], 0, 200, 'now')
+        old = store.db.execute('SELECT body FROM outbox').fetchone()[0]
+        # The former version excluded all source facts from its digest.
+        with store.db:
+            store.db.execute('UPDATE seen SET payload_hash=?',
+                             (digest({k: v for k, v in record.items() if k != 'source'}),))
+        assert store.ingest([record], 0, 200, 'later')['emitted'] == 0
+        assert store.db.execute('SELECT body FROM outbox').fetchone()[0] == old
+        record['source']['database'] = 'relocated.db'
+        assert store.ingest([record], 0, 200, 'later')['emitted'] == 0
+        record['source']['selection_context']['previous_message_key'] = 'late-unselected-row'
+        assert store.ingest([record], 0, 200, 'later')['emitted'] == 1
+    finally:
+        store.close()
+
+
+def test_large_legacy_continuity_upgrade_uses_index_without_republishing(tmp_path):
+    from common.codec import digest
+    count = 3000
+
+    def records():
+        for number in range(count):
+            record = message()
+            record['message_id'] = str(number)
+            record['source']['selection_context'] = {'previous_message_key': str(number-1), 'previous_known': True}
+            yield record
+
+    path = tmp_path/'legacy-large.db'
+    store = Store(path, 'wechat', 'account')
+    assert store.ingest(records(), 0, 200, 'now')['emitted'] == count
+    with store.db:
+        store.db.execute('DROP INDEX outbox_event_id')
+        store.db.executemany('UPDATE seen SET payload_hash=? WHERE message_key=?',
+            ((digest({key: value for key, value in record.items() if key != 'source'}),
+              digest([str(record[key]) for key in ('platform', 'account_id', 'conversation_id', 'message_id')]))
+             for record in records()))
+    store.close()
+    store = Store(path, 'wechat', 'account')
+    try:
+        plan = store.db.execute("EXPLAIN QUERY PLAN SELECT body FROM outbox WHERE json_extract(body,'$.event_id')=?",
+                                ('sample-id',)).fetchall()
+        assert any('SEARCH outbox USING INDEX outbox_event_id' in row[3] for row in plan)
+        assert store.ingest(records(), 0, 200, 'later')['emitted'] == 0
+        assert store.db.execute('SELECT count(*) FROM outbox').fetchone()[0] == count
+    finally:
+        store.close()
+
+
 def test_identical_text_in_another_conversation_is_preserved(tmp_path):
     store = Store(tmp_path / 'state.db', 'wechat', 'account')
     try:
@@ -199,7 +254,8 @@ def test_refresh_interval_defers_without_losing_window_and_replay_bypasses(tmp_p
     def scan(source, start, end, **kwargs):
         calls.append((start, end))
         return [dict(message(),conversation_type='group')] if start <= 100 < end else []
-    monkeypatch.setattr(wechat, 'scan', scan)
+    from providers.platforms import wechat as query_adapter
+    monkeypatch.setattr(query_adapter, 'scan', scan)
     monkeypatch.setattr(runner.time, 'time', lambda: 200)
     assert runner.run_round(cfg)['matched'] == 1
     calls.clear()
@@ -213,7 +269,11 @@ def test_refresh_interval_defers_without_losing_window_and_replay_bypasses(tmp_p
     calls.clear()
     monkeypatch.setattr(runner.time, 'time', lambda: 500)
     runner.run_round(cfg)
-    assert calls == ['refresh', (200, 500)]
+    assert calls == [(200, 250)]  # Replay refreshed at 250, independently of selection's 200 checkpoint.
+    calls.clear()
+    monkeypatch.setattr(runner.time, 'time', lambda: 550)
+    runner.run_round(cfg)
+    assert calls == ['refresh', (250, 550)]
 
 
 def test_state_input_collision_rejected_before_open(tmp_path):

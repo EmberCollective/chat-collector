@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -33,6 +34,7 @@ def test_resume_tool_rejects_reused_pid_without_touching_other_process(monkeypat
 def console(tmp_path):
     original=tomlkit.parse((ROOT/'console.toml').read_text(encoding='utf-8'))
     settings={'collector_root':str((ROOT/original['collector_root']).resolve()), 'port':10400,'modules':{}}
+    settings['automation_config'] = str(tmp_path/'absent-automation.toml')
     now=int(time.time())
     for module in ('wechat','qq'):
         folder=tmp_path/module
@@ -98,8 +100,73 @@ def wait_job(client,identifier):
     raise AssertionError('worker did not finish')
 
 
+def test_activity_combines_manual_and_automatic_runs_with_retry_details(console):
+    from automation import load_config, SchedulerService
+    client, app, folder, now = console
+    path = folder / 'automation.toml'
+    path.write_text('enabled=true\n[storage]\nstate_file="automation.db"\n[jobs.wechat]\nenabled=true\n', encoding='utf-8')
+    app.state.bridge.settings['automation_config'] = str(path)
+    manual = dict(id='old-manual', module='qq', action='preview', origin='manual',
+                  status='succeeded', started_at=now-10, finished_at=now-8)
+    app.state.jobs.jobs[manual['id']] = manual
+    ticks = [now]
+    calls = []
+    def collect():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError('PRIVATE_CHAT_OR_CREDENTIAL')
+        return {'messages': 4}
+    service = SchedulerService(load_config(path), callbacks={'wechat': collect}, clock=lambda: ticks[0])
+    service.execute('wechat')
+    ticks[0] += 31
+    service.execute('wechat')
+    data = client.get('/api/activity').json()
+    assert not data['warnings']
+    assert [r['source'] for r in data['records']] == ['automation', 'console']
+    run = data['records'][0]
+    assert run['status'] == 'succeeded' and run['attempt_count'] == 2
+    assert run['origin'] == 'schedule'
+    detail = client.get('/api/activity/automation/' + run['id']).json()
+    assert [a['number'] for a in detail['attempts']] == [1, 2]
+    assert detail['attempts'][0]['error'] == 'RuntimeError'
+    assert detail['attempts'][1]['result']['messages'] == 4
+    assert 'PRIVATE_CHAT_OR_CREDENTIAL' not in json.dumps(detail)
+    filtered = client.get('/api/activity?module=qq&origin=manual&status=succeeded').json()
+    assert [r['id'] for r in filtered['records']] == ['old-manual']
+    assert client.get('/api/activity?module=qq&origin=schedule').json()['records'] == []
+    assert client.get('/api/activity?limit=1').json()['records'] == [run]
+    manual_detail = client.get('/api/activity/console/old-manual').json()
+    assert manual_detail['duration_seconds'] == 2
+    assert len(manual_detail['attempts']) == 1
+    assert client.get('/api/activity/automation/missing').status_code == 404
+
+
+def test_activity_keeps_manual_records_when_automation_configuration_is_invalid(console):
+    client, app, folder, now = console
+    path = folder / 'invalid-automation.toml'
+    path.write_text('this is not toml', encoding='utf-8')
+    app.state.bridge.settings['automation_config'] = str(path)
+    app.state.jobs.jobs['manual'] = dict(id='manual', module='wechat', action='collect',
+        origin='manual', status='interrupted', started_at=now, finished_at=None)
+    response = client.get('/api/activity')
+    assert response.status_code == 200
+    assert response.json()['records'][0]['duration_seconds'] is None
+    assert response.json()['warnings']
+    assert client.get('/api/activity/automation/missing').status_code == 503
+    assert client.get('/api/activity/console/manual').status_code == 200
+    assert client.get('/api/activity?module=invalid').status_code == 422
+    assert client.get('/api/activity/invalid/manual').status_code == 422
+    client.headers.pop('X-Console-Token')
+    assert client.get('/api/activity').status_code == 401
+    assert client.get('/api/activity/console/manual').status_code == 401
+
+
 def test_security_and_local_docs(console):
     client,app,*_=console
+    session = client.get('/api/session').json()
+    assert session['application'] == 'chat-collector-console'
+    assert Path(session['root']) == app.state.bridge.root
+    assert session['pid'] == os.getpid()
     assert client.get('/').status_code==200
     assert "script-src 'self'" in client.get('/').headers['content-security-policy']
     assert '/static/vendor/swagger-ui-bundle.js' in client.get('/docs').text
@@ -187,19 +254,19 @@ def test_config_backup_revision_validation_and_busy_guard(console):
         assert client.patch(url,json=patch).status_code==409
 
 
-def test_scheduler_resume_pause_and_window_validation(console):
+def test_console_has_no_timer_and_rejects_legacy_schedule(console):
     client,app,root,now=console
-    assert not client.get('/api/status').json()['modules']['qq']['scheduler_enabled']
+    assert not hasattr(app.state.jobs, 'scheduler')
+    assert not hasattr(app.state.jobs, 'enabled')
+    assert 'scheduler_enabled' not in client.get('/api/status').json()['modules']['qq']
     assert client.post('/api/modules/qq/preview',json={'start':now,'end':now-1}).status_code==422
     assert client.post('/api/modules/qq/preview',json={'start':0,'end':8*86400}).status_code==422
-    client.post('/api/modules/qq/schedule',json={'enabled':True})
-    until=time.monotonic()+5
-    while not app.state.jobs.jobs and time.monotonic()<until:time.sleep(.1)
-    identifier=next(iter(app.state.jobs.jobs))
-    client.post('/api/modules/qq/schedule',json={'enabled':False})
-    wait_job(client,identifier)
-    assert app.state.jobs.jobs[identifier]['origin']=='schedule'
-    assert not client.get('/api/status').json()['modules']['qq']['scheduler_enabled']
+    for enabled in (True, False):
+        assert client.post('/api/modules/qq/schedule',json={'enabled':enabled}).status_code==410
+    assert not app.state.jobs.jobs
+    job=client.post('/api/modules/qq/collect').json()
+    assert wait_job(client,job['id'])['status']=='succeeded'
+    assert app.state.jobs.jobs[job['id']]['origin']=='manual'
 
 
 @pytest.mark.parametrize('module', ['wechat', 'qq'])
@@ -282,7 +349,7 @@ def test_assets_require_message_reference_and_archive_root(console):
     assert client.get('/api/modules/wechat/messages').json()['messages'][0]['message']['message_id']=='file1'
 
 
-def test_recorded_external_runner_blocks_double_schedule_and_ignores_reused_pid(console,monkeypatch):
+def test_recorded_external_runner_ignores_reused_pid(console,monkeypatch):
     import datetime
     import psutil
     client,app,root,now=console
@@ -299,7 +366,7 @@ def test_recorded_external_runner_blocks_double_schedule_and_ignores_reused_pid(
     process=Process()
     monkeypatch.setattr(psutil,'Process',lambda pid:process)
     assert bridge.external_runner()['verified'] is True
-    assert client.post('/api/modules/qq/schedule',json={'enabled':True}).status_code==409
+    assert client.post('/api/modules/qq/schedule',json={'enabled':True}).status_code==410
     process.created=now+100
     assert bridge.external_runner() is None
 

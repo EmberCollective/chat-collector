@@ -95,7 +95,7 @@
 
 AI 只使用本批 `f1` 等短引用调用 `read_attachment(ref,pages?,query?)`。当前链路为：验证归档 → 若缺失，调用采集适配器定位及归档/解码 → 公共解析器生成文本或图片 → Pi 原生工具内容。已有有效归档直接复用；定时采集的 `metadata` 强度不阻止这次显式读取。主动关闭附件归档仍被尊重。
 
-提供方实现 `prepare_attachment(event,index)`，返回同一附件的标准归档信息。`providers/attachments.py` 和隔离读取进程负责确定性文件读取；处理层只消费工具结果、校验证据并映射来源。内置实现位于 `collector/attachment_provider.py`；新平台通过本地注册表接入，不需要修改处理核心。当前格式支持、页码、失败状态与限额以 [附件读取](attachment-context.md) 为准。
+提供方实现 `prepare_attachment(event,index)`，返回同一附件的标准归档信息。`providers/attachments.py` 和隔离读取进程负责确定性文件读取；处理层只消费工具结果、校验证据并映射来源。内置实现位于 `providers/platforms/attachments.py`，定位、解码与归档由同目录 `assets.py` 负责；原 `collector/attachment_provider.py`、`collector/assets.py` 保留兼容导入。新平台通过本地注册表接入，不需要修改处理核心。当前格式支持、页码、失败状态与限额以 [附件读取](attachment-context.md) 为准。
 
 找不到本地文件、格式不支持、名称关联不明确、解码失败均返回明确状态；不伪造空文件内容，不要求 AI 读完所有附件，不影响其他会话结果。
 
