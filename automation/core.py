@@ -17,10 +17,11 @@ from common.locking import InstanceLock
 from common.codec import canonical, digest
 
 from .config import JOBS
+from . import history
 
 
 APPLICATION_ID = 0x43434131
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS jobs(name TEXT PRIMARY KEY,state TEXT NOT NULL,attempts INTEGER DEFAULT 0,
  next_run REAL DEFAULT 0,last_start REAL,last_success REAL,error TEXT,active_error TEXT,result TEXT);
@@ -53,11 +54,13 @@ def _connect(config, *, write=False):
                     # Status polling must not wait for another task's metadata write.
                     conn.execute('PRAGMA journal_mode=WAL')
                     with conn:
-                        conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA)
+                        conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA + history.SCHEMA)
                         columns = {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}
                         for column in ('wake_seq', 'wake_consumed'):
                             if column not in columns:
                                 conn.execute(f'ALTER TABLE jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
+                        if 'current_run_id' not in columns:
+                            conn.execute('ALTER TABLE jobs ADD COLUMN current_run_id TEXT')
                         conn.executemany("INSERT OR IGNORE INTO jobs(name,state) VALUES(?,'idle')", [(name,) for name in JOBS])
                         conn.execute('INSERT OR IGNORE INTO listener(id) VALUES(1)')
                         conn.execute(f'PRAGMA application_id={APPLICATION_ID}')
@@ -206,6 +209,7 @@ def resume(config, name):
     if name not in (*JOBS, 'listener'):
         raise ValueError('Unknown job')
     with closing(_connect(config, write=True)) as conn, conn:
+        conn.execute('BEGIN IMMEDIATE')
         if name == 'listener':
             row = conn.execute('SELECT state FROM listener WHERE id=1').fetchone()
             if row['state'] == 'running':
@@ -215,7 +219,8 @@ def resume(config, name):
             row = conn.execute('SELECT state FROM jobs WHERE name=?', (name,)).fetchone()
             if row['state'] == 'running':
                 raise ValueError('Job is already running')
-            conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=?,error=NULL WHERE name=?", (time.time(), name))
+            history._finish(conn, name, 'interrupted', time.time(), error='execution_resumed')
+            conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=?,error=NULL,current_run_id=NULL WHERE name=?", (time.time(), name))
     return {'job': name, 'resumed': True}
 
 
@@ -284,16 +289,24 @@ class SchedulerService:
         with closing(_connect(self.config, write=True)) as conn, conn:
             conn.execute('UPDATE alerts SET external_status=? WHERE id=?', (outcome, record['id']))
 
-    def _failed(self, name, attempts, code, *, details=None):
+    def _failed(self, name, attempts, code, *, details=None, operation=None):
         entry, now = self.config['jobs'][name], self.clock()
         exhausted = attempts >= entry['max_attempts']
         delay = min(entry['backoff_seconds'] * 2 ** max(0, attempts - 1), entry['max_backoff_seconds'])
         with closing(_connect(self.config, write=True)) as conn, conn:
+            conn.execute('BEGIN IMMEDIATE')
             if details is not None:
                 _setting(conn, 'last_failure:' + name, details)
             conn.execute('UPDATE jobs SET state=?,next_run=?,error=?,active_error=? WHERE name=?',
                          ('paused' if exhausted else 'retry', 0 if exhausted else now + delay, code, code, name))
+            interrupted = code == 'interrupted_execution'
+            history._finish(conn, name, ('interrupted' if interrupted else 'failed') if exhausted else 'retry',
+                            now, error=code, details=details, interrupted=interrupted)
+            if operation:
+                conn.execute("UPDATE operations SET state='failed',updated_at=?,error=? WHERE id=?", (now, code, operation['id']))
+            result = dict(conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone())
         self._alert(name, 'failure', code)
+        return result
 
     def execute(self, name, *, force=False, manual=False, operation_id=None):
         if name not in JOBS:
@@ -315,6 +328,7 @@ class SchedulerService:
             if row['state'] in {'running', 'paused'} or (not force and not manual and row['next_run'] > now):
                 return dict(row)
             attempts = row['attempts'] + 1
+            history._begin(conn, row, 'manual' if manual or force else 'schedule', now)
             conn.execute("UPDATE jobs SET state='running',attempts=?,last_start=? WHERE name=?", (attempts, now, name))
             if operation:
                 conn.execute("UPDATE operations SET state='running',updated_at=? WHERE id=?", (now, operation['id']))
@@ -325,23 +339,25 @@ class SchedulerService:
             summary = _stats(result)
             attention = any(summary.get(key, 0) > 0 for key in ('failed', 'conflict', 'unknown', 'unresolved_deliveries'))
             code = 'downstream_attention' if attention else None
-            with closing(_connect(self.config, write=True)) as conn, conn:
-                conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=CASE WHEN wake_seq>? THEN ? ELSE ? END,wake_consumed=?,last_success=?,error=?,active_error=?,result=? WHERE name=?",
-                             (row['wake_seq'], self.clock(), self.clock() + self.config['jobs'][name]['interval_seconds'],
-                              row['wake_seq'], self.clock(), code, code, canonical(summary), name))
-            if attention:
-                self._alert(name, 'failure', code)
-            elif row['active_error']:
-                self._alert(name, 'recovery', 'recovered')
         except Exception as exc:
-            self._failed(name, attempts, _error(exc),
-                         details=_failure_details(exc, self.config['_root'], self.clock()))
+            return self._failed(name, attempts, _error(exc), operation=operation,
+                                details=_failure_details(exc, self.config['_root'], self.clock()))
         with closing(_connect(self.config, write=True)) as conn, conn:
+            conn.execute('BEGIN IMMEDIATE')
+            finished = self.clock()
+            conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=CASE WHEN wake_seq>? THEN ? ELSE ? END,wake_consumed=?,last_success=?,error=?,active_error=?,result=? WHERE name=?",
+                         (row['wake_seq'], finished, finished + self.config['jobs'][name]['interval_seconds'],
+                          row['wake_seq'], finished, code, code, canonical(summary), name))
+            history._finish(conn, name, 'warning' if attention else 'succeeded', finished, error=code, result=summary)
             result = dict(conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone())
             if operation:
                 conn.execute('UPDATE operations SET state=?,updated_at=?,error=? WHERE id=?',
                              ('succeeded' if result['state'] == 'idle' else 'failed', self.clock(), result['error'], operation['id']))
-            return result
+        if attention:
+            self._alert(name, 'failure', code)
+        elif row['active_error']:
+            self._alert(name, 'recovery', 'recovered')
+        return result
 
     def _reconcile(self):
         with self.schedule_lock:
