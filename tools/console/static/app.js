@@ -56,17 +56,6 @@ function updateSourceStatus(){
 function renderStatus(data){
   lastStatus=data;
   if(data.external_runner)notice(data.external_runner.message+'。运行 tools/handover.cmd 可在轮次之间切换。',true);
-  for(const source of sourceCatalog){
-    const id=source.id,state=data.modules[id]||{},signature=JSON.stringify({...state,next_run_in:undefined});let card=$('source-card-'+id);
-    if(!card){card=el('article',undefined,'module-card');card.id='source-card-'+id;$('modules').append(card);}
-    if(card.dataset.signature===signature)continue;card.dataset.signature=signature;card.replaceChildren();
-    const top=el('div',undefined,'module-top');top.append(el('h2',source.name),el('span',source.readonly?'只读来源':state.running_job?'执行中':'手动调试就绪','pill'));card.append(top);
-    if(!source.readonly){const metrics=el('div',undefined,'metrics');metrics.append(metric('已采集消息',state.messages??'—'),metric('待发布事件',state.pending_events??'—'),metric('成功时间终点',time(state.checkpoint),true),metric('快照更新时间',time(state.snapshot_updated_at),true));card.append(metrics);}
-    card.append(el('p',source.readonly?source.description:`${intensities[state.intensity]||state.intensity||'—'} · ${state.refresh_interval_seconds?`数据库至少间隔 ${state.refresh_interval_seconds} 秒刷新`:'每轮刷新数据库'}${state.attachments_enabled?'':' · 附件保存关闭'} · 计划见自动化`,'muted'),sourceControls(id,state));
-    if(state.state_error||state.scheduler_error){const issue=button((state.state_error||state.scheduler_error)+' · 查看相关记录',()=>openHistoryFor(id));issue.className='text-button error';card.append(issue);}
-  }
-  if(!sourceCatalog.length)$('modules').replaceChildren(el('p','尚未配置控制台来源。可先查看待办处理或在本机配置中接入来源。','empty'));
-  else $('modules').querySelector(':scope>p')?.remove();
   updateSourceStatus();
   $('collector-path').textContent='关联项目：'+data.collector_root;
   $('connection').textContent='已连接 · '+time(Date.now()/1000);$('connection').className='muted';
@@ -119,16 +108,9 @@ async function saveConfig(){
   notice(`${names[id]||id}配置已保存并备份；保存期间的新编辑保留在表单中。`);await refresh();
 }
 async function showJob(id,source){
-  const job=await api(source==='automation'?'/activity/automation/'+encodeURIComponent(id):'/activity/console/'+encodeURIComponent(id)),box=$('job-detail');box.replaceChildren();
-  box.append(el('h3',`${names[job.module]||job.module} · ${actions[job.action]||job.action}`),el('p',`${originLabels[job.origin]||job.origin||'未注明'} · ${states[job.status]||job.status} · ${durationText(job.duration_seconds,!!job.finished_at)}`));
-  for(const attempt of job.attempts||[]){const section=el('section',undefined,'module-card');section.append(el('h4',`第 ${attempt.number} 次 · ${states[attempt.status]||attempt.status}`),el('p',`${time(attempt.started_at)} → ${attempt.finished_at?time(attempt.finished_at):'尚无结束时间'}`,'muted'));if(attempt.error)section.append(el('p',attempt.error,'error'));if(attempt.result)section.append(el('pre',JSON.stringify(attempt.result,null,2)));if(attempt.details){const detail=el('details');detail.append(el('summary','错误位置'),el('pre',JSON.stringify(attempt.details,null,2)));section.append(detail);}box.append(section);}
-  const controls=el('div',undefined,'actions');controls.append(button('复制完整记录',()=>navigator.clipboard.writeText(JSON.stringify(job,null,2))));
-  const configure=el('a','打开相关配置','button secondary');configure.href=source==='automation'?'#automation':job.module==='processor'?'#settings/model':'#settings/source';configure.addEventListener('click',()=>{$('detail-dialog').close();if(source!=='automation'&&sourceInfo(job.module)){$('module').value=job.module;guard(switchModule);}});controls.append(configure);
-  if(job.action==='process'&&source!=='automation')controls.append(button('查看 Pi 工作流',async()=>{$('detail-dialog').close();await selectWorkflow(job.id);}));
-  for(const run of job.workflow_runs||[])controls.append(button(`查看第 ${run.attempt||'?'} 次 Pi 工作流`,async()=>{$('detail-dialog').close();await selectWorkflow(run.id);}));
-  box.append(controls);
-  if(job.log_tail)box.append(el('h4','运行日志'),el('pre',job.log_tail));const raw=el('details');raw.append(el('summary','完整记录'),el('pre',JSON.stringify(job,null,2)));box.append(raw);if(!$('detail-dialog').open)$('detail-dialog').showModal();
+  return openOverviewJob(id,source,{label:'运行详情'});
 }
+
 function identitySummary(m){
   const identity=m.identity||{},account=identity.account||{},chat=identity.conversation||{},person=(identity.people||[]).find(p=>p.id===m.sender_id)||{};
   const sender=m.sender||person.label||person.display_name||'名称未获取';
@@ -219,5 +201,5 @@ $('last-day').addEventListener('click',markQueryChanged);
 $('filter-rulesets').addEventListener('input',renderRuleSummary);
 $('result-search').addEventListener('input',filterResults);$('result-attachment').addEventListener('change',filterResults);
 bind('close-message',()=>$('message-dialog').close());
-async function init(){lastDay();const response=await fetch('/api/session');if(!response.ok)throw Error('无法建立本机会话');token=(await response.json()).token;await loadCatalog();await switchModule();await refresh();await initProcessor();await initWorkflow();await initHistory();setInterval(refresh,3000);}
+async function init(){lastDay();const response=await fetch('/api/session');if(!response.ok)throw Error('无法建立本机会话');token=(await response.json()).token;await loadCatalog();await switchModule();await refresh();await initProcessor();await initWorkflow();await initHistory();await initOverview();setInterval(refresh,3000);}
 init().catch(error=>notice(error.message,true));
