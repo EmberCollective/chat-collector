@@ -256,8 +256,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.locator('.nav-item[data-view="history"]').click();
     await page.locator('#history-filter').selectOption('failed');
     assert.equal(await page.locator('#history-rows tr').count(),1);
-    await page.locator('#history-rows [data-job]').click();
-    assert.match(await page.locator('#dialog-body').textContent(),/未推进断点/);
+    await page.locator('#history-rows [data-dashboard-run]').click();
+    assert.match(await page.locator('#run-detail').textContent(),/未推进断点/);
     await page.keyboard.press('Escape');
 
     const views=['overview','collect','process','delivery','automation','history','settings'];

@@ -74,7 +74,7 @@ const evidence={};
   evidence.parameterLayouts=parameterLayouts;
 
   await page.goto(pathToFileURL(path.join(base,'docs/design/overview-dashboard/index.html')).href);
-  const keyboardEntries=['.problem-row button','#rate-chart [role="button"]','.run-ticks .failed','[data-service-problem="collect"]','[data-source-problem="work-chat"]'];
+  const keyboardEntries=['.problem-row button','#rate-chart [role="button"]','.run-ticks .failed','[data-service-problem="collect"]','[data-source-problem="qq-main"]'];
   for(let index=0;index<keyboardEntries.length;index++){
    const target=page.locator(keyboardEntries[index]).first();await target.focus();await page.keyboard.press(index%2?'Space':'Enter');
    assert.equal(await page.locator('#run-detail').isVisible(),true,keyboardEntries[index]);
@@ -87,7 +87,7 @@ const evidence={};
    assert.equal(await page.locator('#run-scope').textContent(),scope);await page.keyboard.press('Escape');
   }
   evidence.keyboardEntries=keyboardEntries;
-  await page.evaluate(()=>{const run=runs.find(run=>run.id==='delivery');run.context.large_context='上下文示例，保持当前来源边界。'.repeat(500);run.logs=Array.from({length:300},(_,index)=>`日志 ${index+1}：等待目标确认；未自动重发。`);});
+  await page.evaluate(()=>{const run=window.overviewDashboard.examples.runs.find(run=>run.id==='delivery');run.context.large_context='上下文示例，保持当前来源边界。'.repeat(500);run.logs=Array.from({length:300},(_,index)=>`日志 ${index+1}：等待目标确认；未自动重发。`);});
   const layout=[];
   for(const width of [320,390,1440,1600]){
    await page.setViewportSize({width,height:width<800?844:1000});
