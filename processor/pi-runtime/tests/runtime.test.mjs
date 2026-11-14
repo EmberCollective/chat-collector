@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import test from 'node:test';
 import {runPi} from '../runtime.mjs';
+import {workflowRecorder} from '../workflow.mjs';
 
 export function toolStream(response, name, args, id = 'call_fixture') {
   response.writeHead(200, {'Content-Type': 'text/event-stream'});
@@ -52,13 +53,14 @@ test('real Pi SDK performs attachment and lookup tools then native final submiss
     else toolStream(res, 'submit_tasks', {tasks: [task(['m1', 'f1:p2'])]});
   }, async (input, requests) => {
     const calls = [];
+    const records = [];
     const result = await runPi(input, async args => {
       calls.push(args);
       return {content: [{type: 'text', text: '[f1:p2] Submit report tomorrow.'}], details: {evidence: [{ref: 'f1:p2', page: 2}]}};
     }, () => {}, async args => {
       assert.deepEqual(args,{query:'report'});
       return {tasks:[],has_more:false,next_offset:null};
-    });
+    }, undefined, record => records.push(record));
     assert.equal(result.tasks.length, 1);
     assert.equal(result._agent.runtime, 'pi-coding-agent');
     assert.equal(result._agent.version, '1.5.2');
@@ -70,6 +72,13 @@ test('real Pi SDK performs attachment and lookup tools then native final submiss
     assert.ok(JSON.stringify(requests[1].messages).includes('f1:p2'));
     assert.ok(!JSON.stringify(requests).includes('synthetic-private-key'));
     assert.ok(!JSON.stringify(requests).includes('/pi-runtime'), 'Pi must not append its local runtime path to the prompt');
+    const prepared = records.filter(record => record.type === 'request_prepared');
+    assert.deepEqual(prepared.map(record => record.body.messages), requests.map(request => request.messages));
+    assert.ok(records.some(record => record.type === 'tool_execution_start' && record.body.arguments.ref === 'f1'));
+    assert.ok(records.some(record => record.type === 'tool_execution_end' && JSON.stringify(record.body).includes('f1:p2')));
+    assert.ok(records.some(record => record.type === 'model_output' && record.body.stop_reason === 'toolUse'));
+    assert.equal(records.at(-1).type, 'run_end');
+    assert.ok(!JSON.stringify(records).includes(input.api_key));
   });
 });
 
@@ -130,7 +139,11 @@ test('whole-run timeout aborts an unresponsive compatible endpoint', async () =>
 
 test('endpoint failure does not expose server response or credential', async () => {
   await fixture(res => {res.writeHead(401); res.end('synthetic-private-key and private server contents');}, async input => {
-    await assert.rejects(runPi(input, () => assert.fail()), error => error.message === 'model_error');
+    const records = [];
+    await assert.rejects(runPi(input, () => assert.fail(), undefined, undefined, undefined, e => records.push(e)), error => error.message === 'model_error');
+    assert.equal(records.at(-1).code, 'model_error');
+    assert.ok(!JSON.stringify(records).includes('private server contents'));
+    assert.ok(!JSON.stringify(records).includes(input.api_key));
   });
 });
 
@@ -190,19 +203,23 @@ test('native Pi compaction summarizes long tool context and evidence survives', 
     if (!body.tools?.length) {summaries++; textStream(res, 'Read f1:p1: submit report tomorrow. Message m1 is the source. Finish with submit_tasks.');}
     else if (!reads++) toolStream(res, 'read_attachment', {ref: 'f1', pages: '1'});
     else toolStream(res, 'submit_tasks', {tasks: [task(['m1', 'f1:p1'])]});
-  }, async input => {
+  }, async (input, requests) => {
     input.model.context_window = 4096;
     input.model.max_output_tokens = 512;
     Object.assign(input.agent, {compaction_reserve_tokens: 1024, compaction_keep_recent_tokens: 128});
     input.processing = {max_input_chars: 100000};
     const events = [];
+    const records = [];
     const result = await runPi(input, async () => ({content: [{type: 'text', text: '[f1:p1] ' + 'Report evidence. '.repeat(1100)}],
-      details: {evidence: [{ref: 'f1:p1', page: 1}]}}), e => events.push(e));
+      details: {evidence: [{ref: 'f1:p1', page: 1}]}}), e => events.push(e), undefined, undefined, e => records.push(e));
     assert.ok(summaries >= 1, 'Pi must make its native summarization request');
     assert.ok(result._agent.compactions >= 1);
     assert.deepEqual(result.tasks[0].sources, ['m1', 'f1:p1']);
     assert.ok(events.some(e => e.type === 'compaction_start'));
     assert.ok(events.some(e => e.type === 'compaction_end' && !e.failed));
+    assert.ok(records.some(e => e.type === 'compaction_end' && e.body.summary?.includes('f1:p1')));
+    assert.equal(records.filter(e => e.type === 'request_prepared').length, requests.length,
+      'Every provider request, including native compaction, must have its real context recorded');
   });
 });
 
@@ -238,10 +255,30 @@ test('Pi native retry recovers a temporary model error', async () => {
     else toolStream(res, 'submit_tasks', {tasks: []});
   }, async (input, requests) => {
     input.agent.max_retries = 1;
-    const result = await runPi(input, () => assert.fail());
+    const records = [];
+    const result = await runPi(input, () => assert.fail(), undefined, undefined, undefined, e => records.push(e));
     assert.equal(result._agent.retries, 1);
     assert.equal(requests.length, 2);
+    assert.ok(records.some(e => e.type === 'auto_retry_start' && e.body.attempt === 1));
+    assert.ok(records.some(e => e.type === 'auto_retry_end' && e.body.success));
   });
+});
+
+test('workflow safe projection omits images, credentials and private reasoning, including JSON tool text', () => {
+  const records = [];
+  const record = workflowRecorder(event => records.push(event), 'synthetic-secret');
+  record({type: 'tool_execution_end', body: {result: {content: [
+    {type: 'text', text: JSON.stringify({authorization: 'private-token', api_key: 'unknown-token', text: 'synthetic-secret',
+      url: 'https://user:private-password@example.org/file?token=private-url-token&name=report'})},
+    {type: 'image', data: 'PRIVATE_BINARY', mimeType: 'image/png'},
+    {type: 'thinking', thinking: 'PRIVATE_REASONING'}], headers: {cookie: 'private-cookie'}}}});
+  const serialized = JSON.stringify(records);
+  for (const omitted of ['private-token', 'unknown-token', 'synthetic-secret', 'PRIVATE_BINARY', 'PRIVATE_REASONING', 'private-cookie', 'private-password', 'private-url-token']) {
+    assert.ok(!serialized.includes(omitted), omitted);
+  }
+  assert.ok(serialized.includes('image_body') && serialized.includes('private_reasoning'));
+  record({type: 'request_prepared', body: {content: 'X'.repeat(600000)}});
+  assert.equal(records.at(-1).body.content.omitted, 'text_limit');
 });
 
 test('failed native compaction rejects the group without accepting a submission', async () => {

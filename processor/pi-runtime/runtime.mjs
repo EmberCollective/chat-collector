@@ -3,11 +3,12 @@ import path from 'node:path';
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { InMemoryCredentialStore, InMemoryModelsStore } from '@earendil-works/pi-ai';
 import { collectorExtension, TOOL_NAMES } from './collector-extension.mjs';
+import { workflowRecorder, requestBody } from './workflow.mjs';
 
 export const VERSION = '1.5.2';
 const cwd = path.dirname(fileURLToPath(import.meta.url));
 
-export async function runPi(input, readAttachment, onProgress = () => {}, findTasks = async () => {throw new Error('Task search unavailable');}, validateSubmission = async () => ({accepted: true})) {
+export async function runPi(input, readAttachment, onProgress = () => {}, findTasks = async () => {throw new Error('Task search unavailable');}, validateSubmission = async () => ({accepted: true}), onRecord) {
   const timeout = Number(input.model?.timeout_seconds ?? 120);
   const maxTurns = Number(input.agent?.max_turns ?? 8);
   const maxCalls = Number(input.agent?.max_tool_calls ?? 12);
@@ -29,6 +30,7 @@ export async function runPi(input, readAttachment, onProgress = () => {}, findTa
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('invalid_input');
   const state = {turns: 0, tool_calls: 0, compactions: 0, retries: 0, max_context_chars: 0, evidence: [], result: null, error: null};
   const progress = event => onProgress({time: new Date().toISOString(), ...event});
+  const record = onRecord ? workflowRecorder(onRecord, input.api_key) : () => {};
   if (JSON.stringify(input.payload).length + input.system.length > (input.processing?.max_input_chars ?? 60000)) throw new Error('context_budget');
   const provider = 'local-collector';
   const modelRuntime = await ModelRuntime.create({credentials: new InMemoryCredentialStore(),
@@ -43,6 +45,16 @@ export async function runPi(input, readAttachment, onProgress = () => {}, findTa
         supportsUsageInStreaming: false, supportsStrictMode: false, maxTokensField: 'max_tokens'}}],
   });
   await modelRuntime.setRuntimeApiKey(provider, input.api_key || 'local-no-key');
+  if (onRecord) {
+    // Native compaction bypasses extension payload hooks; the per-run model runtime sees both request paths.
+    const nativeStream = modelRuntime.streamSimple.bind(modelRuntime);
+    modelRuntime.streamSimple = (model, context, options = {}) => nativeStream(model, context, {...options,
+      onPayload: async (...args) => {
+        const payload = await options.onPayload?.(...args) ?? args[0];
+        record({type: 'request_prepared', turn: state.turns, phase: state.compacting ? 'compaction' : 'model', body: requestBody(payload)});
+        return payload;
+      }});
+  }
   const settingsManager = SettingsManager.inMemory({compaction: {enabled: input.agent?.auto_compaction !== false, reserveTokens, keepRecentTokens},
     retry: {enabled: maxRetries > 0, maxRetries, baseDelayMs: 1000, provider: {maxRetries: 0, timeoutMs: timeout * 1000}},
     images: {blockImages: !input.model.vision, autoResize: false},
@@ -63,6 +75,8 @@ export async function runPi(input, readAttachment, onProgress = () => {}, findTa
     await session.bindExtensions({onError: () => stop('extension_error')});
     if (session.getActiveToolNames().sort().join(',') !== [...TOOL_NAMES].sort().join(',')) throw new Error('tool_isolation_failed');
     session.subscribe(event => {
+      if (event.type === 'compaction_start') state.compacting = true;
+      if (event.type === 'compaction_end') state.compacting = false;
       if (['turn_start', 'tool_execution_start', 'tool_execution_end', 'compaction_start', 'compaction_end', 'auto_retry_start', 'auto_retry_end'].includes(event.type)) {
         const item = {type: event.type, turn: state.turns + (event.type === 'turn_start' ? 1 : 0)};
         if (TOOL_NAMES.includes(event.toolName)) item.tool = event.toolName;
@@ -78,6 +92,21 @@ export async function runPi(input, readAttachment, onProgress = () => {}, findTa
         if (event.type === 'compaction_end') item.failed = !event.result;
         if (Number.isInteger(event.attempt)) item.attempt = event.attempt;
         progress(item);
+        const body = event.type === 'tool_execution_start' ? {arguments: event.args}
+          : event.type === 'tool_execution_end' ? {result: event.result}
+          : event.type === 'compaction_end' ? {summary: event.result?.summary,
+              first_kept_entry_id: event.result?.firstKeptEntryId, tokens_before: event.result?.tokensBefore,
+              aborted: event.aborted, will_retry: event.willRetry}
+          : event.type === 'auto_retry_start' ? {attempt: event.attempt, max_attempts: event.maxAttempts,
+              delay_ms: event.delayMs, code: 'model_request_failed'}
+          : event.type === 'auto_retry_end' ? {success: event.success, attempt: event.attempt,
+              code: event.success ? null : 'model_request_failed'} : {reason: event.reason};
+        record({...item, body});
+      }
+      if (event.type === 'message_end' && event.message?.role === 'assistant') {
+        record({type: 'model_output', turn: state.turns, body: {
+          content: (event.message.content ?? []).filter(block => block.type === 'text'),
+          stop_reason: event.message.stopReason, code: event.message.stopReason === 'error' ? 'model_error' : null}});
       }
       if (event.type === 'turn_start' && ++state.turns > maxTurns) stop('turn_budget');
       if (event.type === 'tool_execution_start') {
@@ -91,18 +120,27 @@ export async function runPi(input, readAttachment, onProgress = () => {}, findTa
     });
     timer = setTimeout(() => stop('timeout'), timeout * 1000);
     progress({type: 'run_start', context_window: contextWindow, reserve_tokens: reserveTokens});
+    record({type: 'input_prepared', turn: 0, body: {system: input.system, payload: input.payload,
+      context_window: contextWindow, reserve_tokens: reserveTokens}});
     await session.prompt(JSON.stringify(input.payload), {expandPromptTemplates: false});
     if (state.error) throw new Error(state.error);
     if (!state.result) {
       const last = [...session.messages].reverse().find(message => message.role === 'assistant');
       throw new Error(last?.stopReason === 'error' ? 'model_error' : 'missing_submission');
     }
+    record({type: 'submission_accepted', turn: state.turns, body: state.result});
     return {...state.result, _agent: {runtime: 'pi-coding-agent', version: VERSION,
       turns: state.turns, tool_calls: state.tool_calls, compactions: state.compactions, retries: state.retries,
       max_context_chars: state.max_context_chars, evidence: state.evidence}};
+  } catch (error) {
+    state.error ??= ['missing_submission', 'model_error', 'compaction_failed'].includes(error.message) ? error.message : 'runtime_error';
+    throw error;
   } finally {
     progress({type: 'run_end', failed: !state.result || !!state.error, code: state.error,
       turns: state.turns, tool_calls: state.tool_calls, compactions: state.compactions, retries: state.retries});
+    record({type: 'run_end', failed: !state.result || !!state.error, turn: state.turns,
+      code: state.error, body: {turns: state.turns, tool_calls: state.tool_calls,
+        compactions: state.compactions, retries: state.retries}});
     clearTimeout(timer);
     session.dispose();
   }
