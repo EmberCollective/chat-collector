@@ -144,7 +144,7 @@ def register_operations_routes(app, bridge, authenticate):
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 backup.write_bytes(old_auto)
                 backup.with_name(backup.name.replace('automation-', 'messaging-', 1)).write_bytes(old_msg)
-                payload = {k: v for k, v in body.messaging.items() if k not in {'schemas', 'version'}}
+                payload = {k: v for k, v in body.messaging.items() if k not in {'schemas', 'types', 'version'}}
                 saved = save_settings(msg_path, payload, body.version['messaging'])
                 try:
                     if auto_path.read_bytes() != old_auto:

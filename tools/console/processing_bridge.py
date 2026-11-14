@@ -17,7 +17,7 @@ EDITABLE = {
     'context': {'gap_seconds', 'max_messages', 'history_messages', 'timezone', 'max_conversation_chars'},
     'processing': {'max_input_chars'},
     'schedule': {'interval_seconds'},
-    'source_descriptions': {'qq', 'wechat'},
+    'source_descriptions': set(),
 }
 
 
@@ -40,7 +40,7 @@ class ProcessingBridge:
     def read_config(self):
         raw = self.path.read_bytes()
         config = self.config()
-        public = {section: {key: value for key, value in config.get(section, {}).items() if key in keys}
+        public = {section: {key: value for key, value in config.get(section, {}).items() if section == 'source_descriptions' or key in keys}
                   for section, keys in EDITABLE.items()}
         # Paths are informative only. Never return an API key or arbitrary TOML fields.
         public['paths'] = {key: str(config[section].get(field, '')) for key, section, field in (
@@ -86,9 +86,11 @@ class ProcessingBridge:
             raise FileExistsError('处理配置已变化，请重新加载后保存')
         document = tomlkit.parse(before.decode('utf-8'))
         for section, values in patch.items():
-            if section not in EDITABLE or set(values) - EDITABLE[section]:
+            if section not in EDITABLE or (section != 'source_descriptions' and set(values) - EDITABLE[section]):
                 raise ValueError('此配置项不能通过调试台修改')
             for key, value in values.items():
+                if section == 'source_descriptions' and (not isinstance(key, str) or not 1 <= len(key) <= 100 or not isinstance(value, str) or len(value) > 10000):
+                    raise ValueError('来源描述无效')
                 document.setdefault(section, tomlkit.table())[key] = value
         backup = self.replace(self.path, before, tomlkit.dumps(document), backup_dir, self.core().load_config)
         return {**self.read_config(), 'backup': backup}

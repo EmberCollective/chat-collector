@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge import Bridge, atomic_json
 
 ROOT = Path(__file__).resolve().parent
-Module = Literal['wechat', 'qq']
+Module = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')]
 TextPath = Annotated[str, Field(min_length=1, max_length=4096)]
 
 
@@ -152,18 +152,13 @@ class ProcessorLimitsPatch(Model):
     max_input_chars: int = Field(default=None, ge=1000, le=1000000)
 
 
-class SourceDescriptionsPatch(Model):
-    qq: str = Field(default=None, max_length=10000)
-    wechat: str = Field(default=None, max_length=10000)
-
-
 class ProcessorConfigPatch(Model):
     model: ProcessorModelPatch = Field(default_factory=ProcessorModelPatch)
     agent: ProcessorAgentPatch = Field(default_factory=ProcessorAgentPatch)
     context: ProcessorContextPatch = Field(default_factory=ProcessorContextPatch)
     processing: ProcessorLimitsPatch = Field(default_factory=ProcessorLimitsPatch)
     schedule: ProcessorSchedulePatch = Field(default_factory=ProcessorSchedulePatch)
-    source_descriptions: SourceDescriptionsPatch = Field(default_factory=SourceDescriptionsPatch)
+    source_descriptions: dict[Annotated[str, Field(min_length=1, max_length=100)], Annotated[str, Field(max_length=10000)]] = Field(default_factory=dict, max_length=128)
 
 
 class SaveProcessorConfig(Model):
@@ -193,6 +188,7 @@ class ProcessorPreview(Model):
 class Jobs:
     def __init__(self, bridge, runtime):
         self.bridge, self.runtime = bridge, Path(runtime)
+        self.processor_history = lambda: Path(bridge.processor.config()['storage']['state_file']).parent/'pi-runs'
         self.directory = self.runtime/'jobs'
         self.directory.mkdir(parents=True, exist_ok=True)
         self.mutex = threading.RLock()
@@ -236,6 +232,8 @@ class Jobs:
                             self.due[name] = time.monotonic()+60
 
     def submit(self, name, action, request, origin='manual'):
+        if name != 'processor':
+            self.bridge.require(name, {'preview':'query', 'collect':'collect', 'replay':'replay'}.get(action, 'unsupported'))
         with self.mutex:
             if name in self.running:
                 raise HTTPException(409, '本模块已有任务运行，请等待完成')
@@ -295,15 +293,15 @@ class Jobs:
             self.due[job['module']] = time.monotonic()+interval
 
     def detail(self, identifier):
+        from workflow import find_run_folder, read_run_metadata, local_record_file
+        folder = find_run_folder(self, identifier, self.processor_history)
         with self.mutex:
-            if identifier not in self.jobs:
-                raise HTTPException(404, '任务不存在或不在最近 100 个启动历史内')
-            job = dict(self.jobs[identifier])
-        path = self.directory/identifier/'result.json'
+            job = dict(self.jobs[identifier]) if identifier in self.jobs else read_run_metadata(folder, self)
+        path = local_record_file(folder, 'result.json')
         if job['status'] != 'running' and path.is_file():
             job.update(json.loads(path.read_text(encoding='utf-8')))
-        log = self.directory/identifier/'worker.log'
-        progress = self.directory/identifier/'pi-events.jsonl'
+        log = local_record_file(folder, 'worker.log')
+        progress = local_record_file(folder, 'pi-events.jsonl')
         if progress.is_file():
             with progress.open('rb') as stream:
                 stream.seek(max(0, progress.stat().st_size-256000))
@@ -338,13 +336,17 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
         yield
         jobs.close()
 
-    app = FastAPI(title='聊天收集调试控制台', version='0.1.0', docs_url=None, redoc_url=None,
+    app = FastAPI(title='拾序 · Loose Ends · 本地调试台', version='0.1.0', docs_url=None, redoc_url=None,
                   description='消息收集项目的可选本机调试工具。预览不推进断点；正式采集和重放会写入主项目。', lifespan=lifespan)
     app.state.jobs, app.state.bridge = jobs, bridge
     from messaging_routes import register_messaging_routes
     register_messaging_routes(app, bridge, authenticate)
     from operations_routes import register_operations_routes
     register_operations_routes(app, bridge, authenticate)
+    from workflow import register_workflow_routes
+    register_workflow_routes(app, jobs, authenticate, jobs.processor_history)
+    from history import register_history_routes
+    register_history_routes(app, jobs, authenticate, jobs.processor_history)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
@@ -380,7 +382,7 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @app.get('/docs', include_in_schema=False)
     def docs():
-        return get_swagger_ui_html(openapi_url='/openapi.json', title='收集控制台 · OpenAPI',
+        return get_swagger_ui_html(openapi_url='/openapi.json', title='拾序 · Loose Ends · OpenAPI',
             swagger_js_url='/static/vendor/swagger-ui-bundle.js', swagger_css_url='/static/vendor/swagger-ui.css',
             swagger_favicon_url='/static/icon.svg', swagger_ui_parameters={'persistAuthorization': False})
 
@@ -388,7 +390,11 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     def session():
         return {'token': token}
 
-    @app.get('/api/status', dependencies=[Depends(authenticate)], summary='查看两模块状态')
+    @app.get('/api/catalog', dependencies=[Depends(authenticate)], summary='信息源实例与操作能力')
+    def catalog():
+        return bridge.catalog()
+
+    @app.get('/api/status', dependencies=[Depends(authenticate)], summary='查看信息源状态')
     def status():
         modules = {}
         with jobs.mutex:
@@ -424,6 +430,7 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @app.post('/api/modules/{module}/schedule', dependencies=[Depends(authenticate)], summary='暂停或恢复本控制台定时采集')
     def schedule(module: Module, body: ScheduleControl):
+        bridge.require(module, 'schedule')
         with jobs.mutex:
             if body.enabled and bridge.external_runner():
                 raise HTTPException(409, '原独立定时采集仍在运行或无法核验；请先运行 tools/handover.cmd 完成切换')
