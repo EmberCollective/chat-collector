@@ -29,7 +29,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
    if(url.pathname==='/api/operations/startup')return startupError?route.fulfill({status:503,json:{detail:'fixture startup read failed'}}):route.fulfill({json:{supported:true,enabled:false}});
    if(url.pathname==='/api/operations/status'){
     const response=await route.fetch(),snapshot=await response.json();
-    if(unknownService)snapshot.service={state:'unknown',running:false,verified:false};
+    if(unknownService){snapshot.service={state:'unknown',running:false,verified:false};snapshot.automation.jobs=[{name:'processor',enabled:true,state:'idle'}];}
     snapshot.messaging.deliveries=[{id:'unknown-delivery',task_id:'task-1',target_id:'workflow-sample',title:'合成投递',status:'unknown',error:'confirmation timeout'}];
     snapshot.feedback.requests=[{request_id:'failed-feedback',task_id:'task-1',title:'合成回写',status:'failed',error:'temporary conflict'}];
     return route.fulfill({response,json:snapshot});
@@ -96,6 +96,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
   assert.equal(await page.locator('#automation-savebar').isVisible(),false);
   startupError=true;unknownService=true;await page.locator('#ops-refresh').click();await page.waitForFunction(()=>document.getElementById('ops-startup-chip').textContent==='状态未确认'&&document.getElementById('ops-service-boundary').textContent.includes('尚未确认'));
   assert.equal(await page.locator('#ops-startup-status').isVisible(),true);assert.match(await page.locator('#ops-startup-status').textContent(),/读取失败/);assert.equal(await page.locator('#ops-startup-enable').isDisabled(),true);
+  await page.locator('.automation-service-diagnostics>summary').click();assert.equal(await page.locator('#ops-jobs').getByText('后台状态未确认',{exact:true}).isVisible(),true);assert.equal(await page.locator('#ops-jobs').getByText('服务未运行',{exact:true}).count(),0);await page.locator('.automation-service-diagnostics>summary').click();
   startupError=false;unknownService=false;await page.locator('#ops-refresh').click();await page.waitForFunction(()=>document.getElementById('ops-startup-chip').textContent==='未开启');
   for(const id of ['ops-start','ops-stop','ops-restart','ops-startup-enable','ops-startup-disable']){await page.locator('#'+id).click();await page.waitForFunction(id=>!document.getElementById(id).disabled,id);}
   for(const path of ['service/start','service/stop','service/restart'])assert.ok(posts.some(post=>post.path==='/api/operations/'+path));

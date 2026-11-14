@@ -223,9 +223,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-ops-next]').forEach(el => {const remaining = Math.ceil(Number(el.dataset.opsNext) - Date.now() / 1000); el.textContent = remaining > 0 ? `${remaining} 秒后` : '等待调度';});
   }
   function renderStatus(snapshot) {
-    const service = snapshot.service || {}, active = service.running;
+    const service = snapshot.service || {}, active = service.running, stopped = ['stopped','not_running'].includes(service.state);
     byId('status-strip').dataset.state=service.state||'unknown';byId('service-detail').textContent=states[service.state]||service.state||'状态未确认';byId('service-verified').textContent=service.verified?'已核对当前后台进程':'进程状态尚未确认';
-    byId('service-boundary').textContent=active?'关闭网页后，已启用的计划继续运行':['stopped','not_running'].includes(service.state)?'后台服务未运行；启用的计划暂不执行':'后台状态尚未确认，请刷新后核对计划是否运行';
+    byId('service-boundary').textContent=active?'关闭网页后，已启用的计划继续运行':stopped?'后台服务未运行；启用的计划暂不执行':'后台状态尚未确认，请刷新后核对计划是否运行';
     byId('service-status').textContent = `${active ? states[service.state] || '运行中' : states[service.state] || service.state || '未运行'}${service.pid ? ' · PID ' + service.pid : ''}${service.config_changed ? ' · 配置已变化，请重新启动' : ''}`;
     const jobs = byId('jobs'); jobs.replaceChildren();
     const checks = snapshot.checks || {};
@@ -250,7 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const link=node('a','打开任务配置','button secondary'),category=['deliver','feedback'].includes(jobCatalog[job.name]?.action)||job.name==='listener'?'channels':'collection';link.href='#automation/'+category;link.addEventListener('click',()=>{document.getElementById('detail-dialog').close();location.hash='automation/'+category;showView();const target=[...document.querySelectorAll('[data-job]')].find(node=>node.dataset.job===job.name);if(target){let parent=target;while(parent){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement;}target.scrollIntoView({block:'center'});}});box.append(link);document.getElementById('detail-dialog').showModal();
         });
       }
-      return [jobNames[job.name] || job.name, !job.enabled ? '未启用' : !active ? '服务未运行' : states[job.state] || job.state, job.attempts ?? 0, next, date(job.last_success), problem];
+      return [jobNames[job.name] || job.name, !job.enabled ? '未启用' : !active ? stopped ? '服务未运行' : '后台状态未确认' : states[job.state] || job.state, job.attempts ?? 0, next, date(job.last_success), problem];
     }));
     const recovery = byId('recovery'); recovery.replaceChildren();
     recovery.append(node('h4', '投递失败与不确定结果'));
