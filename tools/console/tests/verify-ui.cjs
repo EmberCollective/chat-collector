@@ -128,7 +128,8 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
     await page.locator('#history-min-duration').fill('10');await page.locator('#history-error').fill('busy');await page.locator('#history-apply').click();
     await page.waitForFunction(()=>document.getElementById('history-summary').textContent.startsWith('已显示 1 / 1'));
     assert.match(await page.locator('#jobs').textContent(),/14.0 秒/);assert.match(await page.locator('#jobs').textContent(),/fixture database busy/);
-    await page.locator('#jobs button').first().click();await page.waitForSelector('#run-dialog[open]');await page.locator('#close-dialog').click();
+    await page.locator('#jobs button').first().click();await page.waitForSelector('#run-dialog[open]');await page.locator('#show-history').click();
+    assert.equal(await page.locator('#history-origin').inputValue(),'schedule');assert.equal(await page.locator('#history-min-duration').inputValue(),'10');assert.equal(await page.locator('#history-error').inputValue(),'busy');
     await page.locator('#history-reset').click();
     // Appending during an in-flight replacement cannot invalidate that replacement.
     await page.evaluate(async()=>{const original=api;let release;api=(...args)=>args[0].startsWith('/jobs?')?new Promise(r=>{release=r;}):original(...args);const request=refreshHistory();await Promise.resolve();await refreshHistory(true);release({jobs:[],total:0,facets:{actions:[],modules:[],origins:[]},next_cursor:0,has_more:false});await request;api=original;});

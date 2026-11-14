@@ -24,7 +24,7 @@ function renderHistoryRows(){
   for(const job of historyRows){
     const row=el('tr');row.append(el('td',time(job.started_at)),el('td',names[job.module]||job.module||'未注明'),el('td',actions[job.action]||job.action||'未注明'),el('td',originLabels[job.origin]||job.origin||'未注明'),el('td',states[job.status]||job.status||'未注明'));
     const duration=el('td',durationText(job.duration_seconds,job.duration_complete));if(job.status==='running'&&job.started_at)duration.dataset.runningStart=String(job.started_at);row.append(duration);
-    row.append(el('td',job.error||'—','history-error-cell'));const controls=el('td'),group=el('div',undefined,'row');group.append(button('详情',()=>showJob(job.id,job.source)));if(job.action==='process'&&job.source!=='automation')group.append(button('Pi 工作流',()=>selectWorkflow(job.id)));controls.append(group);row.append(controls);$('jobs').append(row);
+    row.append(el('td',job.error||'—','history-error-cell'));const controls=el('td'),group=el('div',undefined,'row');group.append(button('详情',()=>showJob(job.id,job.source,{start:null,end:null,...Object.fromEntries(historyParams()),label:'运行记录 · 当前筛选'})));if(job.action==='process'&&job.source!=='automation')group.append(button('Pi 工作流',()=>selectWorkflow(job.id)));controls.append(group);row.append(controls);$('jobs').append(row);
   }
   if(!historyRows.length){const row=el('tr'),cell=el('td','此范围内没有运行记录。调整筛选条件或等待首次执行。','empty');cell.colSpan=8;row.append(cell);$('jobs').append(row);}
 }

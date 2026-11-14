@@ -8,8 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const labels = {enabled: '启用', interval_seconds: '间隔（秒）', max_attempts: '失败尝试上限', backoff_seconds: '首次重试等待（秒）', max_backoff_seconds: '最长重试等待（秒）', retry_base_seconds: '重试等待基数（秒）', max_deliveries_per_round: '每轮最多投递数', timeout_seconds: '请求超时（秒）', app_id_env: '应用 ID 环境变量名', app_secret_env: '应用密钥环境变量名', recipient_id: '目标群 chat_id', receive_id_type: '目标类型', allowed_operator_ids: '可操作人员 open_id（每行一个）', snooze_seconds: '稍后提醒等待（秒）', upload_files: '上传本地附件', max_file_bytes: '附件上传上限（字节）', url_env: 'Webhook 地址环境变量名', secret_env: '签名密钥环境变量名（可空）', token_env: '访问令牌环境变量名', data_source_id: 'Notion 数据源 ID', mode: '投递模式', purpose: '用途说明', title: '标题', task_id: '待办编号', priority: '优先级', status: '状态', date: '日期', instructions: '行动说明', files: '附件'};
   let config = null, dirty = false, busy = false, polling = false;
   let controls = [];
-  const notice = text => {byId('notice').textContent = text; byId('action-notice').textContent = text;if(byId('target-dialog').open)byId('add-error').textContent=text;};
-  const markDirty = () => {dirty = true; notice('有未保存的设置。运行控制与测试使用已保存的配置。');};
+  const notice = (text, service = true) => {byId('notice').textContent = text; byId('action-notice').textContent = service ? text : '';if(byId('target-dialog').open)byId('add-error').textContent=text;};
+  const markDirty = () => {dirty = true; notice('有未保存的设置。运行控制与测试使用已保存的配置。', false);};
   async function request(path, options = {}, base = '/api/operations') {
     const session = await fetch('/api/session').then(r => r.json());
     const response = await fetch(base + path, {...options, headers: {'X-Console-Token': session.token, 'Content-Type': 'application/json'}});
@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     input.id = 'ops-field-' + controls.length;input.dataset.opsKey = key;
     input.disabled=busy;
     if (type === 'boolean') input.checked = !!object[key];
+    else if (type === 'boolean-select') input.value = String(!!object[key]);
     else input.value = type === 'minutes' ? (object[key] || []).map(v => v / 60).join(', ') : type === 'strings' ? (object[key] || []).join('\n') : object[key] ?? '';
     if (type === 'integer') {input.min = options.min ?? 1; input.max = options.max ?? 86400; input.step = '1'; input.required = true;}
     if (type === 'env') {input.pattern = '[A-Za-z_][A-Za-z0-9_]{0,127}'; input.placeholder = '仅填写变量名；密钥值保留在本机 .env'; input.maxLength = 128;}
@@ -66,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function jobRow(parent,name,note) {
     const settings=config.automation.jobs[name],row=node('div',null,'automation-task-row'),main=node('div');row.dataset.job=name;parent.append(row);row.append(main);
-    field(main,settings,'enabled','boolean',{label:jobNames[name]||name});if(note)main.append(node('p',note));
+    field(main,settings,'enabled','boolean',{label:jobCatalog[name]?.action==='process'?'处理正式增量':jobNames[name]||name});if(note)main.append(node('p',note));
     const number=node('div',null,'automation-number');row.append(number);const input=field(number,settings,'interval_seconds','integer',{label:'检查间隔'});input.parentElement.className='automation-number';number.append(node('span','秒'));
   }
   async function openRules(id){
@@ -91,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const description=channelDescription(target.kind);
     const card=node('details',null,'channel');card.dataset.targetId=target.id;card.open=expandedTargets.has(target.id);byId('targets').append(card);
     card.addEventListener('toggle',()=>{if(card.open)expandedTargets.add(target.id);else expandedTargets.delete(target.id);});
-    const summary=node('summary',null,'automation-target-summary'),title=node('span');title.append(node('strong',target.id),node('small',description?.name||target.kind));summary.append(title,node('span',target.enabled?'已启用':'未启用','chip'+(target.enabled?' green':'')),node('span',description?Object.entries(description.capabilities||{}).filter(([,enabled])=>enabled).map(([name])=>({send:'消息',files:'文件',feedback:'回写',listen:'监听',test:'测试',recovery:'结果核实'}[name]||name)).join(' · '):'描述不可用','automation-caption'));card.append(summary);
+    const summary=node('summary',null,'automation-target-summary'),title=node('span');title.append(node('strong',target.id),node('small',description?.name||target.kind));summary.append(title,node('span',target.enabled?'已启用':'未启用','chip'+(target.enabled?' green':'')),node('span',description?Object.entries(description.capabilities||{}).filter(([,enabled])=>enabled).map(([name])=>({send:'消息',files:'文件',feedback:'回写',listen:'监听',listener:'监听',test:'测试',recovery:'结果核实'}[name]||name)).join(' · '):'描述不可用','automation-caption'));card.append(summary);
     const body=node('div',null,'automation-target-body');card.append(body);card.addEventListener('change',event=>{if(event.target.dataset.opsKey==='enabled'){const chip=summary.querySelector('.chip');chip.textContent=event.target.checked?'已启用 · 草稿':'未启用 · 草稿';chip.classList.toggle('green',event.target.checked);}});
     if(!description){body.append(node('p','此类型没有可用描述，当前只读。已有配置保留在文件中，不会在保存其他设置时丢弃。','scope'));return;}
     for(const [key,value]of Object.entries(description.defaults||{}))if(target[key]===undefined)target[key]=structuredClone(value);
@@ -118,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function renderConfig() {
     controls=[];
-    for(const id of ['source-fields','source-advanced','processor-fields','processor-advanced','delivery-fields','reminder-fields','targets'])byId(id).replaceChildren();
+    for(const id of ['source-fields','source-advanced','processor-fields','processor-advanced','delivery-fields','delivery-advanced','reminder-fields','targets'])byId(id).replaceChildren();
     const entries=Object.entries(jobCatalog),collectors=entries.filter(([,description])=>description.action==='collect');
     for(const source of sourceDescriptions)sourceRow(source,collectors.find(([,description])=>description.source_id===source.id));
     for(const [name,description]of collectors){if(!sourceDescriptions.some(source=>source.id===description.source_id))sourceRow({id:name,name:jobNames[name]||name,capabilities:{}},[name,description]);jobExtra(byId('source-advanced'),name);}
@@ -129,32 +130,39 @@ document.addEventListener('DOMContentLoaded', () => {
     for(const [name]of additional.filter(([,description])=>description.action==='deliver'))jobRow(delivery,name,'按已保存配置投递正式待办');
     const listener=details(delivery,'监听与操作回写');listener.className='automation-advanced';listener.open=true;
     for(const [name]of additional.filter(([,description])=>description.action==='feedback'))jobRow(listener,name,'完成、取消和稍后提醒等待处理层确认保存');
-    const listenerRow=node('div',null,'automation-task-row');listener.append(listenerRow);field(listenerRow,config.automation.listener,'enabled','boolean',{label:'启用渠道按钮监听'});
+    const listenerRow=node('div',null,'automation-task-row'),listenerMain=node('div');listener.append(listenerRow);listenerRow.append(listenerMain);field(listenerMain,config.automation.listener,'enabled','boolean',{label:'监听渠道操作'});listenerMain.append(node('p','仅对声明监听能力的渠道生效'));
+    const listenerInterval=node('div',null,'automation-number');listenerRow.append(listenerInterval);const listenerCheck=field(listenerInterval,config.automation.listener,'check_interval_seconds','integer',{label:'存活检查',max:60});listenerCheck.parentElement.className='automation-number';listenerInterval.append(node('span','秒'));
     for(const parent of [processor,delivery]){
-      const advanced=details(parent===processor?byId('processor-advanced'):parent,'运行一轮与失败重试设置');
+      const advanced=details(byId(parent===processor?'processor-advanced':'delivery-advanced'),'运行一轮与失败重试设置');
       for(const [name,description]of additional.filter(([,description])=>(['deliver','feedback'].includes(description.action)?delivery:processor)===parent))jobExtra(advanced,name);
       if(parent===delivery){button(advanced,'恢复监听重试',()=>operate('/jobs/listener/resume','已提交恢复监听重试。'));advanced.append(node('p','同一应用的目标可共用监听；不同应用需分别启动监听程序。监听仅用于渠道声明支持的操作。','automation-boundary'));}
     }
-    const limits=grid(details(delivery,'投递与回写限制'));
+    const limits=grid(details(byId('delivery-advanced'),'投递与回写限制'));
     field(limits,config.messaging,'enabled','boolean',{label:'允许外部投递'});field(limits,config.messaging,'feedback_enabled','boolean',{label:'允许操作结果回写处理层'});
+    let reminderAdvanced;
     if(config.messaging.deadline_reminders){
       const settings=config.messaging.deadline_reminders;
-      field(reminders,settings,'enabled','boolean',{label:'启用截止节点提醒'});
-      reminders.append(node('p','按截止节点提醒；无截止时间时使用间隔。已完成、取消的事项不再催办','automation-boundary'));
-      field(grid(reminders),settings,'P1','minutes',{label:'P1 截止前提醒 · 分钟'});
+      const checkRow=node('div',null,'automation-task-row'),checkMain=node('div'),schedule=additional.find(([,description])=>description.action==='deliver');
+      checkMain.append(node('strong','检查到期提醒'),node('p','与消息投递共用计划，无需单独启动'));checkRow.append(checkMain,node('span',schedule?'每 '+config.automation.jobs[schedule[0]].interval_seconds+' 秒 · 已保存计划':'计划未关联','automation-caption'));reminders.append(checkRow);
+      reminders.append(node('p','按截止节点提醒；无截止时间时使用间隔。已完成、取消的事项不再催办'));
+      const mainFields=grid(reminders);
+      field(mainFields,settings,'enabled','boolean-select',{label:'提醒方式',choices:{true:'截止节点优先，无截止时间用间隔',false:'仅使用间隔提醒'}});
+      const p1=field(mainFields,settings,'P1','minutes',{label:'P1 截止前提醒 · 分钟'});p1.parentElement.append(node('span','0 表示截止时提醒','hint'));
       const more=details(reminders,'其他优先级、重复提醒与投递时间'),fields=grid(more);
+      reminderAdvanced=more;
       field(fields,settings,'timezone','string',{label:'日期未注明时区时使用'});
       for(const key of ['P0','P2','P3','P4'])field(fields,settings,key,'minutes',{label:key+' · 提前分钟（0 为截止时）'});
       more.append(node('p','每个节点只提醒一次；错过多个节点只补最近一次。只有日期时按当日 23:59:59 安排，空列表表示该优先级不做截止提醒。','automation-boundary'));
     }
-    if(config.messaging.initial_notifications){const fields=grid(details(reminders,'新待办首次通知'));for(const key of ['P0','P1','P2','P3','P4'])field(fields,config.messaging.initial_notifications,key,'boolean',{label:key+' · 首次立即通知'});}
+    reminderAdvanced??=details(reminders,'优先级、重复提醒与投递时间');
+    if(config.messaging.initial_notifications){const fields=grid(details(reminderAdvanced,'新待办首次通知'));for(const key of ['P0','P1','P2','P3','P4'])field(fields,config.messaging.initial_notifications,key,'boolean',{label:key+' · 首次立即通知'});}
     if(config.messaging.daily_digest){
-      const section=details(reminders,'每日早报 · 今日通知安排'),fields=grid(section),settings=config.messaging.daily_digest;
+      const section=details(reminderAdvanced,'每日早报 · 今日通知安排'),fields=grid(section),settings=config.messaging.daily_digest;
       section.append(node('p','只汇总今天有通知节点的未完成事项，呈现方式由渠道决定','automation-boundary'));
       field(fields,settings,'enabled','boolean',{label:'启用每日早报'});field(fields,settings,'time','string',{label:'发送时间（HH:MM）'});field(fields,settings,'timezone','string',{label:'早报时区'});field(fields,settings,'catch_up_minutes','integer',{label:'补发窗口 · 分钟',min:1,max:1440});
     }
-    const interval=grid(details(reminders,'无截止时间时的间隔提醒 · 秒（0 不重复）'));for(const key of ['P0','P1','P2','P3','P4'])field(interval,config.messaging.reminders,key,'integer',{min:0,max:31536000});
-    const retry=details(delivery,'单条投递与状态回写的重试上限');retry.append(node('p','整轮重试与单条消息、回写请求的重试分别设置','automation-boundary'));
+    const interval=grid(details(reminderAdvanced,'无截止时间时的间隔提醒 · 秒（0 不重复）'));for(const key of ['P0','P1','P2','P3','P4'])field(interval,config.messaging.reminders,key,'integer',{min:0,max:31536000});
+    const retry=details(byId('delivery-advanced'),'单条投递与状态回写的重试上限');retry.append(node('p','整轮重试与单条消息、回写请求的重试分别设置','automation-boundary'));
     for(const section of ['schedule','feedback']){retry.append(node('h4',section==='schedule'?'消息投递':'操作回写'));const area=grid(retry);for(const key of Object.keys(config.messaging[section]).filter(key=>key!=='interval_seconds'))field(area,config.messaging[section],key,'integer',{max:key==='max_attempts'?20:key==='max_deliveries_per_round'?1000:86400});}
     const alerts=grid(details(byId('processor-advanced'),'运行失败通知'));
     field(alerts,config.automation.alerts,'enabled','boolean',{label:'启用运行失败通知'});field(alerts,config.automation.alerts,'target_id','string',{label:'接收通知的通道编号'});field(alerts,config.automation.alerts,'cooldown_seconds','integer',{label:'重复故障通知间隔 · 秒',max:2592000});field(alerts,config.automation.alerts,'recovery_enabled','boolean',{label:'恢复后发送通知'});
@@ -174,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (values.some(v => !Number.isFinite(v) || v < 0 || !Number.isInteger(v * 60))) throw Error(key + ' 请填写有效的非负分钟数，使用逗号分隔。');
         object[key] = values.map(v => v * 60); continue;
       }
-      object[key] = type === 'boolean' ? input.checked : type === 'integer' ? Number(input.value) : type === 'strings' ? input.value.split(/[\n,，]+/).map(x => x.trim()).filter(Boolean) : input.value.trim();
+      object[key] = type === 'boolean' ? input.checked : type === 'boolean-select' ? input.value === 'true' : type === 'integer' ? Number(input.value) : type === 'strings' ? input.value.split(/[\n,，]+/).map(x => x.trim()).filter(Boolean) : input.value.trim();
     }
     const {schemas, types, ...settings} = config.messaging;
     const messaging={...settings,targets:settings.targets.filter(target=>Object.hasOwn(types||{},target.kind))};
@@ -185,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const [settings,catalog,sources] = await Promise.all([request('/config'),request('/catalog'),request('/catalog',{},'/api')]);
     config=settings;jobCatalog=catalog.jobs;sourceDescriptions=sources.sources;
     for(const [name,description]of Object.entries(jobCatalog))jobNames[name]=description.name;
-    renderConfig(); dirty = false; notice('设置已加载 · 未修改');
+    renderConfig(); dirty = false; notice('设置已加载 · 未修改', false);
   }
   async function saveConfig(payload) {
     if (!config) throw Error('请先重新加载设置。');
@@ -217,7 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderStatus(snapshot) {
     const service = snapshot.service || {}, active = service.running;
     byId('status-strip').dataset.state=service.state||'unknown';byId('service-detail').textContent=states[service.state]||service.state||'状态未确认';byId('service-verified').textContent=service.verified?'已核对当前后台进程':'进程状态尚未确认';
-    byId('service-boundary').textContent=active?'关闭网页后，已启用的计划继续运行':'后台服务未运行；启用的计划暂不执行';
+    byId('service-boundary').textContent=active?'关闭网页后，已启用的计划继续运行':['stopped','not_running'].includes(service.state)?'后台服务未运行；启用的计划暂不执行':'后台状态尚未确认，请刷新后核对计划是否运行';
     byId('service-status').textContent = `${active ? states[service.state] || '运行中' : states[service.state] || service.state || '未运行'}${service.pid ? ' · PID ' + service.pid : ''}${service.config_changed ? ' · 配置已变化，请重新启动' : ''}`;
     const jobs = byId('jobs'); jobs.replaceChildren();
     const checks = snapshot.checks || {};
@@ -280,12 +288,17 @@ document.addEventListener('DOMContentLoaded', () => {
     finally {polling = false;}
   }
   function renderStartup(value) {
+    byId('startup-chip').textContent = !value.supported ? '系统不支持' : value.blocked_by_windows ? '系统已禁用' : value.installed && !value.matches ? '路径需核对' : value.enabled ? '已开启' : '未开启';
+    byId('startup-status').className = value.supported && !value.blocked_by_windows && !(value.installed && !value.matches) ? 'sr-only' : '';
     for(const id of ['startup-enable','startup-disable']){byId(id).dataset.opsUnavailable=String(!value.supported);byId(id).disabled=!value.supported||busy;}
     byId('startup-status').textContent = !value.supported ? '此系统不支持 Windows 登录启动项。' : value.enabled ? '已开启：当前用户下次登录后自动启动。' : value.blocked_by_windows ? '已被 Windows 任务管理器禁用；点击开启可重新启用。' : value.installed && !value.matches ? '发现同名启动项，但启动路径不同；请核对安装目录后重新开启。' : '未开启';
   }
   async function refreshStartup() {
     try {renderStartup(await request('/startup'));}
-    catch (error) {byId('startup-status').textContent = '启动项状态读取失败：' + error.message;}
+    catch (error) {
+      byId('startup-chip').textContent='状态未确认';byId('startup-status').className='';byId('startup-status').textContent='启动项状态读取失败：'+error.message;
+      for(const id of ['startup-enable','startup-disable']){byId(id).dataset.opsUnavailable='true';byId(id).disabled=true;}
+    }
   }
   for (const [id, enabled] of [['startup-enable', true], ['startup-disable', false]]) {
     byId(id).addEventListener('click', () => action(async () => {

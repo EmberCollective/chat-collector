@@ -16,6 +16,7 @@
   font-weight:600;
 }
 .brand small {
+  display:inline;
   margin-top:0;
   font-size:10px;
 }
@@ -60,10 +61,15 @@
   gap:12px;
   background:#ffffffd9;
 }
+.app-body { display:flex;flex-direction:column;min-height:100dvh; }
 main {
   padding:28px 32px 40px;
   max-width:1700px;
+  width:100%;
+  flex:1;
 }
+.console-statusbar { display:flex;justify-content:space-between;gap:24px;padding:8px 32px;border-top:1px solid var(--line);background:#fff;margin:0; }
+.console-statusbar span { display:inline;margin:0;text-align:right; }
 .page-heading {
   gap:20px;
   margin-bottom:24px;
@@ -133,4 +139,7 @@ h1 { letter-spacing:-.5px; }
   .sidebar nav a { min-height:40px; }
   .btn { min-height:40px; }
   .icon-btn { width:40px; }
+  .topbar .workspace-name,.console-statusbar>span { display:none; }
+  .topbar .icon-button { border-color:transparent;background:transparent; }
+  .console-statusbar { padding:8px 16px; }
 }

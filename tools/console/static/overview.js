@@ -44,7 +44,7 @@
     for(const issue of issues){
       const row=node('div',null,'problem-row'),text=node('div'),unknown=['unknown','delivery_unknown'].includes(issue.kind)||issue.status==='unknown';
       text.append(node('strong',issue.title||(names[issue.source_id||issue.module]||issue.source_id||issue.module||'系统')+'：'+(unknown?'结果待确认':'运行异常')),node('p',issueText(issue)));
-      row.append(node('span',unknown?'待确认':'异常','problem-tag'+(unknown?' warn':'')),text,node('time',clock(issue.last_at)));
+      row.append(node('span',unknown?'待确认':issue.severity==='warning'?'需检查':'失败','problem-tag'+(unknown||issue.severity==='warning'?' warn':'')),text,node('time',clock(issue.last_at)));
       const button=node('button','查看相关记录','secondary');button.dataset.issueKey=issue.key;button.addEventListener('click',()=>guard(()=>openIssue(issue)));row.append(button);attention.append(row);
     }
     const metrics=[['待处理问题',issues.length+' 项',issues.length?'包含当前故障与结果未确认':'包含故障与结果未确认',!!issues.length],['后台服务',serviceState(service),service.note||'采集 / 处理 / 投递分别核对'],['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['正式采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本']];
@@ -138,8 +138,8 @@
     const request=++listGeneration;++detailGeneration;
     $('dialog-heading').textContent='相关运行';$('run-list').hidden=false;$('run-detail').hidden=true;$('show-history').hidden=false;
     $('run-scope').textContent=scope.label||'运行记录';$('related-runs').replaceChildren(node('p','正在读取记录…','empty'));
-    const params=new URLSearchParams({limit:'30',sort:'latest'});
-    for(const key of ['start','end','module','action'])if(scope[key]!=null)params.set(key,scope[key]);
+    const params=new URLSearchParams({limit:'30',sort:scope.sort||'latest'});
+    for(const key of ['start','end','module','action','origin','error','min_duration_seconds','max_duration_seconds'])if(scope[key]!=null&&scope[key]!=='')params.set(key,scope[key]);
     const filter=$('run-result-filter').value;if(filter!=='all')params.set('status',filter==='unknown'?'interrupted':filter);
     let result;
     try{result=await api('/jobs?'+params);}catch(error){if(request===listGeneration)$('related-runs').replaceChildren(node('p','相关记录读取失败：'+error.message+'。当前筛选已保留，可在运行记录中重新查看。','run-notice'));return;}
@@ -147,12 +147,12 @@
     records=result.jobs;const table=node('table'),head=node('tr');for(const value of ['开始时间','模块','操作','触发方式','结果','耗时','详情'])head.append(node('th',value));table.append(head);
     for(const job of records){const row=node('tr');for(const value of [stamp(job.started_at),names[job.module]||job.module,actions[job.action]||job.action,originLabels[job.origin]||job.origin||'未注明',state(job.status),durationText(job.duration_seconds,job.duration_complete)])row.append(node('td',value));const cell=node('td'),button=node('button','查看详情','text-button');button.dataset.runId=job.id;button.addEventListener('click',()=>guard(()=>openOverviewJob(job.id,job.source,scope)));cell.append(button);row.append(cell);table.append(row);}
     $('related-runs').replaceChildren(records.length?table:node('p','此范围没有符合条件的运行；筛选仍保留。','empty'));
-    $('run-scope').textContent=(scope.label||'运行记录')+' · '+stamp(scope.start)+' — '+stamp(scope.end)+' · '+records.length+' / '+result.total+' 条';
+    $('run-scope').textContent=(scope.label||'运行记录')+' · '+(scope.start!=null||scope.end!=null?stamp(scope.start)+' — '+stamp(scope.end):'全部时间')+' · '+records.length+' / '+result.total+' 条';
   }
   function jobConfig(job){return {source_id:job.source==='automation'?snapshot?.jobs?.find(item=>item.module===job.module)?.source_id:sourceInfo(job.module)?job.module:null,config_target:job.module==='processor'?'settings/model':job.module==='messaging'||job.module==='feedback'?'automation/channels':job.source==='automation'?'automation/background':'settings/source'};}
   async function openOverviewJob(id,source,options){
     const request=++detailGeneration;++listGeneration;
-    if(options)scope=windowScope(options);else if(!scope.label)scope=windowScope({label:'运行详情'});
+    if(options){scope=windowScope(options);$('run-result-filter').value=scope.status==='interrupted'?'unknown':scope.status||'all';}else if(!scope.label)scope=windowScope({label:'运行详情'});
     if(!$('run-dialog').open)$('run-dialog').showModal();$('run-list').hidden=true;$('run-detail').hidden=false;$('run-detail').replaceChildren(node('p','正在读取运行详情…','empty'));
     let job;
     try{job=await api('/activity/'+(source==='automation'?'automation':'console')+'/'+encodeURIComponent(id));}
@@ -187,6 +187,7 @@
   }
   async function openIssue(issue){
     scope=windowScope({module:issue.source_id||issue.module,label:(names[issue.source_id||issue.module]||issue.module||'系统')+' · 当前问题'});
+    $('run-result-filter').value='all';
     if(issue.run_id)return openOverviewJob(issue.run_id,issue.run_source,scope);
     const request=++detailGeneration;++listGeneration;current={kind:'issue',issue};
     if(!$('run-dialog').open)$('run-dialog').showModal();
@@ -242,7 +243,8 @@
   }
   async function showHistory(){
     const filter=$('run-result-filter').value;$('run-dialog').close();$('history-form').reset();
-    for(const [key,id]of [['module','history-module'],['action','history-action']])if(scope[key]){const picker=$(id);if(![...picker.options].some(option=>option.value===scope[key])){const option=node('option',names[scope[key]]||actions[scope[key]]||scope[key]);option.value=scope[key];picker.append(option);}picker.value=scope[key];}
+    for(const [key,id]of [['module','history-module'],['action','history-action'],['origin','history-origin']])if(scope[key]){const picker=$(id);if(![...picker.options].some(option=>option.value===scope[key])){const option=node('option',names[scope[key]]||actions[scope[key]]||originLabels[scope[key]]||scope[key]);option.value=scope[key];picker.append(option);}picker.value=scope[key];}
+    for(const [key,id]of [['error','history-error'],['min_duration_seconds','history-min-duration'],['max_duration_seconds','history-max-duration'],['sort','history-sort']])if(scope[key]!=null)$(id).value=scope[key];
     $('history-filter').value=filter==='all'?'':filter==='unknown'?'interrupted':filter;
     for(const key of ['start','end'])if(scope[key]!=null){const date=new Date(scope[key]*1000);$('history-'+key).value=new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,19);}
     location.hash='history';await refreshHistory();
@@ -250,10 +252,11 @@
   window.openOverviewJob=openOverviewJob;
   window.initOverview=async()=>{
     ready=true;
+    for(const status of ['running','retry','warning']){const option=node('option',state(status));option.value=status;$('run-result-filter').append(option);}
     $('overview-hours').addEventListener('change',()=>{++generation;loading=false;guard(refreshOverview);});
     $('resource-messages').addEventListener('click',()=>{metric='messages';if(snapshot)renderResources();});$('resource-storage').addEventListener('click',()=>{metric='storage';if(snapshot)renderResources();});
     $('show-records').addEventListener('click',()=>guard(()=>openRuns({action:'collect'})));
-    $('run-result-filter').addEventListener('change',()=>guard(renderRunList));$('close-dialog').addEventListener('click',()=>{$('run-dialog').close();++detailGeneration;++listGeneration;});
+    $('run-result-filter').addEventListener('change',()=>{scope.status=$('run-result-filter').value==='all'?'':$('run-result-filter').value;guard(renderRunList);});$('close-dialog').addEventListener('click',()=>{$('run-dialog').close();++detailGeneration;++listGeneration;});
     $('show-history').addEventListener('click',()=>guard(showHistory));$('overview-return-run').addEventListener('click',()=>guard(restoreRun));
     window.addEventListener('operations-updated',()=>guard(refreshOverview));
     window.addEventListener('hashchange',()=>{if(!$('view-overview').hidden)guard(refreshOverview);});

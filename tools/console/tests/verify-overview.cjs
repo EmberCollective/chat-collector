@@ -48,6 +48,11 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
     await page.waitForFunction(()=>document.getElementById('run-detail').textContent.includes('已保存人工送达确认'));
     await page.locator('#close-dialog').click();assert.equal(await page.locator('[data-issue-key=delivery-unknown]').count(),0);
     assert.deepEqual(mutations,[base+'/api/operations/deliveries/fixture-unknown/delivered']);
+    data.issues.push(makeSnapshot().issues[1]);operations.messaging.deliveries[0].status='unknown';
+    await page.locator('#overview-hours').selectOption('48');await page.waitForSelector('[data-issue-key=delivery-unknown]');
+    await page.locator('[data-issue-key=delivery-unknown]').click();await page.locator('#delivery-checked').check();await received.click();await page.locator('#close-dialog').click();
+    await page.evaluate(()=>openOverviewJob('00000000000000000000000000000001','console',{module:'qq',action:'collect'}));
+    await page.waitForTimeout(350);assert.doesNotMatch(await page.locator('#run-detail').textContent(),/已保存人工送达确认/);await page.locator('#close-dialog').click();
     // A deleted source must not borrow the current source or a processor schedule.
     await page.route('**/api/activity/automation/removed-source',route=>route.fulfill({json:{id:'removed-source',source:'automation',module:'removed-account',action:'collect',status:'failed',started_at:1,finished_at:2,attempts:[]}}));
     await page.evaluate(()=>openOverviewJob('removed-source','automation',{label:'历史来源'}));
@@ -55,16 +60,16 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
     await page.unroute('**/api/operations/status');
     // Break the success line across missing samples; never join through a missing interval.
     data.success_bins[4].success_rate=null;data.sources[0].name='<img src=x onerror=alert(1)> '+('长名称'.repeat(30));data.sources[0].emitted=null;data.summary.emitted_complete=false;
-    await page.locator('#overview-hours').selectOption('48');await page.waitForFunction(()=>document.querySelectorAll('#rate-chart polyline').length===2);
+    await page.locator('#overview-hours').selectOption('24');await page.waitForFunction(()=>document.querySelectorAll('#rate-chart polyline').length===2);
     assert.equal(await page.locator('#collection-table img').count(),0);
     assert.match(await page.locator('#collection-table').textContent(),/<img src=x/);
     for(const width of [320,390,800,1024,1440,1600]){await page.setViewportSize({width,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'overflow '+width);}
-    fail=true;await page.locator('#overview-hours').selectOption('24');await page.waitForFunction(()=>document.getElementById('last-refresh').textContent.includes('数据已过期'));
+    fail=true;await page.locator('#overview-hours').selectOption('48');await page.waitForFunction(()=>document.getElementById('last-refresh').textContent.includes('数据已过期'));
     assert.match(await page.locator('#attention').textContent(),/无法确认/);assert.match(await page.locator('#kpis').textContent(),/1,284/);
     fail=false;data=makeSnapshot();data.summary={emitted:null,duplicates:null,valid_count:0,success_rate:null};data.issues=[];data.success_bins=[];data.sources=[];data.resources={complete:false,sources:[],shared:{logical_bytes:null}};
     await page.getByRole('button',{name:'重新读取',exact:true}).click();await page.waitForFunction(()=>document.getElementById('attention').textContent.includes('等待首次'));
     await page.locator('#resource-storage').click();assert.equal(await page.locator('#resource-total').textContent(),'—');
-    assert.equal(mutations.length,1);assert.deepEqual(errors,[]);
+    assert.equal(mutations.length,2);assert.deepEqual(errors,[]);
     console.log('PASS: overview real detail/config/return/history scope, missing samples, unknown metrics, stale response, safe text and responsive layout');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

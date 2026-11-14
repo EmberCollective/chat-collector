@@ -26,6 +26,7 @@ class JobSettings(StrictModel):
 
 class ListenerSettings(StrictModel):
     enabled: bool
+    check_interval_seconds: int = Field(default=5, ge=1, le=60)
 
 
 class AlertSettings(StrictModel):
@@ -121,7 +122,7 @@ def register_operations_routes(app, bridge, authenticate):
         auto = {'enabled': cfg['enabled'],
                 'jobs': {name: {key: cfg['jobs'][name][key] for key in JobSettings.model_fields}
                          for name in ('wechat', 'qq', 'processor', 'messaging', 'feedback')},
-                'listener': {'enabled': cfg['listener']['enabled']},
+                'listener': {key: cfg['listener'][key] for key in ListenerSettings.model_fields},
                 'alerts': {key: cfg['alerts'][key] for key in AlertSettings.model_fields}}
         return {'version': {'automation': _hash(raw), 'messaging': msg.pop('version')},
                 'automation': auto, 'messaging': msg}
@@ -144,7 +145,7 @@ def register_operations_routes(app, bridge, authenticate):
             old_config = load_config(auto_path)
             running = control.status(old_config)['running']
             document = tomlkit.parse(old_auto.decode('utf-8'))
-            patch = body.automation.model_dump()
+            patch = body.automation.model_dump(exclude_unset=True)
             document['enabled'] = patch['enabled']
             for name, values in patch['jobs'].items():
                 document.setdefault('jobs', {}).setdefault(name, {}).update(values)

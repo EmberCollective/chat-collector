@@ -6,6 +6,7 @@
 /* The approved automation layout keeps its own controls while using the shared shell. */
 #view-automation .page-heading p{margin-top:8px}#view-automation .automation-tabs button{padding:0 0 12px}#view-automation .automation-tabs button[aria-selected=true]{font-weight:600}#view-automation .automation-section-head p,#view-automation .automation-task-row p,#view-automation .automation-savebar p{margin-top:4px}
 #view-automation .automation-inline-advanced{margin-left:auto}#view-automation .automation-inline-advanced>summary{padding:4px 0;font-size:13px;color:var(--green)}#view-automation .automation-inline-advanced[open]{flex-basis:100%;margin-left:0}#view-automation .automation-inline-advanced[open]>div{padding-top:12px}#view-automation .automation-inline-advanced:not([open])>summary{white-space:nowrap}
+#view-automation .automation-task-row label:has(input[type=checkbox]){min-height:22.4px;position:relative}#view-automation .automation-task-row label:has(input[type=checkbox]):before{content:'';position:absolute;top:50%;transform:translateY(-50%);left:0;right:0;height:36px}
 #view-automation{--secondary:#52615a;--soft:#f1f3f2;--green-soft:#eaf3ee;--radius:8px}
 #view-automation :is(h2,h3,h4,p){margin:0}#view-automation h3{font-size:14px;font-weight:500}
 #view-automation .row{display:flex;align-items:center;gap:12px}#view-automation .wrap{flex-wrap:wrap}
@@ -19,7 +20,7 @@
 #view-automation .field :is(input,select,textarea){width:100%;margin:0;padding:8px 10px;border:1px solid #ced8d1;border-radius:6px;background:white;color:var(--ink);min-height:36px;font-size:13px}
 #view-automation .field input[type=checkbox]{width:16px;min-height:16px;height:16px;padding:0}
 #view-automation .automation-number input{margin:0;max-width:88px}#view-automation .automation-mobile-label{display:none}
-#view-automation .automation-task-row label:has(input[type=checkbox]){min-height:36px;cursor:pointer}
+#view-automation .automation-task-row label:has(input[type=checkbox]){min-height:22.4px;cursor:pointer}
 #view-automation label:has(>input[type=checkbox]){min-height:36px;cursor:pointer}#view-automation :is(.scope,.muted,small,summary,th,td,pre){font-size:13px}
 #view-automation summary{color:var(--secondary)}#view-automation .automation-target-summary{color:var(--ink)}#view-automation .automation-unavailable{color:var(--muted)}
 #view-automation .automation-extra{padding:12px 20px;border-top:1px solid var(--line)}#view-automation .automation-extra>summary{font-size:13px;color:var(--secondary)}
@@ -27,7 +28,9 @@
 #view-automation .settings-grid{gap:16px;margin:16px 0;grid-template-columns:repeat(3,minmax(0,1fr))}#view-automation .settings-grid label{font-size:13px}
 #view-automation .automation-policy-grid .settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 #view-automation .automation-boundary{line-height:1.6}#ops-status-error:empty{display:none}#ops-status-error{font-size:13px;color:#a43b32;margin:12px 0}
+#ops-action-notice:empty{display:none}#view-automation .automation-service-diagnostics{margin:0 0 0 auto}#view-automation .automation-service-diagnostics>summary{cursor:pointer;padding:0;min-height:24px}#view-automation .automation-service-diagnostics[open]{flex-basis:100%;margin-left:0}#ops-jobs{overflow-x:auto}#ops-jobs .scope{margin:12px 0}
 #automation-rules{margin-bottom:20px}#automation-rules-slot{padding:20px}#automation-rules-slot #rulesets-editor{margin:0}#automation-rules-slot .rule-card{padding:12px 0}#automation-rules-slot :is(p,small,summary,button){font-size:13px}
 #ops-target-dialog{padding:20px;width:min(640px,calc(100% - 32px));max-height:88dvh}#ops-target-dialog .settings-grid{grid-template-columns:1fr 1fr}
 #view-automation .automation-savebar strong{overflow-wrap:anywhere}#view-automation .automation-status[data-state=stopped] .badge{color:var(--muted)}
 @media(max-width:800px){#view-automation .automation-mobile-label{display:inline}#view-automation .settings-grid{grid-template-columns:1fr}#view-automation .automation-policy-grid .settings-grid{grid-template-columns:1fr}#view-automation .automation-extra{padding:12px 16px}#automation-rules-slot{padding:16px}#view-automation .automation-savebar .row{width:100%;justify-content:flex-end}#view-automation .automation-policy-grid{gap:0}}
+@media(max-width:800px){#view-automation .automation-section-head{position:relative}#view-automation .automation-inline-advanced:not([open]){position:absolute;top:12px;right:16px}#view-automation .automation-section-head:has(>.automation-inline-advanced) h2{padding-right:80px}#view-automation .automation-processing .automation-section-head>.text-btn{margin-left:auto}#view-automation .automation-inline-advanced[open]{padding-top:4px}}

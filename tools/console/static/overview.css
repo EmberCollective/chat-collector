@@ -16,7 +16,7 @@
 #view-overview .page-heading p{font-size:14px;color:var(--muted);margin-top:8px}
 #view-overview .dashboard-scope{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px;font-size:13px}
 #view-overview .dashboard-scope label{display:flex;align-items:center;gap:8px}
-#view-overview .dashboard-scope label{margin-bottom:0}#view-overview .dashboard-scope select{margin:0;width:auto}
+#view-overview .dashboard-scope label{margin-left:auto;margin-bottom:0}#view-overview .dashboard-scope select{margin:0;width:auto}
 #view-overview .scenario-note{font-size:13px;color:var(--muted);margin:-8px 0 20px}
 #view-overview .pill{display:inline-block;font-size:13px;padding:2px 8px;border-radius:4px;background:#eaf3ee;color:var(--green)}
 #view-overview .pill.warn{background:#fbf5e9;color:var(--warn)}

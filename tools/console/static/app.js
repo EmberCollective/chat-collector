@@ -107,8 +107,8 @@ async function saveConfig(){
   const draft=sourceDrafts.get(id);if(draft)draft.config=config;
   notice(`${names[id]||id}配置已保存并备份；保存期间的新编辑保留在表单中。`);await refresh();
 }
-async function showJob(id,source){
-  return openOverviewJob(id,source,{label:'运行详情'});
+async function showJob(id,source,scope={label:'运行详情'}){
+  return openOverviewJob(id,source,scope);
 }
 
 function identitySummary(m){

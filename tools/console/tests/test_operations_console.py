@@ -86,6 +86,27 @@ def test_job_catalog_matches_source_by_config_path_not_platform_name(console, mo
     assert client.get('/api/operations/catalog', headers={'X-Console-Token':'wrong'}).status_code == 401
 
 
+def test_listener_health_interval_roundtrip_and_older_client(console, monkeypatch):
+    client, root, path = configured(console, monkeypatch)
+    body = client.get('/api/operations/config').json()
+    assert body['automation']['listener']['check_interval_seconds'] == 5
+    body['automation']['listener']['check_interval_seconds'] = 30
+    saved = client.put('/api/operations/config', json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['automation']['listener']['check_interval_seconds'] == 30
+    body = client.get('/api/operations/config').json()
+    del body['automation']['listener']['check_interval_seconds']
+    saved = client.put('/api/operations/config', json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['automation']['listener']['check_interval_seconds'] == 30
+    before = path.read_bytes(), (root/'messaging.toml').read_bytes()
+    for invalid in (0, 61, True, '10', 1.5):
+        body = client.get('/api/operations/config').json()
+        body['automation']['listener']['check_interval_seconds'] = invalid
+        assert client.put('/api/operations/config', json=body).status_code == 422
+        assert before == (path.read_bytes(), (root/'messaging.toml').read_bytes())
+
+
 def test_invalid_changes_do_not_partially_save(console, monkeypatch):
     client, root, path = configured(console, monkeypatch)
     before = path.read_bytes(), (root/'messaging.toml').read_bytes()
