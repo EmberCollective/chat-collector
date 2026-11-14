@@ -36,7 +36,7 @@ def test_preview_worker_is_read_only_and_unconfigured_run_is_blocked(console, mo
     assert not (root/'processing/state.db').exists()
     assert not (root/'processing/todos').exists()
     assert batches == {str(path): path.read_bytes() for path in (root/'wechat/batches').glob('*')}
-    assert set(app.state.jobs.enabled) == {'wechat', 'qq'}
+    assert not hasattr(app.state.jobs, 'scheduler')
 
 
 def test_processing_config_and_rules_backups_conflicts_and_locks(console, monkeypatch):
@@ -221,7 +221,7 @@ def test_collection_controls_remain_available_and_qq_work_dir_is_validated(conso
     for module in ('wechat','qq'):
         assert client.get(f'/api/modules/{module}/config').status_code == 200
         assert client.get(f'/api/modules/{module}/messages').status_code == 200
-        assert client.post(f'/api/modules/{module}/schedule', json={'enabled':False}).status_code == 200
+        assert client.post(f'/api/modules/{module}/schedule', json={'enabled':False}).status_code == 410
         for action, body in (('preview',{'start':now-60,'end':now}),('replay',{'start':now-60,'end':now}),('collect',None)):
             response = client.post(f'/api/modules/{module}/{action}', json=body)
             assert response.status_code == 202, response.text

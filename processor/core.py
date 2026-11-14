@@ -5,27 +5,18 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import sqlite3
 import tomllib
 import urllib.parse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical, digest
+from common.locking import InstanceLock
+from common.codec import canonical, digest
 from contracts import validate_event as _validate_event
 
 
-SCHEMA = '''
-CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, size INTEGER, mtime INTEGER, sha256 TEXT);
-CREATE TABLE IF NOT EXISTS events(event_id TEXT PRIMARY KEY, body_hash TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS messages(message_key TEXT PRIMARY KEY, revision INTEGER, body TEXT);
-CREATE TABLE IF NOT EXISTS groups(id TEXT PRIMARY KEY, fingerprint TEXT, task_ids TEXT);
-CREATE TABLE IF NOT EXISTS group_results(id TEXT PRIMARY KEY, body TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS tasks(task_id TEXT PRIMARY KEY, revision INTEGER, body TEXT);
-CREATE TABLE IF NOT EXISTS outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT, exported INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS task_status_requests(request_id TEXT PRIMARY KEY, request TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL);
-'''
+from .storage import SCHEMA, _connect, _save_task, _export
+from . import service
+from .task_validation import _text, _validate_response, _source
 
 
 def load_config(path):
@@ -88,23 +79,8 @@ def load_config(path):
         raise ValueError('agent.auto_compaction must be a boolean')
     if model['max_output_tokens'] > model['context_window'] or agent['compaction_reserve_tokens'] >= model['context_window'] or agent['compaction_keep_recent_tokens'] >= model['context_window'] - agent['compaction_reserve_tokens']:
         raise ValueError('Model output and Pi compaction budgets must fit model.context_window')
-    attachments = config.setdefault('attachments', {})
-    collectors = attachments.setdefault('collector_configs', {})
-    if not isinstance(collectors, dict) or set(collectors) - {'qq', 'wechat'} or any(not isinstance(p, str) or not p for p in collectors.values()):
-        raise ValueError('attachments.collector_configs must map qq/wechat to local configuration files')
-    attachments['collector_configs'] = {k: str((path.parent / p).resolve()) for k, p in collectors.items()}
-    from providers.registry import configure_providers
-    configure_providers(attachments, path.parent)
-    roots = attachments.setdefault('archive_roots', ['../data/assets'])
-    if not isinstance(roots, list) or any(not isinstance(p, str) or not p for p in roots):
-        raise ValueError('attachments.archive_roots must be an array of paths')
-    attachments['archive_roots'] = [str((path.parent / p).resolve()) for p in roots]
-    cache = attachments.setdefault('cache_dir', '../data/processor/attachment-cache')
-    if not isinstance(cache, str) or not cache:
-        raise ValueError('attachments.cache_dir must be a path')
-    attachments['cache_dir'] = str((path.parent / cache).resolve())
-    if any(Path(root) == Path(attachments['cache_dir']) or Path(root) in Path(attachments['cache_dir']).parents for root in attachments['archive_roots']):
-        raise ValueError('Attachment cache must be outside original archives')
+    from providers.content import configure_content
+    configure_content(config.setdefault('attachments', {}), path.parent)
     timezone = config['context'].setdefault('timezone', 'Asia/Shanghai')
     try:
         ZoneInfo(timezone)
@@ -166,18 +142,6 @@ def _model_info(config):
             'vision': model['vision'], 'context_window': model['context_window'],
             'max_output_tokens': model['max_output_tokens'],
             'api_key_env': model['api_key_env'], 'api_key_file': model['api_key_file']}
-
-
-def _connect(config, *, write=False):
-    path = Path(config['storage']['state_file'])
-    if write:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path)
-        conn.executescript(SCHEMA)
-        return conn
-    if not path.exists():
-        return None
-    return sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)
 
 
 def _read_inputs(config, conn):
@@ -435,147 +399,6 @@ def _call_model(config, rules, group, existing):
     return process_batch(config, rules, [group], existing, api_key=_api_key(config))[group['id']]
 
 
-def _text(value, name, *, nullable=False):
-    if value is None and nullable:
-        return None
-    if not isinstance(value, str) or not value.strip() or len(value) > 20000:
-        raise ValueError(f'Model task {name} must be nonempty text')
-    return value.strip()
-
-
-def _validate_response(response, group, existing, timezone):
-    if not isinstance(response, dict) or not isinstance(response.get('tasks'), list) or len(response['tasks']) > 100:
-        raise ValueError('Model response must contain at most 100 tasks')
-    allowed = {event['message_key'] for event in group['messages']}
-    primary = set(group['primary_message_keys'])
-    existing_ids = {task['task_id'] for task in existing}
-    tasks, assigned, signatures = [], set(), set()
-    for item in response['tasks']:
-        if not isinstance(item, dict):
-            raise ValueError('Model task must be an object')
-        task = {name: _text(item.get(name), name) for name in ('title', 'event', 'priority_reason')}
-        steps = item.get('action_steps', [])
-        if not isinstance(steps, list) or len(steps) > 50 or any(not isinstance(step, str) or not step.strip() or len(step) > 2000 for step in steps):
-            raise ValueError('Model task action_steps must contain at most 50 nonempty strings of at most 2000 characters')
-        task['action_steps'] = [step.strip() for step in steps]
-        if not isinstance(item.get('priority'), str) or item['priority'] not in {'P0', 'P1', 'P2', 'P3', 'P4'} or not isinstance(item.get('status'), str) or item['status'] not in {'open', 'cancelled'}:
-            raise ValueError('Model task priority or status is invalid')
-        task.update(priority=item['priority'], status=item['status'])
-        keys = item.get('source_message_keys')
-        if not isinstance(keys, list) or not keys or any(not isinstance(key, str) or key not in allowed for key in keys):
-            raise ValueError('Model task references missing or fabricated source messages')
-        task['source_message_keys'] = sorted(set(keys))
-        identifier = item.get('task_id')
-        if identifier is not None and (not isinstance(identifier, str) or identifier not in existing_ids or identifier in assigned):
-            raise ValueError('Model task_id must be a unique supplied existing task ID or null')
-        if identifier is None and not primary.intersection(keys):
-            raise ValueError('New tasks cannot be extracted solely from historical context')
-        task['task_id'] = identifier
-        if identifier:
-            assigned.add(identifier)
-        time = item.get('time')
-        if not isinstance(time, dict):
-            raise ValueError('Model task time must be an object')
-        task['time'] = {'timezone': timezone, 'text': _text(time.get('text'), 'time.text', nullable=True)}
-        for field in ('start', 'deadline'):
-            value = _text(time.get(field), 'time.' + field, nullable=True)
-            if value:
-                try:
-                    if len(value) == 10:
-                        dt.date.fromisoformat(value)
-                    elif dt.datetime.fromisoformat(value).tzinfo is None:
-                        raise ValueError('missing offset')
-                except ValueError:
-                    raise ValueError('Model times must be ISO dates or timestamps with timezone offsets') from None
-            task['time'][field] = value
-        people = item.get('people')
-        if not isinstance(people, list) or len(people) > 100 or any(not isinstance(p, dict) for p in people):
-            raise ValueError('Model task people must be an array')
-        task['people'] = [{name: _text(person.get(name), 'people.' + name) for name in ('name', 'role')} for person in people]
-        task['location'] = _text(item.get('location'), 'location', nullable=True)
-        if type(item.get('needs_review', False)) is not bool or not isinstance(item.get('review_reasons', []), list):
-            raise ValueError('Legacy task explanation fields are invalid')
-        notes = item.get('notes', [])
-        legacy_notes = item.get('review_reasons', [])
-        if not isinstance(notes, list) or len(notes) + len(legacy_notes) > 100:
-            raise ValueError('Model task notes must be an array of at most 100 strings')
-        task['notes'] = list(dict.fromkeys(_text(note, 'note') for note in [*notes, *legacy_notes]))
-        # Legacy fields remain readable; uncertainty is explanatory text, not an approval state.
-        task['review_reasons'] = list(task['notes'])
-        task['needs_review'] = False
-        task['attachment_evidence'] = item.get('attachment_evidence', [])
-        materials = item.get('materials', [])
-        messages = {event['message_key']: event for event in group['messages']}
-        if not isinstance(materials, list) or len(materials) > 1000:
-            raise ValueError('Task materials must be a bounded array of mapped attachments')
-        task['materials'] = []
-        for material in materials:
-            if (not isinstance(material, dict) or set(material) != {'message_key', 'attachment_index', 'attachment'}
-                    or not isinstance(material['message_key'], str) or material['message_key'] not in task['source_message_keys']
-                    or type(material['attachment_index']) is not int
-                    or not 0 <= material['attachment_index'] < len(messages[material['message_key']]['message'].get('attachments', []))
-                    or not isinstance(material['attachment'], dict)):
-                raise ValueError('Task materials must map to cited source attachment indices')
-            task['materials'].append(material)
-        signature = digest([task['title'], task['event'], task['source_message_keys']])
-        if signature in signatures:
-            raise ValueError('Model returned duplicate tasks in one response')
-        signatures.add(signature)
-        tasks.append(task)
-    return tasks
-
-
-def _source(config, event):
-    message = event['message']
-    return {'message_key': event['message_key'], 'event_id': event['event_id'], 'revision': event['revision'],
-            'collector_module': message['platform'],
-            'collector_description': config['source_descriptions'].get(message['platform'], message['platform'] + ' local collector'),
-            'account_id': message['account_id'], 'conversation_id': message['conversation_id'],
-            'conversation_type': message.get('conversation_type'), 'message_id': message['message_id'],
-            'sender_id': message['sender_id'], 'sent_at': message['sent_at'],
-            'sent_at_local': dt.datetime.fromtimestamp(message['sent_at'], ZoneInfo(config['context']['timezone'])).isoformat(),
-            'collected_at': event.get('collected_at'), 'text': message['text'],
-            'attachments': message.get('attachments', []), 'source': message.get('source', {}),
-            'identity': message.get('identity', {}), 'sender': message.get('sender'),
-            'kind': message.get('kind'), 'mentions_all': message.get('mentions_all', False),
-            'context_notes': message.get('context_notes', []),
-            'matched_rules': event.get('matched_rules', []), 'window': event.get('window')}
-
-
-def _save_task(conn, task):
-    previous = conn.execute('SELECT revision FROM tasks WHERE task_id=?', (task['task_id'],)).fetchone()
-    task['revision'] = previous[0] + 1 if previous else 1
-    body = canonical(task)
-    conn.execute('INSERT INTO tasks VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET revision=excluded.revision,body=excluded.body',
-                 (task['task_id'], task['revision'], body))
-    event = {'schema_version': 1, 'event_id': digest([task['task_id'], task['revision']]),
-             'operation': 'upsert', 'task_id': task['task_id'], 'revision': task['revision'], 'task': task}
-    conn.execute('INSERT INTO outbox(body) VALUES(?)', (canonical(event),))
-
-
-def _export(config, conn):
-    output = Path(config['storage']['output_dir'])
-    output.mkdir(parents=True, exist_ok=True)
-    batches = []
-    while rows := conn.execute('SELECT seq,body FROM outbox WHERE exported=0 ORDER BY seq LIMIT 1000').fetchall():
-        destination = output / f'todos-{rows[0][0]:012d}-{rows[-1][0]:012d}.jsonl'
-        raw = ('\n'.join(row[1] for row in rows) + '\n').encode('utf-8')
-        if destination.exists():
-            if destination.read_bytes() != raw:
-                raise RuntimeError('Task output conflicts with the durable outbox')
-        else:
-            temporary = destination.with_suffix('.jsonl.tmp')
-            with temporary.open('wb') as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
-            temporary.replace(destination)
-        with conn:
-            conn.execute('UPDATE outbox SET exported=1 WHERE seq BETWEEN ? AND ?', (rows[0][0], rows[-1][0]))
-        batches.append(str(destination))
-    return batches
-
-
 def _related_tasks(conn, group):
     existing = [json.loads(row[0]) for row in conn.execute("SELECT body FROM tasks WHERE json_extract(body,'$.status') != 'superseded' AND json_extract(body,'$.conversation.platform')=? AND json_extract(body,'$.conversation.account_id')=? AND json_extract(body,'$.conversation.conversation_id')=? ORDER BY json_extract(body,'$.updated_at') DESC LIMIT 40",
         (group['platform'], group['account_id'], group['conversation_id']))]
@@ -604,107 +427,49 @@ def _run_batches(config, rules, groups, conn):
         else:
             existing = {task['task_id']: task for tasks, _ in related.values() for task in tasks}
             responses = process_batch(config, rules, batch, list(existing.values()), api_key=_api_key(config))
+        committed = {}
         for group in batch:
-            yield group, *related[group['id']], responses[group['id']]
+            yield group, *related[group['id']], responses[group['id']], committed
 
 
 def run_round(config):
     if not _model_info(config)['configured']:
         raise ValueError('Configure model.base_url, model.model and a local API key before processing; preview remains available')
-    with InstanceLock(config['storage']['state_file']):
+    with InstanceLock(config['storage']['state_file'] + '.round'):
         refreshes = []
         warnings = (['input.refresh_collectors 已停用；处理只读取已发布批次，请单独运行采集。']
                     if config['input'].get('refresh_collectors') else [])
-        conn = _connect(config, write=True)
+        batches = service._export_pending(config)
+        conn = _connect(config)
         try:
-            batches = _export(config, conn)
             rules, messages, files, events, groups, pending = _snapshot(config, conn)
-            with conn:
-                conn.executemany('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+            with service._task_connection(config) as writer, writer:
+                writer.executemany('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                                  [('pending_groups', str(len(pending))), ('snapshot_at', dt.datetime.now(dt.timezone.utc).isoformat())])
-                conn.executemany('INSERT INTO files VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,sha256=excluded.sha256', files)
-                conn.executemany('INSERT INTO events VALUES(?,?)', [(key, digest(event)) for key, event in events.items()])
+                writer.executemany('INSERT INTO files VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,sha256=excluded.sha256', files)
+                writer.executemany('INSERT INTO events VALUES(?,?)', [(key, digest(event)) for key, event in events.items()])
                 for event in events.values():
-                    conn.execute('INSERT INTO messages VALUES(?,?,?) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,body=excluded.body WHERE excluded.revision>messages.revision',
+                    writer.execute('INSERT INTO messages VALUES(?,?,?) ON CONFLICT(message_key) DO UPDATE SET revision=excluded.revision,body=excluded.body WHERE excluded.revision>messages.revision',
                                  (event['message_key'], event['revision'], canonical(event)))
             processed = updated = 0
             outcomes = []
-            for group, existing, previous_ids, response in _run_batches(config, rules, pending[:config['processing']['max_groups_per_round']], conn):
+            for group, existing, previous_ids, response, committed in _run_batches(config, rules, pending[:config['processing']['max_groups_per_round']], conn):
                 existing = list({task['task_id']:task for task in [*existing, *response.get('_existing_tasks', [])]}.values())
-                tasks = _validate_response(response, group, existing, config['context']['timezone'])
-                now = dt.datetime.now(dt.timezone.utc).isoformat()
-                existing_by_id = {task['task_id']: task for task in existing}
-                ids = []
-                with conn:
-                    for index, task in enumerate(tasks):
-                        previous = existing_by_id.get(task['task_id'])
-                        if previous:
-                            if previous.get('status_control'):
-                                task['status_control'] = previous['status_control']
-                                if previous['status_control']['status'] in {'completed', 'cancelled'}:
-                                    task['status'] = previous['status_control']['status']
-                            task['source_message_keys'] = sorted(set(task['source_message_keys']) | set(previous['source_message_keys']))
-                            evidence = {canonical([e['message_key'], e['attachment_index'], e.get('locator')]): e
-                                        for e in [*previous.get('attachment_evidence', []), *task.get('attachment_evidence', [])]}
-                            task['attachment_evidence'] = list(evidence.values())
-                            materials = {(item['message_key'], item['attachment_index']): item
-                                         for item in [*previous.get('materials', []), *task.get('materials', [])]}
-                            task['materials'] = list(materials.values())
-                        task['task_id'] = task['task_id'] or digest([group['id'], group['fingerprint'], index])
-                        task.update(schema_version=1, updated_at=now,
-                            conversation=previous['conversation'] if previous else {key: group[key] for key in ('platform', 'account_id', 'conversation_id')},
-                            sources=list({source['message_key']:source for source in [
-                                *(previous.get('sources', []) if previous else []),
-                                *[_source(config, messages[key]) for key in task['source_message_keys'] if key in messages]]}.values()),
-                            context={'group_id': group['id'], 'continuity': group['continuity'],
-                                     'original_conversation_complete': False,
-                                     'primary_message_keys': group['primary_message_keys'], 'history_message_keys': group['history_message_keys']},
-                            processing={'rules_sha256': rules['sha256'], 'rules_file': rules['path'],
-                                        'model': config['model']['model'], 'base_url': config['model']['base_url'],
-                                        'input_sha256': group['fingerprint'], 'processed_at': now,
-                                        'agent_runtime': response.get('_agent', {})})
-                        _save_task(conn, task)
-                        ids.append(task['task_id'])
-                        updated += 1
-                    # A full re-extraction replaces this group's earlier result, never deletes history.
-                    for identifier in previous_ids - set(ids):
-                        row = conn.execute('SELECT body FROM tasks WHERE task_id=?', (identifier,)).fetchone()
-                        if row:
-                            old = json.loads(row[0])
-                            if (old['context']['group_id'] == group['id'] and old['status'] != 'superseded'
-                                    and old.get('status_control', {}).get('status') not in {'completed', 'cancelled'}):
-                                old.update(status='superseded', updated_at=now, superseded_reason='group_reprocessed')
-                                _save_task(conn, old)
-                    conn.execute('INSERT INTO groups VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,task_ids=excluded.task_ids',
-                                 (group['id'], group['fingerprint'], canonical(ids)))
-                    outcome = {'group_id':group['id'],'updated_at':now,'tasks_count':len(ids),
-                        'conversation':{k:group[k] for k in ('platform','account_id','conversation_id')},
-                        'attachment_review':response.get('attachment_review', []),
-                        'review_required':response.get('review_required', False),
-                        'submission_file':response.get('submission_file'),
-                        'scope':'selected_messages_and_requested_attachment_content'}
-                    conn.execute('INSERT OR REPLACE INTO group_results VALUES(?,?)', (group['id'],canonical(outcome)))
-                    conn.execute("UPDATE settings SET value=? WHERE key='pending_groups'", (str(len(pending) - processed - 1),))
+                # Rebase only onto snapshots committed by earlier groups in this Pi batch.
+                existing = [committed.get(task['task_id'], task) for task in existing]
+                result = service.apply_extraction(config, response,
+                    request_id='extraction:' + digest([group['id'], group['fingerprint'],
+                        [(task['task_id'], task['revision']) for task in existing]]),
+                    context={'group': group, 'existing': existing, 'previous_ids': sorted(previous_ids),
+                             'messages': messages, 'rules': rules, 'pending_groups': len(pending) - processed - 1})
                 processed += 1
-                outcomes.append(outcome)
-                batches.extend(_export(config, conn))
-            # Late messages can change chunk boundaries. Retire obsolete group outputs only
-            # after every current group has succeeded, so API failure cannot discard valid tasks.
+                updated += result['tasks_upserted']
+                outcomes.append(result['outcome'])
+                batches.extend(result['batches'])
+                committed.update({task['task_id']: task for task in result['tasks']})
+            # Retire regrouped outputs only after every current group succeeds.
             if processed == len(pending):
-                current_ids = {g['id'] for g in groups}
-                now = dt.datetime.now(dt.timezone.utc).isoformat()
-                with conn:
-                    for identifier, in conn.execute('SELECT id FROM groups').fetchall():
-                        if identifier not in current_ids:
-                            for body, in conn.execute("SELECT body FROM tasks WHERE json_extract(body,'$.context.group_id')=? AND json_extract(body,'$.status')!='superseded'", (identifier,)).fetchall():
-                                old = json.loads(body)
-                                if old.get('status_control', {}).get('status') in {'completed', 'cancelled'}:
-                                    continue
-                                old.update(status='superseded', updated_at=now, superseded_reason='context_regrouped')
-                                _save_task(conn, old)
-                            conn.execute('DELETE FROM groups WHERE id=?', (identifier,))
-                            conn.execute('DELETE FROM group_results WHERE id=?', (identifier,))
-                batches.extend(_export(config, conn))
+                batches.extend(service._retire_groups(config, {group['id'] for group in groups}))
             return {'status': 'succeeded', 'imported_events': len(events), 'processed_groups': processed,
                     'pending_groups': len(pending) - processed, 'tasks_upserted': updated, 'batches': batches,
                     'group_results':outcomes, 'review_groups':sum(item['review_required'] for item in outcomes),

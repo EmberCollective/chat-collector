@@ -65,6 +65,32 @@ def test_resolved_evidence_wins_over_old_missing_metadata(tmp_path):
     assert build_package(task, config)['resources'][0]['status'] == 'ready'
 
 
+@pytest.mark.parametrize('kind,suffix,expected', [('image', '.jpg', '图片-1.jpg'), ('file', '.pdf', '附件-1.pdf')])
+def test_unnamed_material_keeps_verified_archive_extension_after_hash_storage(tmp_path, kind, suffix, expected):
+    config, task, original = fixture(tmp_path)
+    archived = original.with_suffix(suffix)
+    if archived != original:
+        original.rename(archived)
+    attachment = task['materials'][0]['attachment']
+    attachment.pop('name')
+    attachment.update(type=kind, archive_path=str(archived))
+    package = build_package(task, config, prepare=True)
+    resource = package['resources'][0]
+    stored, name = material_path(package, resource['id'], config)
+    assert name == expected and stored.suffix == ''
+    assert stored.read_bytes() == archived.read_bytes()
+    archived.unlink()
+    assert build_package(task, config)['resources'][0]['name'] == expected
+
+
+def test_resolved_material_uses_source_filename_when_resolution_omits_it(tmp_path):
+    config, task, original = fixture(tmp_path)
+    resolved = dict(task['materials'][0]['attachment'])
+    resolved.pop('name')
+    task['attachment_evidence'] = [{'message_key': 'm1', 'attachment_index': 0, 'attachment': resolved}]
+    assert build_package(task, config)['resources'][0]['name'] == 'report.pdf'
+
+
 def test_materials_reject_path_escape_hash_mismatch_and_encrypted_bytes(tmp_path):
     config, task, original = fixture(tmp_path)
     config['attachments']['allowed_roots'] = []

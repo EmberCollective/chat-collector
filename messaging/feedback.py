@@ -10,8 +10,8 @@ import sqlite3
 import time
 import uuid
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical, digest
+from common.locking import InstanceLock
+from common.codec import canonical, digest
 
 
 SCHEMA = '''
@@ -63,7 +63,14 @@ def _until(value):
     return float(value)
 
 
-def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision=None, *, until=None):
+def _enqueue(config, *args, **kwargs):
+    result = _persist(config, *args, **kwargs)
+    from automation.wakeup import notify
+    notify(config.get('_config_path'), 'feedback')
+    return result
+
+
+def _persist(config, target_id, event_id, task_id, action, actor, expected_revision=None, *, until=None, priority=None):
     if not config.get('feedback', {}).get('enabled', False):
         raise ValueError('feedback_disabled')
     target_id = _text(target_id, 'target_id')
@@ -72,8 +79,13 @@ def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revis
     target = next((t for t in config.get('targets', []) if t['id'] == target_id), None)
     if target is None and target_id != 'local':
         raise ValueError('feedback_target_not_registered')
-    if not isinstance(action, str) or action not in {'complete', 'reopen', 'cancel', 'snooze'}:
+    if not isinstance(action, str) or action not in {'complete', 'reopen', 'cancel', 'snooze', 'set_priority'}:
         raise ValueError('invalid_feedback_action')
+    if action == 'set_priority':
+        if not isinstance(priority, str) or priority not in {'P0', 'P1', 'P2', 'P3', 'P4'}:
+            raise ValueError('invalid_feedback_priority')
+    elif priority is not None:
+        raise ValueError('feedback_priority_only_for_set_priority')
     if not isinstance(actor, dict) or set(actor) != {'platform', 'user_id', 'source'}:
         raise ValueError('invalid_feedback_actor')
     actor = {k: _text(actor[k], 'actor_' + k, 64 if k == 'platform' else 200) for k in ('platform', 'user_id', 'source')}
@@ -85,6 +97,8 @@ def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revis
         until = _until(until)
     payload = {'target_id': target_id, 'event_id': event_id, 'task_id': task_id, 'action': action,
                'actor': actor, 'expected_revision': expected_revision, 'until': until}
+    if action == 'set_priority':
+        payload['priority'] = priority
     request = canonical(payload)
     request_id = digest(['task-feedback.v1', target_id, event_id])
     now = time.time()
@@ -110,8 +124,8 @@ def _enqueue(config, target_id, event_id, task_id, action, actor, expected_revis
         return ack
 
 
-def enqueue_feedback(config, target_id, event_id, task_id, action, actor, *, expected_revision=None):
-    return _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision)
+def enqueue_feedback(config, target_id, event_id, task_id, action, actor, *, expected_revision=None, priority=None):
+    return _enqueue(config, target_id, event_id, task_id, action, actor, expected_revision, priority=priority)
 
 
 def request_task_action(config, task_id, action, *, event_id=None, actor=None, expected_revision=None, until=None):
@@ -129,7 +143,7 @@ def blocked_task_ids(config):
     conn = _connect(config)
     try:
         return set() if conn is None else {row[0] for row in conn.execute(
-            "SELECT DISTINCT task_id FROM feedback_requests WHERE status NOT IN ('applied','superseded')")}
+            "SELECT DISTINCT task_id FROM feedback_requests WHERE status IN ('queued','retry','applying')")}
     finally:
         if conn is not None:
             conn.close()
@@ -157,12 +171,15 @@ def retry_feedback(config, request_id):
             raise ValueError('feedback_request_not_retryable')
         conn.execute("UPDATE feedback_requests SET status='queued',attempts=0,next_attempt=0,error=NULL,updated_at=? WHERE request_id=?",
                      (time.time(), request_id))
+    from automation.wakeup import notify
+    notify(config.get('_config_path'), 'feedback')
     return {'request_id': request_id, 'status': 'queued'}
 
 
 def _apply(config, row):
     from . import core
-    from processor import load_config, update_task_status, TaskStatusConflict, UnknownTask
+    from processor import load_config
+    from processor.service import update_task_status, update_task_priority, TaskStatusConflict, UnknownTask
     request = json.loads(row['request'])
     if request['action'] == 'snooze':
         core.sync(config)
@@ -175,8 +192,10 @@ def _apply(config, row):
         if row['snoozed_until'] <= time.time():
             return {'task_id': row['task_id'], 'status': 'snooze_expired'}
         return core.set_task_state(config, row['task_id'], 'snooze', until=row['snoozed_until'])
-    result = update_task_status(load_config(config['feedback']['processor_config']), row['task_id'],
-        {'complete': 'completed', 'reopen': 'open', 'cancel': 'cancelled'}[request['action']],
+    change_priority = request['action'] == 'set_priority'
+    update = update_task_priority if change_priority else update_task_status
+    value = request['priority'] if change_priority else {'complete': 'completed', 'reopen': 'open', 'cancel': 'cancelled'}[request['action']]
+    result = update(load_config(config['feedback']['processor_config']), row['task_id'], value,
         request_id=row['request_id'], actor=request['actor'], expected_revision=request['expected_revision'])
     core.sync(config)
     # A retried historical acknowledgement must never overwrite a newer formal status.
@@ -187,18 +206,18 @@ def _apply(config, row):
         imported = json.loads(task['body'])
         if imported['revision'] < result['revision']:
             raise RuntimeError('feedback_publication_not_imported')
-        completed = int(imported['status'] == 'completed')
         conn.execute('INSERT OR IGNORE INTO local_state(task_id) VALUES(?)', (row['task_id'],))
-        conn.execute('UPDATE local_state SET completed=?,snoozed_until=0,version=version+1 WHERE task_id=? AND (completed!=? OR snoozed_until!=0)',
-                     (completed, row['task_id'], completed))
+        conn.execute('UPDATE local_state SET completed=0,snoozed_until=0,version=version+1 WHERE task_id=? AND (completed!=0 OR snoozed_until!=0)',
+                     (row['task_id'],))
     return result
 
 
 def process_pending(config):
     result = {'applied': 0, 'retry': 0, 'failed': 0, 'conflict': 0, 'pending': 0}
+    wake_messaging = False
     if not config.get('feedback', {}).get('enabled', False):
         return result
-    from processor import TaskStatusBusy, TaskStatusConflict, TaskStatusExportPending, UnknownTask
+    from processor.service import TaskStatusBusy, TaskStatusConflict, TaskStatusExportPending, UnknownTask
     with InstanceLock(config['feedback']['state_file']), closing(_connect(config, True)) as conn:
         with conn:
             conn.execute("UPDATE feedback_requests SET status='retry',next_attempt=0,error='interrupted_feedback' WHERE status='applying'")
@@ -220,6 +239,7 @@ def process_pending(config):
                     conn.execute("UPDATE feedback_requests SET status='superseded',updated_at=? WHERE task_id=? AND rowid<? AND status IN ('failed','conflict')",
                                  (time.time(), row['task_id'], row['queue_order']))
                 result['applied'] += 1
+                wake_messaging = True
             except Exception as exc:
                 attempts = row['attempts']
                 if isinstance(exc, TaskStatusBusy) or isinstance(exc, RuntimeError) and str(exc) == 'Another collector is using this state file':
@@ -238,7 +258,11 @@ def process_pending(config):
                 with conn:
                     conn.execute('UPDATE feedback_requests SET status=?,attempts=?,next_attempt=?,error=?,updated_at=? WHERE request_id=?',
                                  (state, attempts, time.time() + delay, code, time.time(), row['request_id']))
+                wake_messaging = wake_messaging or state in {'failed', 'conflict'}
         counts = dict(conn.execute('SELECT status,count(*) FROM feedback_requests GROUP BY status'))
         result.update(retry=counts.get('retry', 0), failed=counts.get('failed', 0), conflict=counts.get('conflict', 0),
                       pending=sum(counts.get(state, 0) for state in ('queued', 'retry', 'applying')))
+    if wake_messaging:
+        from automation.wakeup import notify
+        notify(config.get('_config_path'), 'messaging')
     return result

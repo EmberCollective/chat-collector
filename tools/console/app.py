@@ -198,10 +198,6 @@ class Jobs:
         self.mutex = threading.RLock()
         self.running = {}
         self.jobs = {}
-        self.enabled = {name: False for name in bridge.paths}
-        self.due = {name: 0.0 for name in bridge.paths}
-        self.schedule_errors = {}
-        self.stop = threading.Event()
         self.watchers = []
         for path in sorted(self.directory.glob('*/job.json'), key=lambda p: p.stat().st_mtime)[-100:]:
             job = json.loads(path.read_text(encoding='utf-8'))
@@ -212,28 +208,10 @@ class Jobs:
                 job.pop('result', None)
             self.jobs[job['id']] = job
 
-    def start(self):
-        self.scheduler = threading.Thread(target=self.loop, daemon=True)
-        self.scheduler.start()
-
     def close(self):
-        self.stop.set()
-        self.scheduler.join()
         # Do not kill a collection in the middle of its durable transaction.
         for thread in self.watchers:
             thread.join()
-
-    def loop(self):
-        while not self.stop.wait(0.5):
-            with self.mutex:
-                for name in self.enabled:
-                    if self.enabled[name] and name not in self.running and time.monotonic() >= self.due[name]:
-                        try:
-                            self.submit(name, 'collect', {}, 'schedule')
-                            self.schedule_errors.pop(name, None)
-                        except Exception as exc:
-                            self.schedule_errors[name] = str(exc)
-                            self.due[name] = time.monotonic()+60
 
     def submit(self, name, action, request, origin='manual'):
         with self.mutex:
@@ -288,11 +266,6 @@ class Jobs:
             except OSError as exc:
                 job['metadata_error'] = f'任务记录未保存：{type(exc).__name__}；请检查磁盘空间'
             self.running.pop(job['module'], None)
-            try:
-                interval = self.bridge.config(job['module'])['schedule']['interval_seconds']
-            except Exception:
-                interval = 60
-            self.due[job['module']] = time.monotonic()+interval
 
     def detail(self, identifier):
         with self.mutex:
@@ -334,7 +307,6 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        jobs.start()
         yield
         jobs.close()
 
@@ -397,13 +369,11 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
                     data = bridge.state(name)
                 except Exception as exc:
                     data = {'state_error': f'{type(exc).__name__}: {exc}'}
-                modules[name] = dict(data, scheduler_enabled=jobs.enabled[name],
-                    running_job=jobs.running.get(name), next_run_in=max(0, round(jobs.due[name]-time.monotonic())) if jobs.enabled[name] else None,
-                    scheduler_error=jobs.schedule_errors.get(name))
+                modules[name] = dict(data, running_job=jobs.running.get(name))
             recent = [dict(job) for job in sorted(jobs.jobs.values(), key=lambda j: j['started_at'], reverse=True)[:30]]
         return {'modules': modules, 'jobs': recent, 'collector_root': str(bridge.root),
                 'external_runner': bridge.external_runner(),
-                'scheduler_scope': '只管理本控制台启动的定时任务；独立 CLI 不受暂停按钮控制'}
+                'scheduler_scope': '定时任务统一由独立自动化服务管理；本控制台仅手动执行'}
 
     @app.get('/api/modules/{module}/config', dependencies=[Depends(authenticate)], summary='读取配置与版本')
     def config(module: Module):
@@ -417,19 +387,13 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
             try:
                 with bridge.lock(bridge.config(module)['storage']['state_file']):
                     result = bridge.write_config(module, body.revision, body.patch.model_dump(exclude_unset=True), jobs.runtime/'config-backups')
-                jobs.due[module] = time.monotonic()+bridge.config(module)['schedule']['interval_seconds']
                 return result
             except (FileExistsError, RuntimeError) as exc:
                 raise HTTPException(409, str(exc)) from None
 
-    @app.post('/api/modules/{module}/schedule', dependencies=[Depends(authenticate)], summary='暂停或恢复本控制台定时采集')
+    @app.post('/api/modules/{module}/schedule', dependencies=[Depends(authenticate)], deprecated=True, summary='旧定时入口已移除')
     def schedule(module: Module, body: ScheduleControl):
-        with jobs.mutex:
-            if body.enabled and bridge.external_runner():
-                raise HTTPException(409, '原独立定时采集仍在运行或无法核验；请先运行 tools/handover.cmd 完成切换')
-            jobs.enabled[module] = body.enabled
-            jobs.due[module] = time.monotonic()
-        return {'enabled': body.enabled, 'running_job_continues': module in jobs.running}
+        raise HTTPException(410, '调试台定时器已移除，请在“自动任务”区域配置微信或 QQ 采集')
 
     @app.post('/api/modules/{module}/collect', status_code=202, dependencies=[Depends(authenticate)], summary='执行一轮正式增量采集')
     def collect(module: Module):

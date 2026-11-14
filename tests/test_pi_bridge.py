@@ -101,6 +101,35 @@ def test_attachment_exception_is_redacted_before_returning_to_model(endpoint):
     assert 'fixture-secret' not in json.dumps(requests)
 
 
+@pytest.mark.parametrize('same_message', [False, True])
+def test_native_pi_selects_renamed_duplicate_material_without_changing_its_source(endpoint, tmp_path, same_message):
+    from processor import context
+    from test_processor_context import event, group
+    config, _, responder, requests = endpoint
+    archive = tmp_path/'archive'
+    archive.mkdir()
+    path = archive/'content.txt'
+    path.write_text('Submit the report tomorrow.', encoding='utf-8')
+    config.update(storage={'state_file': str(tmp_path/'state.db')}, context={'timezone': 'Asia/Shanghai'},
+                  processing={'max_input_chars': 100000},
+                  attachments={'archive_roots': [str(archive)], 'cache_dir': str(tmp_path/'cache')})
+    first = {'name': 'template.txt', 'archive_path': str(path)}
+    second = dict(first, name='renamed-deliverable.txt')
+    records = ([event('a', attachments=[first, second])] if same_message else
+               [event('a', attachments=[first]), event('b', attachments=[second])])
+    source = 'm1' if same_message else 'm2'
+    responder.append(lambda h, n: send_tool(h, 'read_attachment', {'ref': 'f2'}) if n == 1 else
+                     send_tool(h, 'submit_tasks', {'tasks': [dict(task([source, 'f2:b1']), material_refs=['f2'])]}))
+    result = context.process_batch(config, {'text': 'Extract explicit tasks.'}, [group(*records)], [])
+    selected = result['group-id']['tasks'][0]['materials']
+    assert len(selected) == 1 and selected[0]['attachment']['name'] == second['name']
+    assert selected[0]['message_key'] == records[-1]['message_key']
+    assert selected[0]['attachment_index'] == (1 if same_message else 0)
+    prompt = json.loads(requests[0]['messages'][-1]['content'][0]['text'])
+    assert [(item['ref'], item['name']) for item in prompt['attachments']] == [
+        ('f1', first['name']), ('f2', second['name'])]
+
+
 def test_unknown_source_rejected_across_python_node_protocol(endpoint):
     config, payload, responder, _requests = endpoint
     responder.append(lambda handler, n: send_tool(handler, 'submit_tasks', {'tasks': [task(['invented'])]}))
@@ -154,3 +183,100 @@ def test_task_search_failure_is_visible_without_private_details(endpoint):
     run_agent(config,'Search then submit.',payload,task_finder=finder)
     assert 'task_search_failed' in json.dumps(requests[1])
     assert 'PRIVATE DATABASE PATH' not in json.dumps(requests)
+
+
+def shared_task_batch(endpoint, tmp_path, monkeypatch):
+    from processor import core
+    from test_processor import batch, config as make_config, event, response
+    transport, _, responder, requests = endpoint
+    config = make_config.__wrapped__(tmp_path)
+    config['model'].update(transport['model'])
+    config['model']['api_key_env'] = ''
+    config['agent'].update(transport['agent'], batching='auto')
+    batch(config, 'initial', event('original', conversation='original-room'))
+    with monkeypatch.context() as patch:
+        patch.setattr(core, '_call_model', lambda *args: response(['original']))
+        core.run_round(config)
+    original = core.list_tasks(config)[0]
+    archive = tmp_path/'archive'
+    archive.mkdir()
+    path = archive/'shared.txt'
+    path.write_text('Shared task material.', encoding='utf-8')
+    config['attachments']['archive_roots'] = [str(archive)]
+    records = [event('a', timestamp=1000, conversation='first-room', text='Move the report deadline to 2026-11-20.'),
+               event('b', timestamp=2000, platform='wechat', conversation='second-room',
+                     text='The same report deadline is now 2026-12-01; replace the earlier date.')]
+    for record in records:
+        record['message']['attachments'] = [{'name': record['message_key']+'.txt', 'archive_path': str(path)}]
+    batch(config, 'followup', *records)
+    return config, original, responder, requests
+
+
+@pytest.mark.parametrize('rejection', ['conflicting_fields', 'same_conversation_duplicate'])
+def test_native_pi_merges_shared_task_sources_after_correctable_submission_and_human_edits(endpoint, tmp_path, monkeypatch, rejection):
+    from processor import core, service
+    config, original, responder, requests = shared_task_batch(endpoint, tmp_path, monkeypatch)
+    actor = {'platform': 'test', 'user_id': 'verified', 'source': 'test'}
+    final = dict(task(['m1']), task_id='t1', title='Updated shared report', material_refs=['f1'])
+    final['time'] = dict(final['time'], deadline='2026-12-01')
+    second = dict(final, sources=['m2'], material_refs=['f2'])
+    def respond(handler, n):
+        if n == 1:
+            return send_tool(handler, 'find_related_tasks', {'query': 'report'})
+        if n == 2:
+            service.update_task_status(config, original['task_id'], 'completed', request_id='human:status', actor=actor)
+            service.update_task_priority(config, original['task_id'], 'P0', request_id='human:priority', actor=actor)
+            invalid = (dict(second, time=dict(second['time'], deadline='2026-11-20'))
+                       if rejection == 'conflicting_fields' else dict(final))
+            return send_tool(handler, 'submit_tasks', {'tasks': [final, invalid]})
+        send_tool(handler, 'submit_tasks', {'tasks': [final, second]})
+    responder.append(respond)
+    result = core.run_round(config)
+    saved = service.get_task(config, original['task_id'])
+    assert result['processed_groups'] == result['tasks_upserted'] == 2
+    assert len(core.list_tasks(config)) == 1 and saved['revision'] == 5
+    assert saved['status'] == 'completed' and saved['priority'] == 'P0'
+    assert set(saved['source_message_keys']) == {'original', 'a', 'b'}
+    assert {source['collector_module'] for source in saved['sources']} == {'qq', 'wechat'}
+    assert {item['attachment']['name'] for item in saved['materials']} == {'a.txt', 'b.txt'}
+    assert saved['title'] == final['title'] and saved['time']['deadline'] == final['time']['deadline']
+    assert len(requests) == 3 and 'submission_rejected' in json.dumps(requests[2])
+    assert core.run_round(config)['processed_groups'] == 0 and len(requests) == 3
+
+
+@pytest.mark.parametrize('failure', ['interrupted', 'competing_content_write'])
+def test_shared_task_batch_retries_only_uncommitted_group_and_rejects_external_content_change(endpoint, tmp_path, monkeypatch, failure):
+    from processor import core, service, storage
+    config, original, responder, requests = shared_task_batch(endpoint, tmp_path, monkeypatch)
+    final = dict(task(['m1']), task_id='t1', title='Final shared report')
+    def respond(handler, n):
+        if n % 2:
+            return send_tool(handler, 'find_related_tasks', {'query': 'report'})
+        send_tool(handler, 'submit_tasks', {'tasks': [final, dict(final, sources=['m2'])] if n == 2 else [final]})
+    responder.append(respond)
+    apply = service.apply_extraction
+    calls = []
+    def interrupted(*args, **kwargs):
+        calls.append(kwargs['context']['group']['conversation_id'])
+        if len(calls) == 2 and failure == 'interrupted':
+            raise RuntimeError('injected_interruption')
+        result = apply(*args, **kwargs)
+        if len(calls) == 1 and failure == 'competing_content_write':
+            current = service.get_task(config, original['task_id'])
+            current['title'] = 'Independent writer report'
+            with service._task_connection(config) as conn, conn:
+                storage._save_task(conn, current)
+        return result
+    with monkeypatch.context() as patch:
+        patch.setattr(service, 'apply_extraction', interrupted)
+        with pytest.raises((RuntimeError, service.TaskStatusConflict), match='injected_interruption|task_revision_conflict'):
+            core.run_round(config)
+    first = service.get_task(config, original['task_id'])
+    assert set(first['source_message_keys']) == {'original', 'a'} and len(core.list_tasks(config)) == 1
+    if failure == 'competing_content_write':
+        assert first['title'] == 'Independent writer report'
+    result = core.run_round(config)
+    saved = service.get_task(config, original['task_id'])
+    assert result['processed_groups'] == 1 and saved['revision'] == first['revision'] + 1
+    assert set(saved['source_message_keys']) == {'original', 'a', 'b'} and len(core.list_tasks(config)) == 1
+    assert len(requests) == 4 and core.run_round(config)['processed_groups'] == 0

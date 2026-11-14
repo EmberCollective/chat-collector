@@ -13,13 +13,14 @@ import sqlite3
 import threading
 import time
 
-from collector.__main__ import InstanceLock
-from collector.store import canonical, digest
+from common.locking import InstanceLock
+from common.codec import canonical, digest
 
 from .config import JOBS
 
 
 APPLICATION_ID = 0x43434131
+SCHEMA_VERSION = 1
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS jobs(name TEXT PRIMARY KEY,state TEXT NOT NULL,attempts INTEGER DEFAULT 0,
  next_run REAL DEFAULT 0,last_start REAL,last_success REAL,error TEXT,active_error TEXT,result TEXT);
@@ -42,16 +43,28 @@ def _connect(config, *, write=False):
         conn = sqlite3.connect(path, timeout=10)
     else:
         conn = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=10)
-    owner = conn.execute('PRAGMA application_id').fetchone()[0]
-    if owner != APPLICATION_ID and (owner or conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()):
+    try:
+        owner = conn.execute('PRAGMA application_id').fetchone()[0]
+        if owner != APPLICATION_ID and (owner or conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()):
+            raise ValueError('Automation requires its own state database')
+        if write and conn.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
+            with InstanceLock(str(path) + '.schema', timeout=10):
+                if conn.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
+                    # Status polling must not wait for another task's metadata write.
+                    conn.execute('PRAGMA journal_mode=WAL')
+                    with conn:
+                        conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA)
+                        columns = {row[1] for row in conn.execute('PRAGMA table_info(jobs)')}
+                        for column in ('wake_seq', 'wake_consumed'):
+                            if column not in columns:
+                                conn.execute(f'ALTER TABLE jobs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
+                        conn.executemany("INSERT OR IGNORE INTO jobs(name,state) VALUES(?,'idle')", [(name,) for name in JOBS])
+                        conn.execute('INSERT OR IGNORE INTO listener(id) VALUES(1)')
+                        conn.execute(f'PRAGMA application_id={APPLICATION_ID}')
+                        conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+    except BaseException:
         conn.close()
-        raise ValueError('Automation requires its own state database')
-    if write:
-        conn.execute(f'PRAGMA application_id={APPLICATION_ID}')
-        conn.executescript(SCHEMA)
-        with conn:
-            conn.executemany("INSERT OR IGNORE INTO jobs(name,state) VALUES(?,'idle')", [(name,) for name in JOBS])
-            conn.execute('INSERT OR IGNORE INTO listener(id) VALUES(1)')
+        raise
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -61,8 +74,35 @@ def _setting(conn, key, value):
 
 
 def _error(exc):
+    if isinstance(exc, sqlite3.Error):
+        name = getattr(exc, 'sqlite_errorname', None)
+        if isinstance(name, str) and re.fullmatch(r'SQLITE_[A-Z_]{1,60}', name):
+            return name.lower()
     code = getattr(exc, 'code', None)
     return code if isinstance(code, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,100}', code) else type(exc).__name__
+
+
+def _failure_details(exc, root, now):
+    """Keep code locations and SQLite codes, never exception text, SQL or locals."""
+    root = Path(root).resolve()
+    failures, seen = [], set()
+    while exc is not None and id(exc) not in seen and len(failures) < 5:
+        seen.add(id(exc))
+        frames, trace = [], exc.__traceback__
+        while trace:
+            code = trace.tb_frame.f_code
+            path = Path(code.co_filename).resolve()
+            if path.is_relative_to(root):
+                frames.append({'file': path.relative_to(root).as_posix(),
+                               'line': trace.tb_lineno, 'function': code.co_name})
+            trace = trace.tb_next
+        failure = {'code': _error(exc), 'frames': frames[-12:]}
+        sqlite_code = getattr(exc, 'sqlite_errorcode', None)
+        if isinstance(exc, sqlite3.Error) and type(sqlite_code) is int:
+            failure['sqlite_errorcode'] = sqlite_code
+        failures.append(failure)
+        exc = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+    return {'at': now, 'failures': failures}
 
 
 def _stats(result):
@@ -135,6 +175,10 @@ def check(config):
             ready = importlib.util.find_spec(module) is not None
             if name == 'alerts':
                 ready = ready and loaded['enabled'] and any(t['id'] == entry['target_id'] and t['enabled'] and t['kind'] in {'feishu', 'feishu_app'} for t in loaded['targets'])
+            else:
+                from messaging.feishu import check as check_listener, listener_target
+                target = listener_target(loaded)
+                ready = ready and loaded['enabled'] and check_listener(loaded, target)['configured']
             checks[name] = {'enabled': True, 'ready': ready}
         except Exception as exc:
             checks[name] = {'enabled': True, 'ready': False, 'reason': _error(exc)}
@@ -206,6 +250,16 @@ class SchedulerService:
         self.stop_event = threading.Event()
         self.lock = None
         self.listener = None
+        self.wakeup = None
+        self.schedule_lock = threading.RLock()
+
+    def request_wakeup(self, name):
+        if name not in {'feedback', 'messaging'} or not self.config['enabled'] or not self.config['jobs'][name]['enabled']:
+            return
+        with closing(_connect(self.config, write=True)) as conn, conn:
+            conn.execute("UPDATE jobs SET wake_seq=wake_seq+1,next_run=CASE WHEN state='idle' THEN ? ELSE next_run END WHERE name=?",
+                         (self.clock(), name))
+        self._reconcile()
 
     def _alert(self, name, kind, code):
         now = self.clock()
@@ -230,11 +284,13 @@ class SchedulerService:
         with closing(_connect(self.config, write=True)) as conn, conn:
             conn.execute('UPDATE alerts SET external_status=? WHERE id=?', (outcome, record['id']))
 
-    def _failed(self, name, attempts, code):
+    def _failed(self, name, attempts, code, *, details=None):
         entry, now = self.config['jobs'][name], self.clock()
         exhausted = attempts >= entry['max_attempts']
         delay = min(entry['backoff_seconds'] * 2 ** max(0, attempts - 1), entry['max_backoff_seconds'])
         with closing(_connect(self.config, write=True)) as conn, conn:
+            if details is not None:
+                _setting(conn, 'last_failure:' + name, details)
             conn.execute('UPDATE jobs SET state=?,next_run=?,error=?,active_error=? WHERE name=?',
                          ('paused' if exhausted else 'retry', 0 if exhausted else now + delay, code, code, name))
         self._alert(name, 'failure', code)
@@ -270,14 +326,16 @@ class SchedulerService:
             attention = any(summary.get(key, 0) > 0 for key in ('failed', 'conflict', 'unknown', 'unresolved_deliveries'))
             code = 'downstream_attention' if attention else None
             with closing(_connect(self.config, write=True)) as conn, conn:
-                conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=?,last_success=?,error=?,active_error=?,result=? WHERE name=?",
-                             (self.clock() + self.config['jobs'][name]['interval_seconds'], self.clock(), code, code, canonical(summary), name))
+                conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=CASE WHEN wake_seq>? THEN ? ELSE ? END,wake_consumed=?,last_success=?,error=?,active_error=?,result=? WHERE name=?",
+                             (row['wake_seq'], self.clock(), self.clock() + self.config['jobs'][name]['interval_seconds'],
+                              row['wake_seq'], self.clock(), code, code, canonical(summary), name))
             if attention:
                 self._alert(name, 'failure', code)
             elif row['active_error']:
                 self._alert(name, 'recovery', 'recovered')
         except Exception as exc:
-            self._failed(name, attempts, _error(exc))
+            self._failed(name, attempts, _error(exc),
+                         details=_failure_details(exc, self.config['_root'], self.clock()))
         with closing(_connect(self.config, write=True)) as conn, conn:
             result = dict(conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone())
             if operation:
@@ -286,6 +344,12 @@ class SchedulerService:
             return result
 
     def _reconcile(self):
+        with self.schedule_lock:
+            self._reconcile_jobs()
+
+    def _reconcile_jobs(self):
+        if self.scheduler is None:
+            return
         if self.stop_event.is_set():
             return
         with closing(_connect(self.config)) as conn:
@@ -340,9 +404,25 @@ class SchedulerService:
                 self.scheduler.add_job(self.listener.poll, 'interval', id='_listener',
                     seconds=self.config['listener']['check_interval_seconds'], max_instances=1, coalesce=True)
             self.scheduler.start()
+            # APScheduler releases the job slot before these events; follow-up work
+            # received during a running job can now be scheduled without being lost.
+            if hasattr(self.scheduler, 'add_listener'):
+                from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
+                self.scheduler.add_listener(lambda event: self._reconcile(), EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+            from .wakeup import WakeupListener
+            routes = {}
+            for name in ('feedback', 'messaging'):
+                routes.setdefault(self.config['jobs'][name]['config'], set()).add(name)
+            routes.setdefault(self.config['jobs']['processor']['config'], set()).add('messaging')
+            try:
+                self.wakeup = WakeupListener(routes, self.request_wakeup).start()
+            except OSError:
+                self.wakeup = None
             self._reconcile()
         except Exception:
             try:
+                if self.wakeup:
+                    self.wakeup.close()
                 if self.scheduler is not None and getattr(self.scheduler, 'running', False):
                     self.scheduler.shutdown(wait=True)
                 with closing(_connect(self.config, write=True)) as conn, conn:
@@ -356,6 +436,8 @@ class SchedulerService:
     def stop(self):
         self.stop_event.set()
         try:
+            if self.wakeup:
+                self.wakeup.close()
             if self.scheduler:
                 self.scheduler.shutdown(wait=True)
             if self.listener:

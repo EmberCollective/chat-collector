@@ -84,6 +84,15 @@ def test_failed_collection_retains_completed_platform(install_root, monkeypatch)
     assert not state.get('processed')
 
 
+def test_qq_snapshot_busy_preserves_specific_recovery_message(install_root, monkeypatch, capsys):
+    setup = module('setup')
+    monkeypatch.setattr(setup.ctypes.windll.shell32, 'IsUserAnAdmin', lambda: True)
+    monkeypatch.setattr(setup.subprocess, 'run', Mock(return_value=Mock(returncode=2)))
+    with pytest.raises(RuntimeError, match='QQ 正在重写数据库'):
+        setup.recover_key(install_root, 'qq')
+    assert 'Hook' not in capsys.readouterr().out
+
+
 def test_existing_install_never_overwrites_config(install_root, monkeypatch):
     setup = module('setup')
     original = (install_root / 'config/processor.toml').read_bytes()
@@ -101,6 +110,9 @@ def test_launcher_requires_ready_before_starting_workers(tmp_path):
 def test_release_payload_never_copies_accounts_keys_or_installed_node():
     build = module('build_release')
     files = build.payload(ROOT)
+    assert all(name in files for name in ('common/locking.py', 'application/collection.py',
+        'selection/__init__.py', 'providers/query.py', 'providers/content.py',
+        'providers/platforms/qq.py', 'processor/service.py', 'automation/wakeup.py'))
     assert 'tools/install/defaults/processor.toml' in files
     assert 'tools/install/console.toml' in files
     assert 'tools/console/console.toml' not in files

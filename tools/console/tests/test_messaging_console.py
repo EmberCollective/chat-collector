@@ -78,8 +78,13 @@ def test_feedback_queue_and_automation_are_authenticated_and_read_only(console):
 
 def test_state_action_queues_feedback_without_claiming_completion(console):
     client, root = setup(console)
+    from processor import load_config, storage
+    settings = load_config(root/'processing/config.toml')
+    with storage._connect(settings, write=True) as conn:
+        storage._save_task(conn, {'task_id':'t1','title':'Test task','event':'Submit report',
+                                 'priority':'P2','status':'open','sources':[]})
     with (root/'messaging.toml').open('a', encoding='utf8') as stream:
-        stream.write('\n[feedback]\nenabled=true\nprocessor_config="processor.toml"\nstate_file="delivery/feedback.db"\n')
+        stream.write('\n[feedback]\nenabled=true\nprocessor_config="processing/config.toml"\nstate_file="delivery/feedback.db"\n')
     client.post('/api/messaging/sync').raise_for_status()
     response = client.post('/api/messaging/tasks/t1/state', json={'action':'complete'})
     assert response.status_code == 200 and response.json()['status'] == 'queued'

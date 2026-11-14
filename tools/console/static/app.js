@@ -28,14 +28,15 @@ function renderStatus(data){
   for(const name of ['wechat','qq']){
     const state=data.modules[name],card=el('article',undefined,'module-card'),top=el('div',undefined,'module-top');
     const running=state.running_job?data.jobs.find(j=>j.id===state.running_job):null;
-    top.append(el('h2',names[name]),el('span',running?`${actions[running.action]}中`:(state.scheduler_enabled?'定时采集中':'定时已暂停'),'pill'+(state.scheduler_enabled?'':' warn')));
+    top.append(el('h2',names[name]),el('span',running?`${actions[running.action]}中`:'手动调试就绪','pill'));
     const metrics=el('div',undefined,'metrics');metrics.append(metric('已采集消息',state.messages??'—'),metric('待发布事件',state.pending_events??'—'),metric('成功时间终点',time(state.checkpoint),true),metric('快照更新时间',time(state.snapshot_updated_at),true));
     const controls=el('div',undefined,'actions');
     const run=button('执行一轮',async()=>{const job=await api(`/modules/${name}/collect`,'POST');notice(`${names[name]}采集已启动，任务 ${job.id.slice(0,8)}`);await refresh();},false);run.disabled=!!running;
-    controls.append(run,button(state.scheduler_enabled?'暂停定时':'恢复定时',async()=>{const result=await api(`/modules/${name}/schedule`,'POST',{enabled:!state.scheduler_enabled});notice(result.enabled?`${names[name]}定时已恢复`:'已暂停后续定时触发；正在运行的任务会继续完成');await refresh();}));
-    controls.append(button('扫描与强度',async()=>{if(selected()!==name){$('module').value=name;await switchModule();}else{await loadConfig();}$('tab-settings').click();$('cfg-schedule-interval_seconds').focus();}));
-    card.append(top,metrics,el('p',running?`任务耗时 ${Math.max(0,Math.floor(Date.now()/1000-running.started_at))} 秒 · 刷新数据库、筛选或处理附件`:`轮后等待 ${state.interval_seconds??'—'} 秒 · 数据库${state.refresh_interval_seconds?`至少间隔 ${state.refresh_interval_seconds} 秒刷新`:'每轮刷新'} · ${intensities[state.intensity]||'完整'}${state.attachments_enabled?'':' · 附件保存已关闭'}${state.scheduler_enabled?` · 下次触发约 ${state.next_run_in} 秒后`:''}`,'muted'),controls);
-    if(state.state_error||state.scheduler_error)card.append(el('p',state.state_error||state.scheduler_error,'pill error'));
+    controls.append(run);
+    const automatic = el('a','自动任务设置','text-button'); automatic.href='#automation-panel'; controls.append(automatic);
+    controls.append(button('刷新与附件强度',async()=>{if(selected()!==name){$('module').value=name;await switchModule();}else{await loadConfig();}$('tab-settings').click();$('cfg-schedule-refresh_interval_seconds').focus();}));
+    card.append(top,metrics,el('p',running?`任务耗时 ${Math.max(0,Math.floor(Date.now()/1000-running.started_at))} 秒 · 刷新数据库、筛选或处理附件`:`数据库${state.refresh_interval_seconds?`至少间隔 ${state.refresh_interval_seconds} 秒刷新`:'每轮刷新'} · ${intensities[state.intensity]||'完整'}${state.attachments_enabled?'':' · 附件保存已关闭'} · 定时状态见“自动任务”`,'muted'),controls);
+    if(state.state_error)card.append(el('p',state.state_error,'pill error'));
     $('modules').append(card);
   }
   $('collector-path').textContent='关联收集项目：'+data.collector_root;
@@ -52,7 +53,7 @@ async function refresh(){
   await guard(pollProcessor);
 }
 const fields=[
- ['schedule','interval_seconds','扫描间隔：轮后等待秒数（5–86400）','number'],['schedule','refresh_interval_seconds','数据库刷新最小间隔（秒，0 为每轮）','number'],['processing','intensity','附件抓取解码强度','select'],['schedule','initial_lookback_seconds','首次回溯时长（秒）','number'],
+ ['schedule','refresh_interval_seconds','数据库刷新最小间隔（秒，0 为每轮）','number'],['processing','intensity','附件抓取解码强度','select'],['schedule','initial_lookback_seconds','首次回溯时长（秒）','number'],
  ['source','encrypted_dir','原始加密数据库目录','text'],['source','decrypted_dir','明文快照目录','text'],
  ['source','work_dir','QQ 临时工作目录（建议放 SSD）','text'],
  ['source','media_dir','原始媒体目录','text'],['source','key_file','本机密钥文件路径（不显示内容）','text'],

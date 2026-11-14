@@ -2,6 +2,8 @@ data/
 runtime-deps/
 secrets/
 /config/*.lock
+.*.wakeup.json
+.*.wakeup.json.*.tmp
 __pycache__/
 .pytest_cache/
 *.log

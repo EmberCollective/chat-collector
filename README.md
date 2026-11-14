@@ -7,23 +7,28 @@
 ```mermaid
 flowchart LR
     A[微信 / QQ 本地数据库] --> B[收集层：增量解密与身份资料]
-    B --> C[筛选层：注册的 SQL 规则取并集去重]
+    B --> R[(已验证来源数据库)]
+    R --> P[兼容层：SQL 适配与附件内容]
+    C[筛选层：规则编排与合并去重] -->|SQL 与参数| P
+    P -->|标准消息与命中| C
     C --> D[统一消息 JSONL]
     D --> E[处理层：Pi + 本地 Markdown 规则]
-    E --> F[带来源的待办 JSONL]
-    F --> G[消息层：行动与材料、完成状态、提醒计划]
+    E -->|按编号索取附件| P
+    E --> T[待办服务与唯一正式数据库]
+    T -->|持久变更流| G[消息层：材料与通知调度]
     G --> H[飞书卡片与文件]
     G --> I[Notion 资料库与日期]
     G --> J[外部工作流 / Notion Calendar MCP]
     H -->|完成、恢复| K[鉴权回调与持久反馈队列]
-    K -->|公开状态 API| E
+    K -->|公开状态 API| T
 ```
 
 ## 当前能力
 
 | 模块 | 已实现 | 配置与说明 |
 |---|---|---|
-| 收集 | 微信、QQ 首次完整解密；后续变化页刷新、失败回滚，保留已验证快照 | [增量刷新](docs/incremental-refresh.md) |
+| 收集 | 首次完整解密、后续变化页刷新；单库失败回滚，多分片未完整发布时禁止读取混合版本并支持增量恢复 | [增量刷新](docs/incremental-refresh.md) |
+| 兼容 | 平台字段与身份适配、统一 SQL 查询、附件按需解码与解析 | [提供方契约](docs/provider-api.md) |
 | 筛选 | 每轮数据库时间窗；独立 SQL 规则；合并去重，保留命中规则 | [规则集](FILTERS.md) |
 | 处理 | P0–P4、时间、参与人员、地点、执行步骤、来源引用；Pi 按需读附件、查完整待办库 | [处理说明](docs/processing.md)、[提取规则](processing-rules/default.md) |
 | 消息 | 消费正式待办输出；材料与成果归档、优先级提醒、操作反馈回写 | [消息层契约](docs/messaging.md) |
@@ -106,7 +111,7 @@ python -m messaging feedback-status
 
 | 边界 | 保证与限制 |
 |---|---|
-| 采集 → 处理 | 统一消息契约，按事件 ID、消息 ID 与修订去重；原始 SQL 架构由收集方处理 |
+| 采集 → 处理 | 兼容层适配原始库并执行 SQL，筛选层合并命中并按消息身份与修订去重；Pi 只接收标准契约 |
 | 处理 → 消息 | 统一待办事件；按事件 ID 去重、按任务修订更新；乱序不回退，同修订冲突拒绝 |
 | 外部投递 | 持久记录投递 ID、目标与回执；明确失败退避，结果未知停止自动重发。不能保证所有外部平台“恰好一次” |
 | 操作反馈 | 飞书卡片和本地操作按请求 ID 去重，调用公开状态 API；冲突保留且不覆盖新状态。Notion/日历原生编辑尚未自动回流 |
@@ -119,7 +124,7 @@ python -m messaging feedback-status
 
 ## 开发与文档
 
-目录：`collector/` 收集与 SQL 执行，`rulesets/` SQL，`providers/` 附件提供方，`processor/` Pi 处理与状态 API，`messaging/` 消息、反馈和渠道，`automation/` 独立调度，`tools/console/` 可选调试台，`tests/` 合成测试。
+目录：`collector/` 原生增量收集，`providers/` SQL 适配与附件内容，`selection/` 规则编排和去重，`rulesets/` SQL 文件，`processor/` Pi 与正式待办服务，`messaging/` 通知编排、反馈和渠道，`automation/` 独立调度，`tools/console/` 可选调试台。
 
 - [文档索引](docs/README.md)
 - [提供方契约](docs/data-contract.md) · [收集层开发指南](docs/collector-development.md)
