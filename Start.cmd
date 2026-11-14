@@ -5,4 +5,4 @@ if not exist "%~dp0.runtime\python\pythonw.exe" (
   pause
   exit /b 1
 )
-start "" "%~dp0.runtime\python\pythonw.exe" "%~dp0tools\install\launcher.py" --open
+start "" /d "%~dp0" "%~dp0.runtime\python\pythonw.exe" "%~dp0tools\install\launcher.py" --open

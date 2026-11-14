@@ -93,6 +93,24 @@ python -m automation stop --config config/automation.toml
 
 停止时写入停止标记，等待官方 SDK 监听器退出，最多等待 10 秒。SDK 初始化网络请求阻塞时可能延迟响应；自动化保留 `stopping` 状态，不强杀进程。再次启动时会先处理仍存活的旧监听器。正常停止不删除待办、材料、回调队列或任何失败记录。
 
+## 执行历史
+
+自动化在自身状态库中保存每轮执行及每次尝试，后台独立运行时也会记录。定时执行、控制面板手动执行和 CLI `once` 进入同一套记录；同轮自动重试沿用原编号和来源。重试耗尽后恢复会重新建立一轮，旧轮保留失败结果。进程重启会把未完成的尝试记为中断，并按原重试预算继续处理，不把中断记为成功。
+
+`automation.history.list_runs(config, *, limit=100, module=None, origin=None, status=None)` 按开始时间倒序返回摘要，最多查询 1000 条。`get_run(config, identifier)` 返回摘要及按次数排序的 `attempts`；不存在时返回 `None`。两者只读，状态库不存在或尚未升级时返回空结果，不创建或迁移数据库。
+
+摘要字段为 `id`（UUID hex）、`module`（任务名）、`action`（`collect/process/deliver/feedback`）、`origin`（`manual/schedule`）、`status`、`started_at`、`finished_at`、`attempt_count`、`error`、`result` 和 `duration_seconds`。时间为 Unix 秒；运行中或等待重试时结束时间和耗时为空。状态包括 `running/retry/succeeded/failed/interrupted/warning`；`warning` 表示本轮完成，但下游仍需处理。详情中的每次尝试包含 `number/status/started_at/finished_at/error/result/details`。
+
+结果只保留数值统计，错误只保留安全代码；尝试详情沿用项目内调用位置和 SQLite 错误码，不保存聊天正文、凭据、SQL 或异常原文。业务结果与任务状态一起提交，之后的报警失败不会把已完成的业务执行改为失败重试。每个模块分别保留最近 1000 轮已结束记录，另保留仍在运行、等待重试的记录；现有五个模块合计最多保留 5000 轮已结束记录，高频反馈不会挤掉低频采集历史，清理同时删除对应尝试。升级仅新增结构，保留原任务、配置和待执行操作，不补造升级前的历史。
+
+## 统一查看
+
+调试台底部的“执行记录”合并显示原有面板手动记录和上述后台历史，可按模块、触发方式、状态筛选最近 100 轮，点击详情查看每次尝试。总耗时包含重试等待。高频反馈可通过模块筛选排除，不隐藏真实执行轮次；升级前未保存的自动历史无法补回。
+
+面板通过受本机会话认证保护的 `GET /api/activity` 查询合并视图（可选 `module/origin/status/limit`），通过 `GET /api/activity/{source}/{identifier}` 查看详情，`source` 为 `console` 或 `automation`。只在视图中合并，两类执行端继续独立保存自己的记录；自动化不导入面板。旧 `/api/jobs/{identifier}` 保留给手动任务与预览进度查询。后台配置暂时不可读时，页面明确提示，仍保留可用的手动记录。
+
 ## 验证范围
 
 `tests/test_automation.py` 使用合成任务和时钟验证有限重试、暂停持久化、手动恢复、同任务并发拒绝、故障隔离、报警去重、不递归报警、监听器接管和重启预算；另有真实 APScheduler 调度合成任务的测试。测试不请求真实模型、不读取实际聊天、不发送飞书消息。`check` 通过也不代表真实权限、网络或远端配置已经验证。
+
+`tests/test_automation_history.py` 验证失败后成功的重试归组、耗尽后恢复、进程中断、旧库迁移及只读查询、反馈高频清理、并发认领、业务完成与报警故障隔离。

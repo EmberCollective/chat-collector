@@ -115,6 +115,9 @@ def test_release_payload_never_copies_accounts_keys_or_installed_node():
         'providers/platforms/qq.py', 'processor/service.py', 'automation/wakeup.py'))
     assert 'tools/install/defaults/processor.toml' in files
     assert 'tools/install/console.toml' in files
+    assert all(path.relative_to(ROOT).as_posix() in files
+               for path in (ROOT / 'assets/readme').rglob('*') if path.is_file())
+    assert 'assets/readme/logo.svg' in files
     assert 'tools/console/console.toml' not in files
     assert 'runtime-deps/native/sqlcipher-pages.dll' in files
     assert 'runtime-deps/sqlcipher3/_sqlite3.cp313-win_amd64.pyd' in files
