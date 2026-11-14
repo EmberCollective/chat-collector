@@ -16,6 +16,7 @@ def main(argv=None):
             interval = 60
             try:
                 config = load_config(args.config)
+                config['_workflow_origin'] = 'cli'
                 interval = config['schedule']['interval_seconds']
                 operation = {'preview': preview, 'status': status}.get(args.mode, run_round)
                 print(json.dumps(operation(config), ensure_ascii=False), flush=True)

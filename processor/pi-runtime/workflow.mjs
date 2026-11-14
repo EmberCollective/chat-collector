@@ -7,7 +7,7 @@ export function workflowRecorder(onRecord, secret = '') {
     }
     text = text.replace(/data:[\w.+/-]+;base64,[A-Za-z0-9+/=\s]+/g, '[binary omitted]')
       .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/_.=-]+/gi, '$1 [credential omitted]')
-      .replace(/((?:api[_-]?key|(?:access[_-]?)?token|client[_-]?secret|password)\s*[=:]\s*)[^\s,;"']+/gi, '$1[credential omitted]');
+      .replace(/(["']?(?:api[_-]?key|(?:access[_-]?)?token|refresh[_-]?token|client[_-]?secret|password|authorization)["']?\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)/gi, '$1"[credential omitted]"');
     text = text.replace(/https?:\/\/[^\s<>"']+/gi, address => {
       try {
         const url = new URL(address);

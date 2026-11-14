@@ -80,7 +80,9 @@ def _callback(config, name):
         return run_round(load_config(path))
     if name == 'processor':
         from processor import load_config, run_round
-        return run_round(load_config(path))
+        settings = load_config(path)
+        settings['_workflow_origin'] = config.get('_workflow_origin', 'schedule')
+        return run_round(settings)
     from messaging import load_config
     settings = load_config(path)
     if name == 'feedback':
@@ -263,7 +265,7 @@ class SchedulerService:
             if operation:
                 conn.execute("UPDATE operations SET state='running',updated_at=? WHERE id=?", (now, operation['id']))
         try:
-            result = self.callbacks[name]() if name in self.callbacks else _callback(self.config, name)
+            result = self.callbacks[name]() if name in self.callbacks else _callback(dict(self.config, _workflow_origin='manual' if manual else 'schedule'), name)
             if isinstance(result, dict) and result.get('status') == 'failed':
                 raise RuntimeError('job_returned_failed')
             summary = _stats(result)

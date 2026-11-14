@@ -279,6 +279,11 @@ test('workflow safe projection omits images, credentials and private reasoning, 
   assert.ok(serialized.includes('image_body') && serialized.includes('private_reasoning'));
   record({type: 'request_prepared', body: {content: 'X'.repeat(600000)}});
   assert.equal(records.at(-1).body.content.omitted, 'text_limit');
+  record({type: 'tool_execution_end', body: {result: {content: [{type: 'text', text:
+    'Inline config: {"api_key":"OTHER_PRIVATE_KEY","access_token":"OTHER_PRIVATE_TOKEN"}\n```json\n{"password": "PRIVATE_PASSWORD"}\n```'}]}}});
+  for (const omitted of ['OTHER_PRIVATE_KEY', 'OTHER_PRIVATE_TOKEN', 'PRIVATE_PASSWORD']) {
+    assert.ok(!JSON.stringify(records.at(-1)).includes(omitted), omitted);
+  }
 });
 
 test('failed native compaction rejects the group without accepting a submission', async () => {

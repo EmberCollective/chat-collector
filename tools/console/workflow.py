@@ -1,72 +1,114 @@
 """Authenticated, on-demand access to durable Pi workflow bodies."""
 import json
+from pathlib import Path
 import re
 
 from fastapi import Depends, HTTPException, Query
+import psutil
 
 
 MAX_LINE = 1100000
 MAX_PAGE = 4 * 1024 * 1024
 
 
-def register_workflow_routes(app, jobs, authenticate):
-    def folder_for(identifier):
-        if not re.fullmatch(r'[0-9a-f]{32}', identifier):
-            raise HTTPException(404, '运行记录不存在')
-        root = jobs.directory.resolve()
-        folder = (root / identifier).resolve()
-        if folder.parent != root or not folder.is_dir():
-            raise HTTPException(404, '运行记录不存在')
-        return folder
-
-    def local_file(folder, name):
-        path = (folder / name).resolve()
-        if path.parent != folder:
-            raise HTTPException(404, '运行记录不存在')
-        return path
-
-    def job_info(folder):
+def history_roots(jobs, processor_history=None):
+    directories = [jobs.directory.resolve()]
+    if processor_history is not None:
         try:
-            job = json.loads(local_file(folder, 'job.json').read_text(encoding='utf-8'))
-            if not isinstance(job, dict):
-                raise ValueError('Invalid job metadata')
-            result = local_file(folder, 'result.json')
-            if result.is_file():
-                outcome = json.loads(result.read_text(encoding='utf-8'))
-                if not isinstance(outcome, dict):
-                    raise ValueError('Invalid job outcome')
-                job.update({key: outcome[key] for key in ('status', 'error') if key in outcome})
-            elif job.get('status') == 'running' and job.get('id') not in getattr(jobs, 'running', {}).values():
+            path = processor_history() if callable(processor_history) else processor_history
+            directory = Path(path).resolve()
+            if directory not in directories:
+                directories.append(directory)
+        except (OSError, ValueError):
+            pass  # Existing console runs remain readable while processor configuration is being repaired.
+    return directories
+
+
+def find_run_folder(jobs, identifier, processor_history=None):
+    if not re.fullmatch(r'[0-9a-f]{32}', identifier):
+        raise HTTPException(404, '运行记录不存在')
+    matches = []
+    for root in history_roots(jobs, processor_history):
+        folder = (root / identifier).resolve()
+        if folder.parent == root and folder.is_dir():
+            matches.append(folder)
+    if len(matches) > 1:
+        raise HTTPException(409, '运行编号在两个记录目录中冲突，请检查本地运行记录')
+    if not matches:
+        raise HTTPException(404, '运行记录不存在')
+    return matches[0]
+
+
+def local_record_file(folder, name):
+    path = (folder / name).resolve()
+    if path.parent != folder:
+        raise HTTPException(404, '运行记录不存在')
+    return path
+
+
+def read_run_metadata(folder, jobs):
+    try:
+        job = json.loads(local_record_file(folder, 'job.json').read_text(encoding='utf-8'))
+        if not isinstance(job, dict):
+            raise ValueError('Invalid job metadata')
+        result = local_record_file(folder, 'result.json')
+        if result.is_file():
+            outcome = json.loads(result.read_text(encoding='utf-8'))
+            if not isinstance(outcome, dict):
+                raise ValueError('Invalid job outcome')
+            job.update({key: outcome[key] for key in ('status', 'error') if key in outcome})
+        elif job.get('status') == 'running':
+            if folder.parent == jobs.directory.resolve():
+                active = job.get('id') in getattr(jobs, 'running', {}).values()
+            else:
+                try:
+                    process = psutil.Process(job.get('pid', -1))
+                    active = abs(process.create_time() - job.get('create_time', 0)) < .01 and process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+                except (psutil.Error, TypeError, ValueError):
+                    active = False
+            if not active:
                 job['status'] = 'interrupted'
-            job['id'] = folder.name
-            return {key: job.get(key) for key in ('id', 'module', 'action', 'origin', 'status', 'started_at', 'finished_at', 'error')}
-        except (OSError, ValueError, TypeError):
-            raise HTTPException(404, '运行元数据不可读') from None
+        job['id'] = folder.name
+        return {key: job.get(key) for key in ('id', 'module', 'action', 'origin', 'status', 'started_at', 'finished_at', 'error')}
+    except (OSError, ValueError, TypeError):
+        raise HTTPException(404, '运行元数据不可读') from None
+
+
+def register_workflow_routes(app, jobs, authenticate, processor_history=None):
 
     @app.get('/api/workflow/runs', dependencies=[Depends(authenticate)], summary='查看持久化的 Pi 处理运行')
     def runs(cursor: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100)):
         history = []
-        for entry in jobs.directory.iterdir():
-            if not re.fullmatch(r'[0-9a-f]{32}', entry.name):
+        seen = set()
+        for root in history_roots(jobs, processor_history):
+            if not root.is_dir():
                 continue
-            try:
-                folder = folder_for(entry.name)
-                job = job_info(folder)
-                if job['module'] != 'processor' or job['action'] != 'process':
+            for entry in root.iterdir():
+                if not re.fullmatch(r'[0-9a-f]{32}', entry.name):
                     continue
-                job['recorded'] = local_file(folder, 'pi-workflow.jsonl').is_file()
-                history.append(job)
-            except HTTPException:
-                continue
+                try:
+                    folder = find_run_folder(jobs, entry.name, processor_history)
+                    if folder.name in seen:
+                        continue
+                    seen.add(folder.name)
+                    job = read_run_metadata(folder, jobs)
+                    if job['module'] != 'processor' or job['action'] != 'process':
+                        continue
+                    job['recorded'] = local_record_file(folder, 'pi-workflow.jsonl').is_file()
+                    history.append(job)
+                except HTTPException as exc:
+                    if exc.status_code == 409:
+                        raise
+                    continue
         history.sort(key=lambda item: (item.get('started_at') or 0, item['id']), reverse=True)
         page = history[cursor:cursor + limit]
         return {'runs': page, 'next_cursor': cursor + len(page), 'has_more': cursor + len(page) < len(history)}
 
     @app.get('/api/jobs/{identifier}/workflow', dependencies=[Depends(authenticate)], summary='分页读取 Pi 上下文与工具记录')
     def workflow(identifier: str, cursor: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
-        folder = folder_for(identifier)
-        job = job_info(folder)
-        path = local_file(folder, 'pi-workflow.jsonl')
+        folder = find_run_folder(jobs, identifier, processor_history)
+        job = read_run_metadata(folder, jobs)
+        path = local_record_file(folder, 'pi-workflow.jsonl')
         response = {'events': [], 'next_cursor': cursor, 'has_more': False, 'recorded': path.is_file(),
                     'job': job, 'coverage': 'safe_projection',
                     'omissions': ['credentials', 'image_bodies', 'private_reasoning', 'oversized_bodies']}
@@ -102,7 +144,7 @@ def register_workflow_routes(app, jobs, authenticate):
                     if oversized:
                         raise ValueError('oversized')
                     event = json.loads(line)
-                    if not isinstance(event, dict):
+                    if not isinstance(event, dict) or not isinstance(event.get('type'), str):
                         raise ValueError('invalid')
                 except (ValueError, UnicodeError):
                     event = {'type': 'record_unavailable', 'body': {'omitted': 'oversized_or_invalid_record'}}

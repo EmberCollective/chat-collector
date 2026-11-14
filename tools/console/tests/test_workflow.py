@@ -7,12 +7,12 @@ from fastapi.testclient import TestClient
 from workflow import MAX_LINE, register_workflow_routes
 
 
-def client_for(tmp_path):
+def client_for(tmp_path, processor_history=None):
     app = FastAPI()
     def authenticate(x_console_token: str = Header('')):
         if x_console_token != 'fixture':
             raise HTTPException(401)
-    register_workflow_routes(app, SimpleNamespace(directory=tmp_path), authenticate)
+    register_workflow_routes(app, SimpleNamespace(directory=tmp_path), authenticate, processor_history)
     return TestClient(app, headers={'X-Console-Token': 'fixture'})
 
 
@@ -53,9 +53,9 @@ def test_pagination_partial_append_unicode_and_invalid_record(tmp_path):
     assert second['events'][0]['seq'] == 3 and not second['has_more'] and second['pending']
     assert second['next_cursor'] == path.read_bytes().rfind(b'\n') + 1
     with path.open('a', encoding='utf-8') as stream:
-        stream.write('"run_end"}\ninvalid json\n')
+        stream.write('"run_end"}\ninvalid json\n{"type":null}\n')
     final = client.get(f'/api/jobs/{identifier}/workflow?cursor={second["next_cursor"]}').json()
-    assert [event['type'] for event in final['events']] == ['run_end', 'record_unavailable']
+    assert [event['type'] for event in final['events']] == ['run_end', 'record_unavailable', 'record_unavailable']
     assert not final['has_more'] and not final['pending']
     assert client.get(f'/api/jobs/{identifier}/workflow?cursor=1').status_code == 422
     assert client.get(f'/api/jobs/{identifier}/workflow?cursor=999999999').status_code == 422
@@ -82,3 +82,43 @@ def test_workflow_cannot_follow_a_record_link_outside_run(tmp_path):
     except OSError:
         pytest.skip('Creating symbolic links requires Windows developer mode')
     assert client.get(f'/api/jobs/{identifier}/workflow').status_code == 404
+
+
+def test_background_history_survives_console_restart_and_checks_process_identity(tmp_path):
+    import os
+    import psutil
+    background = tmp_path / 'background'
+    background.mkdir()
+    identifier, folder = save_job(background, 200)
+    path = folder / 'job.json'
+    metadata = json.loads(path.read_text())
+    metadata.update(status='running', origin='cli', pid=os.getpid(), create_time=psutil.Process().create_time())
+    path.write_text(json.dumps(metadata), encoding='utf-8')
+    (folder / 'pi-workflow.jsonl').write_text('{"type":"model_output","body":{"content":[]}}\n')
+    client = client_for(tmp_path, lambda: background)
+    response = client.get('/api/workflow/runs').json()
+    assert response['runs'][0]['id'] == identifier and response['runs'][0]['status'] == 'running'
+    assert response['runs'][0]['origin'] == 'cli'
+    assert 'pid' not in response['runs'][0] and str(background) not in json.dumps(response)
+    detail = client.get(f'/api/jobs/{identifier}/workflow').json()
+    assert detail['recorded'] and detail['events'][0]['type'] == 'model_output'
+    assert client.get(f'/api/jobs/{identifier}/workflow', headers={'X-Console-Token': ''}).status_code == 401
+    metadata['create_time'] -= 100  # The PID alone must not make an orphaned run look active.
+    path.write_text(json.dumps(metadata))
+    restarted = client_for(tmp_path, background)
+    assert restarted.get(f'/api/jobs/{identifier}/workflow').json()['job']['status'] == 'interrupted'
+
+
+def test_conflicting_ids_and_unavailable_background_configuration(tmp_path):
+    identifier, _ = save_job(tmp_path)
+    background = tmp_path / 'background'
+    background.mkdir()
+    save_job(background)
+    client = client_for(tmp_path, background)
+    assert client.get('/api/workflow/runs').status_code == 409
+    assert client.get(f'/api/jobs/{identifier}/workflow').status_code == 409
+    def unavailable():
+        raise ValueError('PRIVATE CONFIGURATION PATH')
+    response = client_for(tmp_path, unavailable).get('/api/workflow/runs')
+    assert response.status_code == 200 and response.json()['runs'][0]['id'] == identifier
+    assert 'PRIVATE' not in response.text
