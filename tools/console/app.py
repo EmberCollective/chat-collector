@@ -392,6 +392,10 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     def config(module: Module):
         return bridge.read_config(module)
 
+    @app.get('/api/modules/{module}/rulesets', dependencies=[Depends(authenticate)], summary='发现允许目录内的 SQL 规则与参数')
+    def rulesets(module: Module):
+        return bridge.rulesets(module)
+
     @app.patch('/api/modules/{module}/config', dependencies=[Depends(authenticate)], summary='校验、备份并保存配置')
     def save(module: Module, body: SaveConfig):
         with jobs.mutex:

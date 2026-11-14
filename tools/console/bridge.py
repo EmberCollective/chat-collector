@@ -67,6 +67,11 @@ class Bridge:
     def catalog(self):
         return {'sources': list(self.sources.values())}
 
+    def rulesets(self, name):
+        self.require(name, 'sql')
+        from rules import discover_rules
+        return discover_rules(self.root, self.paths[name], self.config(name))
+
     def require(self, name, capability):
         source = self.sources.get(name)
         if not source:
