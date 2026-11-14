@@ -89,6 +89,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
     await page.evaluate(()=>location.hash='settings/channels');
     await page.waitForSelector('#ops-targets article');
     assert.match(await page.locator('#ops-targets').textContent(),/当前只读/);
+    assert.match(await page.locator('#ops-targets article').filter({hasText:'reserved-kind'}).textContent(),/当前只读/);
     assert.doesNotMatch(await page.content(),/never-output-this/);
     await page.locator('#ops-new-kind').selectOption('webhook');await page.locator('#ops-new-id').fill('second-target');await page.locator('#ops-add-target').click();
     const newTarget=page.locator('#ops-targets article').filter({hasText:'second-target'});

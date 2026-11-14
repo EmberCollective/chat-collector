@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let token = '', currentConfig = null, pendingPreview = null, previewShown = null, imageUrl = null, refreshing = false;
-const names = {processor:'待办处理'}, actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放',processor_preview:'上下文预览',process:'提取待办'};
+const names = Object.assign(Object.create(null),{processor:'待办处理'}), actions = {collect:'正式采集',preview:'筛选预览',replay:'时间段重放',processor_preview:'上下文预览',process:'提取待办'};
 const states = {running:'执行中',succeeded:'已完成',failed:'失败',interrupted:'结果未确认'};
 const intensities = {metadata:'轻量',standard:'标准',full:'完整'};
 const assetStates = {deferred:'按强度暂缓保存',archived:'已归档',missing:'本地未找到',thumbnail_only:'仅缩略图',unverified:'内容待核验',encrypted_only:'仅保留密文',unsupported:'格式未支持'};

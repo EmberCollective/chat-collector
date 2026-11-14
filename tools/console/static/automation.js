@@ -57,8 +57,9 @@ document.addEventListener('DOMContentLoaded', () => {
     button(actions, '运行一轮', () => operate('/jobs/' + name + '/once', jobNames[name] + '已请求运行。'));
     button(actions, '恢复重试', () => operate('/jobs/' + name + '/resume', jobNames[name] + '已恢复。'));
   }
+  function channelDescription(kind) {const types=config?.messaging.types||{};return Object.hasOwn(types,kind)?types[kind]:null;}
   function targetCard(target) {
-    const description=config.messaging.types?.[target.kind];
+    const description=channelDescription(target.kind);
     const card=node('article',null,'message');byId('targets').append(card);
     card.append(node('h4',`${target.id} · ${description?.name||target.kind}`));
     if(!description){card.append(node('p','此类型没有可用描述，当前只读。已有配置保留在文件中，不会在保存其他设置时丢弃。','scope'));return;}
@@ -77,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!description.capabilities?.test)return;
     const actions=node('div',null,'actions');card.append(actions);
     button(actions,'发送测试消息…',async()=>{
-      if(!config.messaging.types?.[target.kind]?.capabilities?.test)throw Error('此通道不支持测试');
+      if(!channelDescription(target.kind)?.capabilities?.test)throw Error('此通道不支持测试');
       if(dirty)throw Error('请先保存设置，再测试已保存的通道。');
       if(!window.confirm(`向 ${target.id} 发送一条测试消息？这会访问外部服务。`))return;
       const result=await request('/targets/'+encodeURIComponent(target.id)+'/test',{method:'POST'});
@@ -153,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
       object[key] = type === 'boolean' ? input.checked : type === 'integer' ? Number(input.value) : type === 'strings' ? input.value.split(/[\n,，]+/).map(x => x.trim()).filter(Boolean) : input.value.trim();
     }
     const {schemas, types, ...settings} = config.messaging;
-    const messaging={...settings,targets:settings.targets.filter(target=>types?.[target.kind])};
+    const messaging={...settings,targets:settings.targets.filter(target=>Object.hasOwn(types||{},target.kind))};
     return {version: config.version, automation: config.automation, messaging};
   }
   async function loadConfig() {
@@ -256,7 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const id = byId('new-id').value.trim(), kind = byId('new-kind').value;
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw Error('通道编号只能包含字母、数字、下划线或连字符，最多 100 字符。');
     if (config.messaging.targets.some(target => target.id === id)) throw Error('通道编号已存在。');
-    const description=config.messaging.types?.[kind];if(!description)throw Error('此通道类型没有可编辑描述');
+    const description=channelDescription(kind);if(!description)throw Error('此通道类型没有可编辑描述');
     const target={...structuredClone(description.defaults),id,kind,enabled:false};
     config.messaging.targets.push(target); targetCard(target); byId('new-id').value = ''; markDirty();
   }));

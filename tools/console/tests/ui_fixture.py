@@ -21,7 +21,7 @@ second['storage']['state_file']=str(root/'qq-second-state.db')
 second_path=root/'qq-second.toml';second_path.write_text(tomlkit.dumps(second),encoding='utf8')
 settings['sources']={'qq-work':{'kind':'qq','config':str(second_path),'name':'工作账号'},'external-example':{'kind':'ticket-stream','name':'外部工单','description':'由外部收集器管理，只发布标准消息。'}}
 settings['messaging_config']=str(root/'messaging.toml')
-(root/'messaging.toml').write_text((root/'messaging.toml').read_text(encoding='utf8')+'\n[[targets]]\nid="workflow-sample"\nkind="webhook"\nenabled=false\nurl_env="UI_TEST_WEBHOOK"\n\n[[targets]]\nid="future"\nkind="new-provider"\nenabled=false\nsecret="never-output-this"\n',encoding='utf8')
+(root/'messaging.toml').write_text((root/'messaging.toml').read_text(encoding='utf8')+'\n[[targets]]\nid="workflow-sample"\nkind="webhook"\nenabled=false\nurl_env="UI_TEST_WEBHOOK"\n\n[[targets]]\nid="future"\nkind="new-provider"\nenabled=false\nsecret="never-output-this"\n\n[[targets]]\nid="reserved-kind"\nkind="constructor"\nenabled=false\n',encoding='utf8')
 settings['automation_config']=str(root/'automation.toml')
 (root/'automation.toml').write_text('enabled=false\n[storage]\nstate_file="automatic/state.db"\n[jobs.processor]\nconfig="processing/config.toml"\n[jobs.messaging]\nconfig="messaging.toml"\n[jobs.feedback]\nconfig="messaging.toml"\n',encoding='utf8')
 (root/'console.toml').write_text(tomlkit.dumps(settings),encoding='utf8')
