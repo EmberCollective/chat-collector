@@ -75,6 +75,55 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.locator('#rule-list .rule').count(),1);
     assert.match(await page.locator('#filter-state').textContent(),/未保存/);
 
+    // The same automation forms are reachable from one navigation entry and old shortcuts.
+    assert.equal(await page.locator('.nav-item[data-view="automation"]').count(),1);
+    await page.evaluate(()=>openSettings('service'));
+    assert.equal(await page.locator('#view-automation').isVisible(),true);
+    assert.equal(await page.locator('#view-automation [role="tab"]').count(),2);
+    await page.locator('[data-automation-task="delivery"]').uncheck();
+    await page.evaluate(()=>openSettings('delivery'));
+    assert.equal(await page.locator('#channel-auto-delivery').isChecked(),false);
+    await page.locator('#channel-auto-delivery').check();
+    await page.evaluate(()=>openSettings('service'));
+    assert.equal(await page.locator('[data-automation-task="delivery"]').isChecked(),true);
+    assert.match(await page.locator('#automation-task-fields').textContent(),/处理正式增量.*投递正式待办.*应用操作回写.*监听渠道操作.*检查到期提醒/s);
+    await page.locator('[data-background-source="wechat-main"]').uncheck();
+    await page.evaluate(()=>{switchSource('qq-main');switchSource('wechat-main');});
+    assert.equal(await page.locator('[data-background-source="wechat-main"]').isChecked(),false);
+    assert.equal(await page.evaluate(()=>currentSource().ui.schedule),false);
+    await page.locator('[data-background-source="wechat-main"]').check();
+    await page.locator('[data-automation-interval="feedback"]').fill('15');
+    await page.locator('[data-automation-interval="feedback"]').dispatchEvent('change');
+    assert.equal(await page.evaluate(()=>automationTasks.find(task=>task.id==='feedback').interval),15);
+
+    // Discover files from the source's catalog; a name unknown to the UI stays disabled.
+    await page.locator('[data-action="automation-source-rules"][data-source-id="wechat-main"]').click();
+    assert.equal(await page.locator('#source-sql-settings').isVisible(),true);
+    assert.equal(await page.locator('#sql-catalog .setting-row').filter({hasText:'project-notes.sql'}).locator('input[type="checkbox"]').isChecked(),false);
+    await page.evaluate(()=>{
+      openSettings('source');
+      currentSource().sqlFiles.push({file:'../rulesets/future-source-rule.sql'});
+    });
+    await page.locator('[data-action="sql-scan"]').click();
+    assert.match(await page.locator('#sql-directory').textContent(),/\.\.\/rulesets\/\*\.sql/);
+    const discovered=page.locator('#sql-catalog .setting-row').filter({hasText:'future-source-rule.sql'});
+    assert.equal(await discovered.locator('input[type="checkbox"]').isChecked(),false);
+    await discovered.locator('[data-action="sql-params"]').click();
+    await page.locator('#sql-params-json').fill('[]');
+    await page.locator('#dialog-confirm').click();
+    assert.equal(await page.locator('#dialog').evaluate(node=>node.open),true);
+    assert.match(await page.locator('#sql-params-error').textContent(),/JSON 对象/);
+    await page.locator('#sql-recent-count').fill('12');
+    await page.locator('#sql-params-json').fill('{"project":"release","minimum_count":3}');
+    await page.locator('#dialog-confirm').click();
+    await discovered.locator('input[type="checkbox"]').check();
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(currentSource().ui.savedRulesText).find(rule=>rule.file.includes('future-source-rule'))),{file:'../rulesets/future-source-rule.sql',enabled:true,params:{project:'release',minimum_count:3},recent_count:12});
+    await page.evaluate(()=>switchSource('qq-main'));
+    assert.equal(await page.locator('#sql-catalog').getByText('future-source-rule.sql',{exact:true}).count(),0);
+    await page.evaluate(()=>switchSource('wechat-main'));
+    assert.equal(await discovered.locator('input[type="checkbox"]').isChecked(),true);
+    await page.evaluate(()=>{navigate('collect');activateTab(document.getElementById('tab-filter'));});
+
     await page.locator('#result-search').fill('没有这样的消息');
     assert.equal(await page.locator('#message-list .message-row').count(),0);
     assert.match(await page.locator('#message-list').textContent(),/仍保留/);
@@ -178,6 +227,18 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.locator('[data-action="delivery-retry"]').click();
     assert.match(await page.locator('#dialog-body').textContent(),/核实没有收到/);
     await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(()=>catalog.deliveries[0].status),'unknown','cancel changed delivery state');
+    await page.locator('[data-action="delivery-received"]').click();
+    await page.locator('#dialog-confirm').click();
+    assert.equal(await page.evaluate(()=>catalog.deliveries[0].status),'sent');
+    assert.equal(await page.locator('[data-action="delivery-received"]').count(),0);
+    assert.equal(await page.locator('.nav-count').textContent(),'');
+    await page.evaluate(()=>{catalog.deliveries[0].status='unknown';renderDeliveries();renderOverview();});
+    await page.locator('[data-action="delivery-retry"]').click();
+    await page.locator('#dialog-confirm').click();
+    assert.equal(await page.evaluate(()=>catalog.deliveries[0].status),'queued');
+    assert.match(await page.locator('#delivery-rows tr').first().textContent(),/等待重试（演示）/);
+    assert.doesNotMatch(await page.locator('#delivery-rows tr').first().textContent(),/已确认送达/);
 
     await page.locator('.nav-item[data-view="history"]').click();
     await page.locator('#history-filter').selectOption('failed');
@@ -186,7 +247,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.match(await page.locator('#dialog-body').textContent(),/未推进断点/);
     await page.keyboard.press('Escape');
 
-    const views=['overview','collect','process','delivery','history','settings'];
+    const views=['overview','collect','process','delivery','automation','history','settings'];
     for (const width of [1600,1440,1280,1024,800,390,320]) {
       await page.setViewportSize({width,height:900});
       for (const view of views) {
@@ -197,6 +258,10 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         if(view==='settings')for(const tab of ['source','model','delivery','service']){
           await page.evaluate(tab=>openSettings(tab),tab);
           assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),`settings ${tab} overflows at ${width}`);
+        }
+        if(view==='automation')for(const tab of ['service','delivery']){
+          await page.evaluate(tab=>openSettings(tab),tab);
+          assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),`automation ${tab} overflows at ${width}`);
         }
       }
     }
@@ -218,10 +283,17 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await page.locator('#workflow-filter').selectOption('tool');
       await page.locator('#workflow-events>.workflow-event').filter({has:page.locator('summary strong',{hasText:/^read_attachment$/})}).locator('summary').first().click();
       await page.locator('.workflow-layout').screenshot({path:path.join(output,'pi-workflow.png')});
+      await page.evaluate(()=>openSettings('service'));
+      await page.screenshot({path:path.join(output,'automation.png'),fullPage:true});
+      await page.evaluate(()=>openSettings('source'));
+      await page.evaluate(()=>window.scrollTo(0,document.getElementById('source-sql-settings').getBoundingClientRect().top+scrollY-80));
+      await page.locator('#source-sql-settings').screenshot({path:path.join(output,'sql-rules.png')});
     }
+    await page.goto(pathToFileURL(path.join(__dirname,'index.html')).href+'#automation');
+    assert.equal(await page.locator('#view-automation').isVisible(),true);
     assert.deepEqual(errors,[],'browser JavaScript errors');
     assert.deepEqual(network,[],'unexpected network requests');
-    console.log('PASS: README branding, arbitrary source and channel kinds, instance isolation, capability gating, unknown channel preservation, complete Pi workflow states and tool rendering; six views and all settings at seven widths; existing interaction checks; no network or browser errors');
+    console.log('PASS: branding, extensible catalogs, SQL discovery and parameters, unified automation, safe delivery simulation, complete Pi workflow; seven views and settings at seven widths; no network or browser errors');
     if (screenshots) console.log('Previews:',output);
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
