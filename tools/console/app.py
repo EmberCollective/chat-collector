@@ -358,7 +358,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @app.get('/api/session', include_in_schema=False)
     def session():
-        return {'token': token}
+        return {'token': token, 'application': 'chat-collector-console',
+                'root': str(bridge.root), 'pid': os.getpid()}
 
     @app.get('/api/status', dependencies=[Depends(authenticate)], summary='查看两模块状态')
     def status():

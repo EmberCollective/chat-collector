@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -100,6 +101,10 @@ def wait_job(client,identifier):
 
 def test_security_and_local_docs(console):
     client,app,*_=console
+    session = client.get('/api/session').json()
+    assert session['application'] == 'chat-collector-console'
+    assert Path(session['root']) == app.state.bridge.root
+    assert session['pid'] == os.getpid()
     assert client.get('/').status_code==200
     assert "script-src 'self'" in client.get('/').headers['content-security-policy']
     assert '/static/vendor/swagger-ui-bundle.js' in client.get('/docs').text
