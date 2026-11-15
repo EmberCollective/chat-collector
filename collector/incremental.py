@@ -266,14 +266,26 @@ def _refresh_database(source,target,*,platform,account,key,key_mode,work_dir,lib
                         image=None
                         step=time.perf_counter()
                         if resized:
+                            diagnostic['stage']='resize_image'
                             image=bytearray(count*PAGE_SIZE)
                             # The open SQLite transaction recovered journals and excludes other writers.
                             with target.open('rb') as stream:
-                                remaining=memoryview(image)[:min(count,len(previous))*PAGE_SIZE]
-                                while remaining:
-                                    received=stream.readinto(remaining[:1024*1024])
+                                size=min(count,len(previous))*PAGE_SIZE
+                                view=memoryview(image)
+                                lock_page=(pending_byte if pending_byte is not None else 0x40000000)//PAGE_SIZE+1
+                                lock_offset=(lock_page-1)*PAGE_SIZE
+                                offset=0
+                                while offset<size:
+                                    # Windows denies raw reads of SQLite's locked page, even in this process.
+                                    if offset==lock_offset:
+                                        view[offset:offset+PAGE_SIZE]=destination.execute('SELECT data FROM sqlite_dbpage WHERE pgno=?',(lock_page,))[0][0]
+                                        offset+=PAGE_SIZE
+                                        stream.seek(offset)
+                                        continue
+                                    end=min(offset+1024*1024,size,lock_offset if offset<lock_offset else size)
+                                    received=stream.readinto(view[offset:end])
                                     if not received:raise RuntimeError('incremental_snapshot_image_incomplete')
-                                    remaining=remaining[received:]
+                                    offset+=received
                         stage_timings['resize_image']=round(time.perf_counter()-step,3)
                         # Publish the new schema header only after its referenced pages are present.
                         step=time.perf_counter()
