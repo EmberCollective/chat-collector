@@ -37,3 +37,5 @@
 - 面板设计与验收：[整体重写](design/console-redesign/README.md)、[运行概览](design/overview-dashboard/README.md)、[负载与加载优化](design/runtime-monitoring/README.md)。
 
 任务通过程序校验后直接入库；缺失信息记入 `notes`。模型与外部投递是否启用，以本机配置为准。使用边界与第三方授权见 [项目说明](../README.md) 和 [第三方说明](../THIRD_PARTY_NOTICES.md)。
+
+文档维护者请遵循 [目录与写作规则](AGENTS.md)。
