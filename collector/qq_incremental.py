@@ -190,6 +190,7 @@ def sync_plaintext(raw, target, library, *, candidates=None, previous_raw_stamp=
                    and previous.get('raw') == [str(raw), list(previous_raw_stamp)])
         candidate_rows = sum(len(set(rowids)) for rowids in candidates.values() if rowids is not None) if limited else None
         rows_written = rows_deleted = 0
+        stage_timings = {}
         if full:
             with tempfile.NamedTemporaryFile(dir=staging_dir, prefix=staging_prefix, suffix='.db', delete=False) as stream:
                 temporary = Path(stream.name)
@@ -197,6 +198,10 @@ def sync_plaintext(raw, target, library, *, candidates=None, previous_raw_stamp=
             with closing(sqlite3.connect(temporary if full else target, isolation_level=None)) as destination:
                 destination.execute('PRAGMA journal_mode=DELETE')
                 destination.execute('PRAGMA synchronous=FULL')
+                if not full:
+                    # Map verified existing pages instead of issuing per-page reads during quick_check.
+                    destination.execute(f'PRAGMA mmap_size={target.stat().st_size}')
+                phase = time.perf_counter()
                 if full:
                     rows_written = _export(source, destination, schema)
                 else:
@@ -225,12 +230,17 @@ def sync_plaintext(raw, target, library, *, candidates=None, previous_raw_stamp=
                 for table in ('group_msg_table', 'c2c_msg_table'):
                     if '40050' in {row[1] for row in destination.execute(f'PRAGMA table_info("{table}")')}:
                         destination.execute(f'CREATE INDEX IF NOT EXISTS "_collector_time_{table}" ON "{table}"("40050")')
+                stage_timings['compare_and_write'] = round(time.perf_counter() - phase, 3)
                 _fault('before_integrity_check')
+                phase = time.perf_counter()
                 _verify(destination, full=full)
+                stage_timings['verify'] = round(time.perf_counter() - phase, 3)
                 if _stamp(raw) != raw_stamp:
                     raise RuntimeError('qq_private_snapshot_changed_during_sync')
                 _fault('before_commit')
+                phase = time.perf_counter()
                 destination.execute('COMMIT')
+                stage_timings['commit'] = round(time.perf_counter() - phase, 3)
             if full:
                 _fault('before_publish')
                 if any(Path(str(target) + suffix).exists() for suffix in ('-wal', '-shm', '-journal')):
@@ -252,4 +262,4 @@ def sync_plaintext(raw, target, library, *, candidates=None, previous_raw_stamp=
     return {'changed': True, 'mode': 'logical_baseline' if full else 'logical_incremental',
             'rows_written': rows_written, 'rows_deleted': rows_deleted, 'quick_check_ok': True,
             'candidate_rows': candidate_rows, 'validation': 'integrity_check' if full else 'quick_check',
-            'timings_seconds': {'logical_sync': round(time.perf_counter() - started, 3)}}
+            'timings_seconds': {**stage_timings, 'logical_sync': round(time.perf_counter() - started, 3)}}
