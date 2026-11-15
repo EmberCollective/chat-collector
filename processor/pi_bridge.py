@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 
 
 RUNTIME = Path(__file__).parent / 'pi-runtime'
@@ -49,7 +50,29 @@ def run_agent(config, system, payload, *, api_key='', attachment_reader=None, ex
                'system': system, 'payload': payload, 'existing_tasks': existing_tasks or []}
     incoming = queue.Queue()
     progress_file = Path(config['_progress_file']) if config.get('_progress_file') else None
+    workflow_file = progress_file.with_name('pi-workflow.jsonl') if progress_file else None
+    request['record_workflow'] = bool(workflow_file)
     run_id = uuid.uuid4().hex
+    sequence = 0
+    received = False
+
+    def record(event):
+        nonlocal sequence
+        if not workflow_file:
+            return
+        if not isinstance(event, dict) or not isinstance(event.get('type'), str):
+            raise RuntimeError('Invalid Pi workflow event')
+        sequence += 1
+        event = dict(event, run_id=run_id, seq=sequence)
+        serialized = json.dumps(event, ensure_ascii=False, allow_nan=False)
+        if api_key:
+            serialized = serialized.replace(api_key, '[credential omitted]')
+        if len(serialized.encode('utf-8')) > 1100000:
+            event['body'] = {'omitted': 'record_limit'}
+            serialized = json.dumps(event, ensure_ascii=False, allow_nan=False)
+        workflow_file.parent.mkdir(parents=True, exist_ok=True)
+        with workflow_file.open('a', encoding='utf-8') as stream:
+            stream.write(serialized+'\n')
     environment = {**os.environ, 'PI_OFFLINE': '1'}
     environment.pop(config['model'].get('api_key_env', ''), None)
     process = subprocess.Popen([runtime['node'], str(RUNTIME / 'runner.mjs')], cwd=RUNTIME,
@@ -95,6 +118,8 @@ def run_agent(config, system, payload, *, api_key='', attachment_reader=None, ex
 
     threading.Thread(target=receive, daemon=True).start()
     try:
+        record({'type': 'run_created', 'time': datetime.now(timezone.utc).isoformat(),
+                'body': {'runtime': 'pi-coding-agent', 'version': '1.5.2'}})
         send(request)
         while True:
             remaining = deadline - time.monotonic()
@@ -123,12 +148,19 @@ def run_agent(config, system, payload, *, api_key='', attachment_reader=None, ex
                     progress_file.parent.mkdir(parents=True, exist_ok=True)
                     with progress_file.open('a', encoding='utf-8') as stream:
                         stream.write(json.dumps(dict(safe, run_id=run_id), ensure_ascii=False)+'\n')
+            elif message.get('type') == 'workflow':
+                record(message.get('event'))
             elif message.get('type') == 'error':
+                record({'type': 'runtime_failed', 'time': datetime.now(timezone.utc).isoformat(), 'failed': True,
+                        'body': {'code': message.get('code') if message.get('code') in ERRORS else 'runtime_error'}})
                 raise RuntimeError(ERRORS.get(message.get('code'), 'Pi processing failed; no group result was accepted'))
             elif message.get('type') == 'result':
                 result = message.get('result')
                 if not isinstance(result, dict) or not isinstance(result.get('tasks'), list):
                     raise RuntimeError('Pi returned an invalid task submission')
+                received = True
+                record({'type': 'result_received', 'time': datetime.now(timezone.utc).isoformat(), 'body': {'task_count': len(result['tasks']),
+                        'saved': False, 'note': 'Awaiting processing transaction; see the job outcome for storage status.'}})
                 return result
             else:
                 raise RuntimeError('Invalid Pi transport response')
@@ -140,3 +172,5 @@ def run_agent(config, system, payload, *, api_key='', attachment_reader=None, ex
         process.wait(timeout=5)
         process.stdin.close()
         process.stdout.close()
+        record({'type': 'transport_end', 'time': datetime.now(timezone.utc).isoformat(), 'failed': not received,
+                'body': {'code': 'result_received' if received else 'processing_stopped'}})

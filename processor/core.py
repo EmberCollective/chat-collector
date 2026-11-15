@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from common.locking import InstanceLock
 from common.codec import canonical, digest
 from contracts import validate_event as _validate_event
+from .workflow import record_round
 
 
 from .storage import SCHEMA, _connect, _save_task, _export
@@ -432,6 +433,7 @@ def _run_batches(config, rules, groups, conn):
             yield group, *related[group['id']], responses[group['id']], committed
 
 
+@record_round
 def run_round(config):
     if not _model_info(config)['configured']:
         raise ValueError('Configure model.base_url, model.model and a local API key before processing; preview remains available')

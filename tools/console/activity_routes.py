@@ -59,4 +59,11 @@ def register_activity_routes(app, bridge, jobs, authenticate):
             raise HTTPException(503, '后台执行记录暂时无法读取，请检查自动化配置及状态数据库。') from None
         if record is None:
             raise HTTPException(404, '记录不存在或已超过保留范围')
+        from history import history_jobs
+        try:
+            record['workflow_runs'] = [dict(id=run['id'], attempt=run.get('automation_attempt'))
+                                       for run in history_jobs(jobs, jobs.processor_history)
+                                       if run.get('automation_run_id') == identifier and run['module'] == 'processor']
+        except HTTPException:
+            record['workflow_warning'] = '关联 Pi 记录不可读，请在 Pi 工作流中检查本地运行目录'
         return dict(record, source='automation')

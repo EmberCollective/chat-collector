@@ -1,9 +1,11 @@
 """Real local feedback pipeline with only model and Feishu network calls replaced."""
+from concurrent.futures import ThreadPoolExecutor
 import json
 import hashlib
 from pathlib import Path
 import sqlite3
 import datetime as dt
+import threading
 
 import pytest
 
@@ -174,7 +176,42 @@ allowed_operator_ids=["ou_me"]
     queued = feishu.handle_callback(config, config['targets'][0], click)
     assert queued['status'] == 'queued' and queued['task_id'] == original['task_id']
     assert feishu.handle_callback(config, config['targets'][0], click) == queued
-    assert feedback.process_pending(config)['applied'] == 1
+
+    from automation import SchedulerService, load_config as load_automation, status as automation_status
+    automation_path = tmp_path / 'automation.toml'
+    automation_path.write_text('''enabled=true
+[storage]
+state_file="automation.db"
+[jobs.messaging]
+enabled=true
+''', encoding='utf-8')
+    automation_config = load_automation(automation_path)
+    syncing, release = threading.Event(), threading.Event()
+    original_sync = messaging._sync
+    def slow_sync(*args):
+        syncing.set()
+        assert release.wait(5)
+        return original_sync(*args)
+    def scheduled_delivery():
+        timer = threading.Timer(.2, release.set)
+        timer.start()
+        try:
+            return messaging.run_round(config, now=101)
+        finally:
+            timer.cancel()
+            timer.join()
+    service = SchedulerService(automation_config, callbacks={'messaging': scheduled_delivery})
+    with monkeypatch.context() as patch, ThreadPoolExecutor(1) as workers:
+        patch.setattr(messaging, '_sync', slow_sync)
+        pending = workers.submit(feedback.process_pending, config)
+        try:
+            assert syncing.wait(5)
+            delivery = service.execute('messaging')
+        finally:
+            release.set()
+        assert pending.result(timeout=5)['applied'] == 1
+    assert delivery['state'] == 'idle' and delivery['attempts'] == 0
+    assert automation_status(automation_config)['alerts'] == []
 
     completed = processing.list_tasks(processor_config)[0]
     assert completed['status'] == 'completed' and completed['revision'] == original['revision'] + 1

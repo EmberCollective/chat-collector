@@ -1,0 +1,12 @@
+OpenSSL 3.6.1
+Copyright 1998-2026 The OpenSSL Authors. All rights reserved.
+
+This project uses the OpenSSL libcrypto runtime library.
+Official source: https://github.com/openssl/openssl/tree/openssl-3.6.1
+License: OpenSSL-Apache-2.0.txt (Apache License, Version 2.0).
+
+The checked Windows DLL was copied from the Strawberry toolchain. Its SHA-256
+is fafd384db586592bd42eb4bdc8b4017087bd221ca410cc8f5f50d193bac7d118.
+The DLL matches the toolchain copy and reports version 3.6.1. This record does
+not assert a reproducible match to the official source tree. The toolchain
+patch record contains only "Pack diff not generated".

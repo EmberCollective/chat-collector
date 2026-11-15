@@ -123,7 +123,11 @@ def _callback(config, name):
         return run_round(load_config(path))
     if name == 'processor':
         from processor import load_config, run_round
-        return run_round(load_config(path))
+        settings = load_config(path)
+        settings['_workflow_origin'] = config.get('_workflow_origin', 'schedule')
+        settings['_workflow_parent_run'] = config.get('_workflow_parent_run')
+        settings['_workflow_attempt'] = config.get('_workflow_attempt')
+        return run_round(settings)
     from messaging import load_config
     settings = load_config(path)
     if name == 'feedback':
@@ -329,11 +333,14 @@ class SchedulerService:
                 return dict(row)
             attempts = row['attempts'] + 1
             history._begin(conn, row, 'manual' if manual or force else 'schedule', now)
+            episode = conn.execute('SELECT id,attempt_count FROM runs WHERE id=(SELECT current_run_id FROM jobs WHERE name=?)', (name,)).fetchone()
             conn.execute("UPDATE jobs SET state='running',attempts=?,last_start=? WHERE name=?", (attempts, now, name))
             if operation:
                 conn.execute("UPDATE operations SET state='running',updated_at=? WHERE id=?", (now, operation['id']))
         try:
-            result = self.callbacks[name]() if name in self.callbacks else _callback(self.config, name)
+            result = self.callbacks[name]() if name in self.callbacks else _callback(dict(self.config,
+                _workflow_origin='manual' if manual else 'schedule', _workflow_parent_run=episode['id'],
+                _workflow_attempt=episode['attempt_count']), name)
             if isinstance(result, dict) and result.get('status') == 'failed':
                 raise RuntimeError('job_returned_failed')
             summary = _stats(result)

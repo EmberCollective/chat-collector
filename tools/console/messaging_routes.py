@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 from typing import Literal
 import uuid
+import sqlite3
 
 
 class TaskAction(BaseModel):
@@ -29,6 +30,53 @@ def register_messaging_routes(app, bridge, authenticate):
             raise HTTPException(400, '操作未完成，请检查消息层配置、任务编号和素材状态') from None
         except RuntimeError:
             raise HTTPException(409, '消息层正在运行或数据冲突，请稍后重试并检查本地状态') from None
+        except sqlite3.Error:
+            raise HTTPException(503, '投递状态暂时不可读取，请稍后重试') from None
+
+    def runtime(cfg):
+        from automation import load_config, control
+        path = bridge.root / bridge.settings.get('automation_config', 'config/automation.toml')
+        result = {'state': 'unknown', 'interval_seconds': None, 'next_check_at': None}
+        if not path.is_file():
+            return result
+        try:
+            auto = load_config(path)
+            entry = auto['jobs']['messaging']
+            if Path(entry['config']).resolve() != Path(cfg['_config_path']).resolve():
+                return result
+            live = control.status(auto)
+            job = next((j for j in live.get('jobs', []) if j['name'] == 'messaging'), {})
+            state = 'config_changed' if live.get('config_changed') else 'disabled' if not auto['enabled'] or not entry['enabled'] else 'paused' if job.get('state') == 'paused' else live['state']
+            return {'state': state, 'interval_seconds': entry['interval_seconds'],
+                    'next_check_at': job.get('next_run') if state == 'running' and job.get('state') != 'running' else None}
+        except (ValueError, OSError, RuntimeError, sqlite3.Error):
+            return result
+
+    @app.get('/api/messaging/schedule', dependencies=[Depends(authenticate)], summary='只读查看逐项投递计划，不整理附件或发送')
+    def schedule(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0, le=200000),
+                 search: str = Query('', max_length=500), state: Literal['all', 'scheduled', 'attention', 'ended'] = 'all',
+                 target_id: str | None = Query(None, max_length=100)):
+        from messaging.planning import schedule as project
+        def response(cfg):
+            result = project(cfg, limit=limit, offset=offset, search=search, state=state, target_id=target_id)
+            result['runtime'] = runtime(cfg)
+            return result
+        return call(response)
+
+    @app.get('/api/messaging/digest', dependencies=[Depends(authenticate)], summary='只读预览指定日期与目标的早报内容')
+    def digest(date: str | None = Query(None, max_length=10), target_id: str | None = Query(None, max_length=100)):
+        from messaging.planning import digest_preview
+        return call(lambda cfg: digest_preview(cfg, day=date, target_id=target_id))
+
+    @app.get('/api/messaging/tasks/{task_id}', dependencies=[Depends(authenticate)], summary='按需读取单条待办与材料，不导入或发送')
+    def task(task_id: str):
+        from messaging.core import task_package
+        from messaging.planning import schedule as project
+        def response(cfg):
+            result = task_package(cfg, task_id)
+            result['delivery_plan'] = project(cfg, task_id=task_id, limit=1)['tasks'][0]
+            return result
+        return call(response)
 
     @app.get('/api/messaging/status', dependencies=[Depends(authenticate)], summary='查看消息层、提醒和投递状态')
     def status():

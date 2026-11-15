@@ -1,0 +1,76 @@
+/* Builds on the approved console. Unslop by Damir Sokolovsky, CC BY 4.0. */
+#runtime-monitor .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.view :is(button,input,select):focus-visible,.view summary:focus-visible,#run-dialog button:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+#view-overview .overview-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+#view-overview .overview-kpis .metric:nth-child(2){border-right:1px solid var(--line)}
+#view-overview .dashboard-scope .overview-range{margin:0;display:block;width:auto;flex:none}
+#view-overview .overview-range select{margin:0;min-height:26px;padding:0 8px;border-color:transparent;border-radius:4px;background:#eaf3ee;color:var(--green);font-size:0.928571rem;line-height:24px}
+#view-overview #overview-health{align-items:stretch}
+#overview-health>section{display:flex;flex-direction:column;min-width:0}
+#view-overview #overview-health .panel-head{min-height:6.285714rem;align-items:flex-start;flex:none}
+#overview-health>.panel>.footnote{margin-top:auto}
+#view-overview #rate-chart{flex:1;display:grid;grid-template-rows:minmax(220px,1fr) auto;min-height:0}
+#rate-chart .rate-plot{position:relative;min-height:220px;min-width:0}
+#view-overview #rate-chart svg{position:absolute;inset:0;height:100%;max-height:none;min-height:0}
+#view-overview .schedule-service{display:block}
+#view-overview .schedule-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+#view-overview .schedule-heading>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#view-overview .schedule-entry{display:grid;grid-template-columns:minmax(48px,1fr) minmax(0,2.5fr);align-items:center;gap:8px;font-size:0.928571rem;padding:8px 0}
+#view-overview .schedule-entry>span{color:var(--secondary);overflow-wrap:anywhere}
+#view-overview .schedule-entry>div{text-align:right;overflow-wrap:anywhere;min-height:3.2em}
+#view-overview .schedule-entry>.schedule-source{display:flex;align-items:center;gap:8px;flex-wrap:wrap;text-align:left}
+#view-overview .schedule-entry.is-running{background:var(--soft);box-shadow:-3px 0 var(--green);border-radius:4px}
+#view-overview .schedule-source .text-button{font-weight:600;min-height:0;padding:0}
+#view-overview .schedule-entry .schedule-recovery{display:block;min-height:0;padding:0;margin-left:auto;color:var(--warn)}
+#view-overview .schedule-source .pill{font-size:0.785714rem}
+#view-overview .schedule-elapsed{display:block;font-weight:600;font-variant-numeric:tabular-nums;color:var(--green);white-space:nowrap}
+#view-overview .schedule-entry time{display:block;font-variant-numeric:tabular-nums;white-space:nowrap}
+#view-overview .schedule-entry small{display:block}
+#view-overview .monitor-plan-note{padding-top:8px}
+#view-overview .monitor-panel{margin-top:20px}
+#view-overview .monitor-disk-picker{display:flex;align-items:center;gap:8px;margin:0}
+#view-overview .monitor-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:16px 0}
+#view-overview .monitor-metric{padding:0 20px;border-right:1px solid var(--line);font-size:0.928571rem;min-width:0}
+#view-overview .monitor-metric:last-child{border:0}
+#view-overview .monitor-metric>span{color:var(--secondary);display:block}
+#view-overview .monitor-metric>strong{font-size:1.714286rem;line-height:1.4;display:block;margin:4px 0;font-variant-numeric:tabular-nums}
+#view-overview .monitor-io-values{display:flex;align-items:baseline;gap:16px;margin:4px 0}
+#view-overview .monitor-io-values strong{font-size:1.714286rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+#view-overview .monitor-io-values small{font-size:0.857143rem}
+#view-overview .monitor-plot{padding:4px 20px 12px}
+#view-overview .monitor-legend{display:flex;align-items:center;gap:20px;flex-wrap:wrap;font-size:0.928571rem;margin-bottom:8px}
+#view-overview .monitor-legend>span{display:flex;align-items:center;gap:8px}
+#view-overview .monitor-legend>span:last-child{margin-left:auto}
+#view-overview .monitor-legend i{width:16px;height:2px;background:var(--green);display:inline-block}
+#view-overview .monitor-legend .disk-key{background:var(--warn)}
+#monitor-chart{position:relative;min-width:0;border-radius:4px;touch-action:pan-y;cursor:crosshair}
+#monitor-chart:focus-visible{outline:2px solid var(--green);outline-offset:4px}
+#monitor-chart svg{display:block;width:100%;height:180px}
+#monitor-chart text{fill:var(--muted);font:12px "Segoe UI","Microsoft YaHei",sans-serif}
+#monitor-chart .monitor-tooltip{position:absolute;top:8px;z-index:1;min-width:244px;max-width:calc(100% - 16px);padding:8px 12px;background:var(--paper);border:1px solid #ccd6cf;border-radius:6px;box-shadow:0 2px 8px #24332e0c;pointer-events:none;font-size:0.928571rem}
+#monitor-chart .monitor-tooltip[hidden]{display:none}
+#monitor-chart .monitor-tooltip time{display:block;margin-bottom:4px;color:var(--secondary);font-variant-numeric:tabular-nums}
+#monitor-chart .monitor-tooltip>div{display:flex;justify-content:space-between;gap:16px}
+#monitor-chart .monitor-tooltip strong{font-variant-numeric:tabular-nums}
+#monitor-chart .monitor-tooltip .monitor-tooltip-io{justify-content:flex-end;flex-wrap:wrap;gap:0 12px;color:var(--secondary);font-size:0.857143rem}
+#monitor-chart .monitor-tooltip .monitor-tooltip-io>span{white-space:nowrap}
+#monitor-chart .monitor-tooltip .monitor-tooltip-process{display:block;color:var(--secondary);font-size:0.857143rem}
+#monitor-chart .monitor-tooltip p{font-size:0.857143rem;color:var(--muted);margin-top:4px;padding-top:4px;border-top:1px solid var(--line)}
+#view-overview .monitor-health{font-size:0.928571rem;color:var(--warn);margin:8px 0}
+#view-overview .monitor-attribution{border-top:1px solid var(--line);font-size:0.928571rem}
+#view-overview .monitor-attribution>summary{cursor:pointer;color:var(--green);min-height:44px;padding:12px 20px;list-style-position:inside}
+#view-overview .monitor-attribution-body{padding:0 20px 16px}
+#view-overview .monitor-attribution-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:4px}
+#view-overview .monitor-attribution-head label{display:flex;align-items:center;gap:8px}
+#view-overview .monitor-attribution-note{font-size:0.928571rem;color:var(--secondary);margin:8px 0 12px}
+#view-overview .monitor-attribution table{min-width:640px}
+#view-overview .monitor-attribution td small{display:block;margin-top:4px}
+#view-overview .monitor-attribution :is(td,th):is(:nth-child(2),:nth-child(3),:nth-child(4)){text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+#view-overview .monitor-attribution td:first-child{min-width:180px}
+#view-overview .monitor-attribution tr[data-shared-module] td:first-child{padding-left:28px}
+#view-overview .monitor-attribution tr[data-probe-group="shared"]{background:var(--soft)}
+#view-overview .monitor-definitions{font-size:0.928571rem;color:var(--secondary);margin-top:12px}
+#view-overview .monitor-definitions p+p{margin-top:8px}
+@media(max-width:1200px){#view-overview .schedule-entry{grid-template-columns:minmax(80px,1fr) auto}#view-overview #overview-health .panel-head{min-height:0}#view-overview #rate-chart{flex:none;grid-template-rows:220px auto}}
+@media(max-width:800px){#view-overview .overview-kpis{grid-template-columns:1fr;padding:0;gap:0}#view-overview .overview-kpis .metric{padding:12px 16px;border:0!important;border-bottom:1px solid var(--line)!important;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center}#view-overview .overview-kpis .metric:last-child{border:0!important}#view-overview .overview-kpis .metric strong{margin:0;font-size:1.714286rem}#view-overview .overview-kpis .metric small{margin:0;grid-column:1/-1}#view-overview .monitor-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 0;padding:16px 0}#view-overview .monitor-metric{padding:0 16px}#view-overview .monitor-metric:nth-child(2){border:0}#view-overview .monitor-metric:last-child{grid-column:1/-1;border-top:1px solid var(--line);padding-top:12px;display:flex;align-items:center;flex-wrap:wrap;gap:4px 16px}#view-overview .monitor-metric:last-child>small{width:100%}#view-overview .monitor-io-values{gap:16px;margin:0}#view-overview .monitor-plot{padding:0 16px 8px}#view-overview .monitor-legend{gap:8px 16px}#view-overview .monitor-legend>span:last-child{margin-left:0;width:100%}#view-overview .monitor-disk-picker{width:100%}#view-overview .monitor-disk-picker select{width:100%}#view-overview .monitor-attribution>summary{padding:12px 16px}#view-overview .monitor-attribution-body{padding:0 16px 16px}#view-overview .schedule-entry{grid-template-columns:minmax(44px,1fr) auto}#view-overview .schedule-entry time{font-size:0.857143rem}#monitor-chart svg{height:180px}#monitor-chart .monitor-tooltip{font-size:0.857143rem;min-width:172px}}
+@media(prefers-reduced-motion:reduce){#runtime-monitor *{animation:none;transition:none}}
