@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const duration = seconds => seconds % 86400 === 0 ? seconds / 86400 + ' 天' : seconds % 3600 === 0 ? seconds / 3600 + ' 小时' : seconds / 60 + ' 分钟';
   const states = {open: '待处理', completed: '已完成', done: '已完成', cancelled: '已取消', superseded: '已替代'};
   async function request(path, options = {}) {
-    const session = await fetch('/api/session').then(r => r.json());
+    const session = await window.consoleSession();
     const response = await fetch('/api/messaging' + path, {...options, headers: {'X-Console-Token': session.token, 'Content-Type': 'application/json'}});
     if (!response.ok) throw Error((await response.json()).detail || '操作失败');
     return response;

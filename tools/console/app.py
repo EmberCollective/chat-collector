@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -309,8 +311,20 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        jobs.close()
+        def prewarm():
+            try:
+                app.state.overview.snapshot(24)
+            except Exception:
+                logging.getLogger(__name__).warning('Overview prewarm unavailable; requests can retry')
+        warmup = threading.Thread(target=prewarm, name='overview-prewarm', daemon=True)
+        warmup.start()
+        app.state.runtime_monitor.start()
+        try:
+            yield
+        finally:
+            jobs.close()
+            warmup.join(timeout=3)
+            app.state.runtime_monitor.close()
 
     app = FastAPI(title='拾序 · Loose Ends · 本地调试台', version='0.1.0', docs_url=None, redoc_url=None,
                   description='消息收集项目的可选本机调试工具。预览不推进断点；正式采集和重放会写入主项目。', lifespan=lifespan)
@@ -327,6 +341,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     register_activity_routes(app, bridge, jobs, authenticate)
     from overview import register_overview_routes
     register_overview_routes(app, bridge, jobs, authenticate)
+    from runtime_monitor import register_runtime_monitor_routes
+    register_runtime_monitor_routes(app, bridge, jobs, authenticate)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
@@ -340,6 +356,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
         if request.url.path.startswith('/api/') and request.headers.get('sec-fetch-site') == 'cross-site':
             return JSONResponse({'detail': '不接受跨站数据访问'}, 403)
         response = await call_next(request)
+        if request.method not in {'GET', 'HEAD', 'OPTIONS'} and response.status_code < 400:
+            await asyncio.to_thread(app.state.overview.invalidate)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Referrer-Policy'] = 'no-referrer'

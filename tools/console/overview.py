@@ -1,5 +1,7 @@
 """Read-only overview of retained executions, current queues and project files."""
 from contextlib import closing
+from collections import OrderedDict
+from copy import deepcopy
 import json
 import math
 import os
@@ -7,6 +9,7 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+import threading
 import tomllib
 
 from fastapi import Depends, Query
@@ -115,7 +118,7 @@ def _metrics(records, *, available=True, complete=True):
                 attempts=dict(attempts, unit='attempt', scope='recorded_status_only'))
 
 
-def _console_records(jobs):
+def _console_records(jobs, read_record=_json):
     with jobs.mutex:
         records = {identifier: dict(record) for identifier, record in jobs.jobs.items()}
     examined, truncated, unreadable = 0, False, 0
@@ -130,7 +133,7 @@ def _console_records(jobs):
                 if not re.fullmatch(r'[0-9a-f]{32}', entry.name) or not entry.is_dir(follow_symlinks=False):
                     continue
                 try:
-                    metadata = _json(Path(entry.path) / 'job.json')
+                    metadata = read_record(Path(entry.path) / 'job.json')
                     metadata['id'] = entry.name
                     records.setdefault(entry.name, metadata)
                 except (OSError, ValueError, TypeError):
@@ -149,7 +152,7 @@ def _console_records(jobs):
                 if time.monotonic() > deadline:
                     truncated = True
                     raise ValueError('result_read_budget')
-                outcome = _json(jobs.directory / identifier / 'result.json')
+                outcome = read_record(jobs.directory / identifier / 'result.json')
                 record['result'] = _result(outcome.get('result'))
                 record['status'] = outcome.get('status', record.get('status'))
             except FileNotFoundError:
@@ -184,6 +187,12 @@ def _automatic(config, start):
         for module in config['jobs']:
             rows = conn.execute('SELECT * FROM runs WHERE module=? ORDER BY started_at DESC,rowid DESC LIMIT ?',
                                 (module, MAX_TERMINAL_RUNS + 1)).fetchall()
+            attempts_by_run = {item['run_id']: dict(item) for item in conn.execute('''
+                SELECT a.run_id,count(*) AS total,sum(a.status='failed') AS failed,
+                       sum(a.status NOT IN ('failed','succeeded','running')) AS unknown
+                FROM run_attempts a JOIN
+                  (SELECT id FROM runs WHERE module=? ORDER BY started_at DESC,rowid DESC LIMIT ?) r
+                ON r.id=a.run_id GROUP BY a.run_id''', (module, MAX_TERMINAL_RUNS + 1))}
             terminal = sum(row['finished_at'] is not None for row in rows)
             earliest = min((_number(row['started_at']) for row in rows if _number(row['started_at']) is not None), default=None)
             earliest_terminal = min((_number(row['started_at']) for row in rows if row['finished_at'] is not None and _number(row['started_at']) is not None), default=None)
@@ -196,8 +205,8 @@ def _automatic(config, start):
                 for field in ('started_at', 'finished_at'):
                     item[field] = _number(item[field])
                 item['result'] = _result(item.get('result'))
-                attempts = conn.execute('SELECT count(*),sum(status=\'failed\'),sum(status NOT IN (\'failed\',\'succeeded\',\'running\')) FROM run_attempts WHERE run_id=?', (item['id'],)).fetchone()
-                item['attempts'] = dict(zip(('total', 'failed', 'unknown'), (value or 0 for value in attempts)))
+                attempts = attempts_by_run.get(item['id'], {})
+                item['attempts'] = {key: attempts.get(key, 0) or 0 for key in ('total', 'failed', 'unknown')}
                 result.append(item)
     return result, {'available': True, 'status': 'retained_only', 'modules': coverage,
                     'retention_per_module': MAX_TERMINAL_RUNS,
@@ -266,8 +275,76 @@ class Overview:
     def __init__(self, bridge, jobs):
         self.bridge, self.jobs = bridge, jobs
         self.storage = StorageMetrics()
+        self._lock = threading.RLock()
+        self._cache = OrderedDict()
+        self._records = OrderedDict()
+        self._record_bytes = 0
+        self._base_paths = {Path(jobs.directory), Path(bridge.settings_path), *map(Path, bridge.paths.values()),
+                            *(_config_path(bridge, module) for module in ('automation', 'processor', 'messaging'))}
+        self._tracked = set(self._base_paths)
+
+    @staticmethod
+    def _version(path):
+        try:
+            info = path.stat()
+            return info.st_mtime_ns, info.st_size, info.st_ino
+        except OSError:
+            return None
+
+    def _read_record(self, path):
+        version = self._version(path)
+        cached = self._records.get(path)
+        if cached and cached[0] == version:
+            self._records.move_to_end(path)
+            return deepcopy(cached[1])
+        value = _json(path)
+        if path.name == 'result.json':
+            result = _result(value.get('result'))
+            fields = ('start', 'end', 'emitted', 'duplicates', 'matched', 'batches', 'retry_after_seconds', 'status')
+            value = {**({'status': value['status']} if 'status' in value else {}),
+                     'result': {key: result[key] for key in fields if key in result} if result is not None else None}
+        else:
+            fields = ('id', 'module', 'action', 'origin', 'status', 'started_at', 'finished_at', 'error', 'automation_run_id')
+            value = {key: value[key] for key in fields if key in value}
+        size = len(json.dumps(value, ensure_ascii=False).encode('utf8'))
+        previous = self._records.pop(path, None)
+        if previous:
+            self._record_bytes -= previous[2]
+        self._records[path] = (version, value, size)
+        self._record_bytes += size
+        while len(self._records) > 4096 or self._record_bytes > 2 * 1024 * 1024:
+            self._record_bytes -= self._records.popitem(last=False)[1][2]
+        return deepcopy(value)
+
+    def invalidate(self):
+        with self._lock:
+            self._cache.clear()
+
+    def _signature(self):
+        with self.jobs.mutex:
+            active = tuple((identifier, item.get('status'), item.get('finished_at'))
+                           for identifier, item in self.jobs.jobs.items())
+        paths = self._tracked | self._records.keys() | {
+            *map(Path, self.bridge.paths.values()),
+            *(_config_path(self.bridge, module) for module in ('automation', 'processor', 'messaging'))}
+        return (repr(self.bridge.settings), repr(self.bridge.sources), active,
+                tuple((str(path), self._version(path)) for path in sorted(paths)))
 
     def snapshot(self, hours):
+        with self._lock:
+            signature = self._signature()
+            cached = self._cache.get(hours)
+            if cached and time.monotonic() - cached[0] < 5 and cached[1] == signature:
+                return deepcopy(cached[2])
+            result = self._snapshot(hours)
+            # A writer may finish during the scan; only reuse the input version we started with.
+            self._cache[hours] = (time.monotonic(), signature, result)
+            self._cache.move_to_end(hours)
+            while len(self._cache) > 4:
+                self._cache.popitem(last=False)
+            return deepcopy(result)
+
+    def _snapshot(self, hours):
         now = time.time()
         start = now - hours * 3600
         bridge, warnings, specs, issues = self.bridge, [], [], []
@@ -285,7 +362,7 @@ class Overview:
                     ('storage', 'output_dir', 'output'), ('attachments', 'archive_dir', 'attachments')), identifier))
             except Exception as exc:
                 _warning(warnings, type(exc).__name__, identifier)
-        manual, manual_coverage = _console_records(self.jobs)
+        manual, manual_coverage = _console_records(self.jobs, self._read_record)
         automatic, auto_cfg = [], None
         auto_coverage = {'available': False, 'status': 'not_configured', 'modules': [], 'truncated': False}
         service = {'state': 'unknown', 'running': None, 'verified': False, 'enabled': None,
@@ -418,6 +495,7 @@ class Overview:
         issues_truncated = any(queue.get('issues_truncated', False) for queue in queues.values())
         if issues_truncated:
             _warning(warnings, 'queue_issues_truncated')
+        self._tracked = self._base_paths | {Path(spec['path']) for spec in specs if spec['category'] == 'state'}
         return {'window': {'hours': hours, 'start': start, 'end': now, 'basis': 'episode_started_at',
                            'metric_unit': 'episode', 'action': 'collect', 'duration_basis': 'episode_wall_seconds'},
                 'generated_at': now, 'sources': measured, 'summary': summary, 'success_bins': bins,

@@ -15,7 +15,7 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
     const actual=await response.json();assert.equal(actual.window.hours,24);assert.equal(actual.sources.length,4);
     assert.equal(actual.sources.find(source=>source.id==='external-example').metrics_available,false);
     await page.goto(base+'/#overview');await page.waitForSelector('#collection-table table');
-    assert.equal(await page.locator('#kpis .metric').count(),4);assert.doesNotMatch(await page.locator('#overview-coverage').textContent(),/\[object Object\]/);
+    assert.equal(await page.locator('#kpis .metric').count(),3);assert.doesNotMatch(await page.locator('#overview-coverage').textContent(),/\[object Object\]/);
     assert.match(await page.locator('#collection-table').textContent(),/工作账号/);
     let data=makeSnapshot(Date.now()/1000),fail=false;
     await page.route('**/api/overview?*',route=>route.fulfill({status:fail?503:200,json:fail?{detail:'fixture metrics unavailable'}:data}));

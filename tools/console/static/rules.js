@@ -3,6 +3,10 @@ const ruleCatalogs = new Map();
 function placeRules(view){
   const editor=document.getElementById('rulesets-editor');
   document.getElementById(view==='automation'?'automation-rules-slot':'source-rules-slot').append(editor);
+  const actions=document.getElementById('rules-actions');
+  if(view==='automation')editor.append(actions);
+  else document.querySelector('.filter-footer').insertBefore(actions,document.getElementById('replay'));
+  document.getElementById('rules-save').classList.toggle('secondary',view!=='automation');
   if(view==='automation'&&location.hash==='#automation/rules')document.getElementById('automation-rules').hidden=false;
   let scope=document.getElementById('automation-rules-save-scope');
   if(!scope){scope=document.createElement('p');scope.id='automation-rules-save-scope';scope.className='scope';scope.textContent='保存包含此来源的完整配置，以及设置页尚未保存的字段';editor.prepend(scope);}

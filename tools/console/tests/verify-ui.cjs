@@ -16,7 +16,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
     if(screenshots)fs.mkdirSync(screenshots,{recursive:true});
     assert.equal((await (await page.request.get(base+'/__fixture__')).json()).synthetic,true,'Refuse to mutate a real deployment');
     await page.goto(base);
-    await page.waitForSelector('#workflow-matches',{state:'attached'});
+    await page.waitForSelector('#collection-table table');
     assert.equal(await page.locator('#module option').count(),4);
     assert.deepEqual(await page.evaluate(()=>[...document.querySelectorAll('[id]')].map(n=>n.id).filter((id,i,ids)=>ids.indexOf(id)!==i)),[]);
     await page.locator('[data-view=sources]').click();

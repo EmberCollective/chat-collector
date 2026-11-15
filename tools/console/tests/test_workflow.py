@@ -40,6 +40,22 @@ def test_auth_and_durable_history_beyond_memory(tmp_path):
     assert client.get('/api/jobs/not-a-job/workflow').status_code == 404
 
 
+def test_pi_list_skips_unrelated_result_bodies_before_reading(tmp_path, monkeypatch):
+    from pathlib import Path
+    identifier, folder = save_job(tmp_path)
+    unrelated = tmp_path / ('b' * 32)
+    unrelated.mkdir()
+    (unrelated / 'job.json').write_text(json.dumps({'module': 'personal', 'action': 'collect', 'status': 'succeeded'}))
+    result = unrelated / 'result.json'
+    result.write_text('{"status":"succeeded","result":{"messages":["PRIVATE BODY"]}}')
+    original = Path.read_text
+    def read(path, *args, **kwargs):
+        assert path != result, 'Pi list must not parse collection result bodies'
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'read_text', read)
+    assert client_for(tmp_path).get('/api/workflow/runs').json()['runs'][0]['id'] == identifier
+
+
 def test_pagination_partial_append_unicode_and_invalid_record(tmp_path):
     client = client_for(tmp_path)
     identifier, folder = save_job(tmp_path)

@@ -69,7 +69,7 @@ button:disabled {
   background:none;
   color:var(--green);
   padding:4px;
-  font-size:12px;
+  font-size:0.857143rem;
 }
 .text-button:hover:not(:disabled) {
   background:var(--soft);
@@ -110,18 +110,18 @@ h1,h2,h3,h4 {
   font-weight:500;
 }
 h1 {
-  font-size:28px;
+  font-size:2rem;
   line-height:1.3;
 }
 h2 {
-  font-size:18px;
+  font-size:1.285714rem;
 }
 h3 {
-  font-size:15px;
+  font-size:1.071429rem;
   margin-bottom:8px;
 }
 h4 {
-  font-size:14px;
+  font-size:1rem;
   margin:12px 0 8px;
 }
 p {
@@ -133,7 +133,7 @@ strong {
 }
 .muted,.scope {
   color:var(--muted);
-  font-size:12px;
+  font-size:0.857143rem;
 }
 .scope {
   margin:12px 0 20px;
@@ -175,11 +175,11 @@ input,select,textarea,pre,.metric strong {
   padding:0 4px;
 }
 .brand strong {
-  font-size:15px;
+  font-size:1.071429rem;
   display:block;
 }
 .brand small {
-  font-size:10px;
+  font-size:0.714286rem;
   color:var(--muted);
   display:block;
   margin-top:4px;
@@ -188,7 +188,7 @@ input,select,textarea,pre,.metric strong {
   flex:none;
 }
 .nav-caption {
-  font-size:11px;
+  font-size:0.785714rem;
   color:var(--muted);
   margin:40px 12px 12px;
 }
@@ -228,7 +228,7 @@ input,select,textarea,pre,.metric strong {
   margin-top:auto;
   padding:20px 12px 0;
   color:var(--muted);
-  font-size:11px;
+  font-size:0.785714rem;
 }
 .app-body {
   margin-left:224px;
@@ -243,7 +243,7 @@ input,select,textarea,pre,.metric strong {
   padding:0 32px;
   border-bottom:1px solid var(--line);
   background:white;
-  font-size:12px;
+  font-size:0.857143rem;
 }
 .topbar strong {
   font-weight:400;
@@ -272,7 +272,7 @@ main:focus {
 }
 .page-heading p {
   color:var(--muted);
-  font-size:13px;
+  font-size:0.928571rem;
   margin:8px 0 0;
 }
 .page-heading>label {
@@ -328,7 +328,7 @@ main:focus {
   gap:12px;
 }
 .module-top h2 {
-  font-size:18px;
+  font-size:1.285714rem;
 }
 .metrics {
   display:grid;
@@ -342,21 +342,21 @@ main:focus {
 .metric span {
   display:block;
   color:var(--muted);
-  font-size:12px;
+  font-size:0.857143rem;
 }
 .metric strong {
   display:block;
-  font-size:24px;
+  font-size:1.714286rem;
   font-weight:500;
   overflow-wrap:anywhere;
 }
 .metric strong.small {
-  font-size:13px;
+  font-size:0.928571rem;
   margin-top:8px;
 }
 .pill {
   display:inline-block;
-  font-size:12px;
+  font-size:0.857143rem;
   padding:2px 8px;
   border-radius:4px;
   background:#eaf3ee;
@@ -386,11 +386,11 @@ main:focus {
 }
 .pipeline span {
   color:var(--muted);
-  font-size:12px;
+  font-size:0.857143rem;
 }
 label {
   display:block;
-  font-size:12px;
+  font-size:0.857143rem;
   color:var(--muted);
   margin-bottom:12px;
 }
@@ -419,7 +419,7 @@ select {
   width:auto;
 }
 pre,textarea[spellcheck=false] {
-  font:12px/1.6 Consolas,"SFMono-Regular",monospace;
+  font:0.857143rem/1.6 Consolas,"SFMono-Regular",monospace;
 }
 pre {
   background:#f5f7f5;
@@ -457,7 +457,7 @@ pre {
   padding:32px 16px;
   text-align:center;
   color:var(--muted);
-  font-size:13px;
+  font-size:0.928571rem;
 }
 .tabs {
   display:flex;
@@ -545,7 +545,7 @@ pre {
   flex:none;
 }
 .filter-footer .muted {
-  font-size:11px;
+  font-size:0.785714rem;
 }
 .result-tools {
   display:flex;
@@ -600,12 +600,12 @@ pre {
   overflow:hidden;
   white-space:pre-wrap;
   overflow-wrap:anywhere;
-  font-size:13px;
+  font-size:0.928571rem;
 }
 .message-row small {
   display:block;
   color:var(--muted);
-  font-size:11px;
+  font-size:0.785714rem;
   margin-top:8px;
 }
 .inspector {
@@ -644,7 +644,7 @@ pre {
   flex-wrap:wrap;
   gap:8px;
   color:var(--muted);
-  font-size:11px;
+  font-size:0.785714rem;
 }
 .message-text {
   white-space:pre-wrap;
@@ -652,27 +652,27 @@ pre {
   max-height:320px;
   overflow:auto;
   margin:12px 0;
-  font-size:13px;
+  font-size:0.928571rem;
 }
 .asset {
   padding:12px;
   background:#f3f6f2;
   border-radius:4px;
   margin-top:8px;
-  font-size:12px;
+  font-size:0.857143rem;
   overflow-wrap:anywhere;
 }
 .asset .actions {
   margin:8px 0;
 }
 .asset button {
-  font-size:12px;
+  font-size:0.857143rem;
   padding:4px 8px;
 }
 .task-facts {
   display:grid;
   grid-template-columns:48px minmax(0,1fr);
-  font-size:13px;
+  font-size:0.928571rem;
   gap:8px 12px;
 }
 .task-facts dt {
@@ -692,7 +692,7 @@ details {
 summary {
   color:var(--green);
   cursor:pointer;
-  font-size:13px;
+  font-size:0.928571rem;
 }
 details>summary {
   padding:8px 0;
@@ -723,7 +723,7 @@ details>summary {
 table {
   width:100%;
   border-collapse:collapse;
-  font-size:12px;
+  font-size:0.857143rem;
   margin:12px 0 0;
 }
 th,td {
@@ -737,7 +737,7 @@ th {
   font-weight:400;
 }
 td button {
-  font-size:12px;
+  font-size:0.857143rem;
 }
 .history td {
   white-space:nowrap;
@@ -784,7 +784,7 @@ td button {
   height:28px;
   border:1px solid var(--line);
   border-radius:4px;
-  font:12px/1.5 Consolas,monospace;
+  font:0.857143rem/1.5 Consolas,monospace;
   color:var(--muted);
 }
 .workflow-event summary>div {
@@ -792,18 +792,18 @@ td button {
   min-width:0;
 }
 .workflow-event summary strong {
-  font-size:13px;
+  font-size:0.928571rem;
   font-weight:500;
   overflow-wrap:anywhere;
 }
 .workflow-event summary p {
   margin:4px 0 0;
   color:var(--muted);
-  font-size:11px;
+  font-size:0.785714rem;
 }
 .workflow-event time {
   color:var(--muted);
-  font:11px/1.6 Consolas,monospace;
+  font:0.785714rem/1.6 Consolas,monospace;
   white-space:nowrap;
 }
 .workflow-event[open]>summary>span:first-child {
@@ -821,14 +821,14 @@ td button {
   max-height:300px;
   overflow:auto;
   padding-left:20px;
-  font-size:12px;
+  font-size:0.857143rem;
 }
 #processor-live li {
   padding:8px 0;
   border-bottom:1px solid var(--line);
 }
 footer {
-  font-size:11px;
+  font-size:0.785714rem;
   color:var(--muted);
   margin-top:32px;
 }
@@ -899,7 +899,7 @@ dialog::backdrop {
     padding-right:16px;
   }
   .brand strong {
-    font-size:14px;
+    font-size:1rem;
   }
 }
 @media(max-width:1180px) {
@@ -923,7 +923,7 @@ dialog::backdrop {
     margin:4px 0 0;
   }
   .source-bar strong {
-    font-size:14px;
+    font-size:1rem;
   }
   .brand {
     gap:8px;
@@ -933,10 +933,10 @@ dialog::backdrop {
     height:32px;
   }
   .brand strong {
-    font-size:13px;
+    font-size:0.928571rem;
   }
   .brand small {
-    font-size:9px;
+    font-size:0.642857rem;
   }
 }
 @media(max-width:800px) {
@@ -970,7 +970,7 @@ dialog::backdrop {
   #connection {
     max-width:42%;
     overflow-wrap:anywhere;
-    font-size:10px;
+    font-size:0.714286rem;
   }
   #menu-toggle {
     display:inline-flex;
@@ -984,7 +984,7 @@ dialog::backdrop {
     gap:16px;
   }
   .page-heading h1 {
-    font-size:25px;
+    font-size:1.785714rem;
   }
   .source-picker {
     width:100%;
@@ -1061,7 +1061,7 @@ dialog::backdrop {
     padding-left:8px;
   }
   .workflow-event time {
-    font-size:10px;
+    font-size:0.714286rem;
   }
   .history {
     padding:8px 12px 16px;
@@ -1070,10 +1070,10 @@ dialog::backdrop {
     padding:16px;
   }
   .brand strong {
-    font-size:15px;
+    font-size:1.071429rem;
   }
   .brand small {
-    font-size:10px;
+    font-size:0.714286rem;
   }
   .brand img {
     width:36px;
@@ -1083,7 +1083,7 @@ dialog::backdrop {
     padding:16px;
   }
   h2 {
-    font-size:17px;
+    font-size:1.214286rem;
   }
 }
 @media(prefers-reduced-motion:reduce) {
@@ -1097,12 +1097,12 @@ dialog::backdrop {
   align-items:flex-start;
   gap:8px;
   margin:12px 0;
-  font-size:12px;
+  font-size:0.857143rem;
   overflow-wrap:anywhere;
 }
 .rule-row .pill {
   flex:none;
-  font-size:10px;
+  font-size:0.714286rem;
 }
 .rule-card {border-top:1px solid var(--line);padding:16px 0;overflow-wrap:anywhere;}
 .rule-toggle {display:flex;align-items:center;gap:8px;margin-bottom:4px;}
@@ -1113,13 +1113,13 @@ dialog::backdrop {
 #rule-summary .scope {margin:8px 0;}
 #automation-rules {max-width:100%;}
 #automation-rules #rule-list {max-height:540px;overflow:auto;padding-right:8px;}
-#rulesets-editor>.actions {position:sticky;bottom:0;background:var(--panel,#fff);padding:12px 0;margin:0;border-top:1px solid var(--line);}
+#rulesets-editor>.actions {background:var(--paper);padding:12px 0;margin:0;border-top:1px solid var(--line);}
 #automation-background .actions:has(#ops-save),#automation-channels .actions:has(#ops-delivery-save) {position:sticky;bottom:0;background:var(--panel,#fff);padding:12px 0;border-top:1px solid var(--line);}
 .result-scroll>.output>p:not(.empty) {
   padding:12px 20px;
   margin:0;
   border-bottom:1px solid var(--line);
-  font-size:12px;
+  font-size:0.857143rem;
   color:var(--muted);
 }
 #workflow-matches {

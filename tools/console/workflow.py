@@ -46,11 +46,13 @@ def local_record_file(folder, name):
     return path
 
 
-def read_run_metadata(folder, jobs):
+def read_run_metadata(folder, jobs, *, processor_only=False):
     try:
         job = json.loads(local_record_file(folder, 'job.json').read_text(encoding='utf-8'))
         if not isinstance(job, dict):
             raise ValueError('Invalid job metadata')
+        if processor_only and (job.get('module') != 'processor' or job.get('action') != 'process'):
+            return None
         result = local_record_file(folder, 'result.json')
         if result.is_file():
             outcome = json.loads(result.read_text(encoding='utf-8'))
@@ -97,8 +99,8 @@ def register_workflow_routes(app, jobs, authenticate, processor_history=None):
                     if folder.name in seen:
                         continue
                     seen.add(folder.name)
-                    job = read_run_metadata(folder, jobs)
-                    if job['module'] != 'processor' or job['action'] != 'process':
+                    job = read_run_metadata(folder, jobs, processor_only=True)
+                    if job is None:
                         continue
                     job['recorded'] = local_record_file(folder, 'pi-workflow.jsonl').is_file()
                     history.append(job)

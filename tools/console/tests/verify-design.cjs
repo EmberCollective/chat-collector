@@ -10,13 +10,14 @@ const { spawnSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const overviewSnapshot = require('./overview-snapshot.cjs');
+const runtimeSnapshot = require('./runtime-monitor-snapshot.cjs');
 
 const base = process.env.CONSOLE_TEST_URL;
 assert.ok(base, 'Set CONSOLE_TEST_URL to the local synthetic fixture URL.');
 const origin = new URL(base);
 assert.ok(['127.0.0.1', 'localhost', '::1'].includes(origin.hostname), 'Only a loopback fixture is permitted.');
 const root = path.resolve(__dirname, '../../..');
-const approved = path.join(root, 'docs/design/console-redesign/index.html');
+const approved = path.join(root, 'docs/design/runtime-monitoring/index.html');
 const output = path.resolve(process.env.DESIGN_PARITY_OUTPUT || path.join(root, '.runtime/design-parity'));
 const compareHelper = path.join(__dirname, 'compare-design-images.py');
 const executablePath = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
@@ -103,6 +104,7 @@ async function main() {
       return route.fallback();
     });
     if (!liveOverview) await page.route('**/api/overview*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(overviewSnapshot()) }));
+    if (!liveOverview) await page.route('**/api/runtime-monitor',route=>route.fulfill({json:runtimeSnapshot()}));
     if (matchApproved) {
       await page.route('**/api/catalog', route => fulfillJson(route, catalog => {
         catalog.sources = (catalog.sources || []).filter(source => source.id !== 'qq-work');
@@ -153,7 +155,7 @@ async function main() {
         await go(designPage, fileUrl(approved, state.designHash), state);
         if (state.name === 'overview') {
           await designPage.locator('#kpis .metric').first().waitFor();
-          assert.equal(await designPage.locator('#kpis .metric').count(), 4, 'Approved overview must render all four KPI cards.');
+          assert.equal(await designPage.locator('#kpis .metric').count(), 3, 'Approved overview must render all three KPI cards.');
         }
         const designMetrics = await metrics(designPage);
         const designViewport = path.join(output, `${stem}-approved-viewport.png`);
@@ -165,7 +167,7 @@ async function main() {
         await go(page, `${origin.origin}/${state.hash}`, state);
         if (state.name === 'overview') {
           await page.locator('#kpis .metric').first().waitFor();
-          assert.equal(await page.locator('#kpis .metric').count(), 4, 'Production overview must render all four KPI cards.');
+          assert.equal(await page.locator('#kpis .metric').count(), 3, 'Production overview must render all three KPI cards.');
         } else if (state.name === 'automation-collection') {
           await page.waitForFunction(() => document.querySelectorAll('#automation-collection .automation-source-row').length >= 3);
           if (matchApproved) assert.equal(await page.locator('#automation-collection .automation-source-row').count(), 3, 'Matched automation screenshot should show the approved three catalog rows.');

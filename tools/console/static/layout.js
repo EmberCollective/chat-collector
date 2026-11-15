@@ -1,6 +1,6 @@
 ﻿'use strict';
 const viewLabels = {overview:'运行概览',sources:'信息源调试',processor:'待办处理',delivery:'行动与投递',automation:'自动化',history:'运行记录',settings:'设置'};
-function activatePanel(id, focus=false) {
+function activatePanel(id, focus=false, refresh=true) {
   const tab=document.querySelector(`[data-panel="${id}"]`); if(!tab)return;
   const tabs=tab.parentElement;
   for(const other of tabs.querySelectorAll('[data-panel]')){
@@ -15,7 +15,7 @@ function activatePanel(id, focus=false) {
     document.querySelector('.filter-footer').hidden=id!=='query';
     document.getElementById('result-scope').textContent=id==='query'?'现有快照 · 只读预览':'已采集消息 · 最新修订';
   }
-  if(id==='pi-workflow'&&document.getElementById('workflow-matches')&&typeof refreshWorkflow==='function')refreshWorkflow().catch(e=>notice(e.message,true));
+  if(refresh&&id==='pi-workflow'&&document.getElementById('workflow-matches')&&typeof refreshWorkflow==='function')refreshWorkflow().catch(e=>notice(e.message,true));
 }
 function setMenu(open){
   document.body.classList.toggle('menu-open',open);

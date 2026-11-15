@@ -6,6 +6,9 @@ const states = {running:'执行中',retry:'等待重试',succeeded:'已完成',w
 const intensities = {metadata:'轻量',standard:'标准',full:'完整'};
 const assetStates = {deferred:'按强度暂缓保存',archived:'已归档',missing:'本地未找到',thumbnail_only:'仅缩略图',unverified:'内容待核验',encrypted_only:'仅保留密文',unsupported:'格式未支持'};
 let sourceCatalog=[], lastStatus=null, sourceSignature='', sourceGeneration=0;
+let sessionPromise;
+function consoleSession(){return sessionPromise??=fetch('/api/session').then(async response=>{if(!response.ok)throw Error('无法建立本机会话');return response.json();}).catch(error=>{sessionPromise=null;throw error;});}
+window.consoleSession=consoleSession;
 const sourceDrafts=new Map();
 const selected = () => $('module').value;
 const sourceInfo = (id=selected()) => sourceCatalog.find(source=>source.id===id);
@@ -201,5 +204,23 @@ $('last-day').addEventListener('click',markQueryChanged);
 $('filter-rulesets').addEventListener('input',renderRuleSummary);
 $('result-search').addEventListener('input',filterResults);$('result-attachment').addEventListener('change',filterResults);
 bind('close-message',()=>$('message-dialog').close());
-async function init(){lastDay();const response=await fetch('/api/session');if(!response.ok)throw Error('无法建立本机会话');token=(await response.json()).token;await loadCatalog();await switchModule();await refresh();await initProcessor();await initWorkflow();await initHistory();await initOverview();setInterval(refresh,3000);}
+const viewInitializers=new Map();
+function onceView(key,initialize){if(!viewInitializers.has(key))viewInitializers.set(key,Promise.resolve().then(initialize).catch(error=>{viewInitializers.delete(key);throw error;}));return viewInitializers.get(key);}
+async function initializeView(){
+  if(!token)return;
+  const visible=id=>!$('view-'+id).hidden;
+  if(visible('overview'))await onceView('overview',initOverview);
+  if(visible('sources')||visible('settings')||visible('automation')&&location.hash==='#automation/rules')await onceView('source',()=>Promise.all([$('module').dataset.loaded===selected()?undefined:switchModule(),refresh()]));
+  if(visible('processor')||visible('settings'))await onceView('processor',initProcessor);
+  if(visible('processor'))await onceView('workflow',initWorkflow);
+  if(visible('history'))await onceView('history',initHistory);
+}
+async function init(){
+  lastDay();token=(await consoleSession()).token;await loadCatalog();
+  $('connection').textContent='已连接 · '+time(Date.now()/1000);$('connection').className='muted';
+  await onceView('overview',initOverview);
+  await initializeView();
+  window.addEventListener('hashchange',()=>guard(initializeView));
+  setInterval(()=>{if(document.hidden)return;if(!$('view-sources').hidden)guard(refresh);else if(!$('view-processor').hidden)guard(pollProcessor);},3000);
+}
 init().catch(error=>notice(error.message,true));

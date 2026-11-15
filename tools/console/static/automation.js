@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const notice = (text, service = true) => {byId('notice').textContent = text; byId('action-notice').textContent = service ? text : '';if(byId('target-dialog').open)byId('add-error').textContent=text;};
   const markDirty = () => {dirty = true; notice('有未保存的设置。运行控制与测试使用已保存的配置。', false);};
   async function request(path, options = {}, base = '/api/operations') {
-    const session = await fetch('/api/session').then(r => r.json());
+    const session = await window.consoleSession();
     const response = await fetch(base + path, {...options, headers: {'X-Console-Token': session.token, 'Content-Type': 'application/json'}});
     const body = await response.json();
     if (!response.ok) throw Error(response.status === 409 && path === '/config' ? '配置已变化或正在操作。你的编辑已保留；请先核对后重新加载。' : typeof body.detail === 'string' ? body.detail : '操作失败，请检查输入和运行状态。');
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function openRules(id){
     if(!sourceInfo(id)?.capabilities.sql)throw Error('此来源未提供 SQL 规则编辑能力。');
-    if(selected()!==id){document.getElementById('module').value=id;await switchModule();}
+    if(selected()!==id||document.getElementById('module').dataset.loaded!==id){document.getElementById('module').value=id;await switchModule();}
     location.hash='automation/rules';showView();document.getElementById('automation-rules').scrollIntoView({block:'nearest'});
   }
   function sourceRow(source,entry){
@@ -323,6 +323,9 @@ document.addEventListener('DOMContentLoaded', () => {
   byId('close-rules').addEventListener('click',()=>{document.getElementById('automation-rules').hidden=true;});
   window.addEventListener('operations-updated',refreshStatus);
   window.addEventListener('beforeunload', event => {if (dirty) {event.preventDefault(); event.returnValue = '';}});
-  action(loadConfig); refreshStatus(); refreshStartup();
-  setInterval(refreshStatus, 5000); setInterval(countdowns, 1000);
+  let initialized=false;
+  function enterAutomation(){if(document.hidden||document.getElementById('view-automation').hidden)return;if(!initialized){initialized=true;action(loadConfig);refreshStartup();}refreshStatus();}
+  window.addEventListener('hashchange',enterAutomation);document.addEventListener('visibilitychange',enterAutomation);enterAutomation();
+  setInterval(()=>{if(!document.hidden&&!document.getElementById('view-automation').hidden)refreshStatus();},5000);
+  setInterval(()=>{if(!document.hidden&&!document.getElementById('view-automation').hidden)countdowns();},1000);
 });

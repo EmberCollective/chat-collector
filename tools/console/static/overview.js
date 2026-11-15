@@ -2,7 +2,7 @@
 (() => {
   const node=(tag,text,cls)=>{const item=document.createElement(tag);if(text!=null)item.textContent=text;if(cls)item.className=cls;return item;};
   const $=id=>document.getElementById(id);
-  const statusNames={unknown:'结果未确认',unsupported:'未提供统计',running:'执行中',retry:'等待重试',paused:'已暂停',disabled:'未启用',waiting:'定时等待',idle:'等待调度',stopped:'已停止',starting:'启动中',stopping:'停止中',restarting:'重新启动中',success:'成功',failed:'失败',sent:'已发送',queued:'已排队',applied:'已回写',conflict:'状态冲突'};
+  const statusNames={unknown:'结果未确认',unsupported:'未提供统计',running:'执行中',updating:'更新计划中',retry:'等待重试',paused:'已暂停',disabled:'未启用',waiting:'定时等待',idle:'等待调度',stopped:'已停止',starting:'启动中',stopping:'停止中',restarting:'重新启动中',success:'成功',failed:'失败',sent:'已发送',queued:'已排队',applied:'已回写',conflict:'状态冲突'};
   const count=value=>value==null?'—':value.toLocaleString();
   const rate=value=>value==null?'—':(value*100).toFixed(1)+'%';
   const clock=value=>value==null?'—':new Date(value*1000).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'});
@@ -14,10 +14,24 @@
   const warningText=value=>typeof value==='string'?value:warningLabels[value.code]||((value.module==='automation'?'后台服务':names[value.module]||value.module||'部分')+'数据暂时不可读');
   const issueLabels=new Map([['result_unknown','本轮结果尚未确认，请先核对实际输出。'],['config_changed','已保存配置与运行中服务不一致，请在后台服务中核对。'],['service_stopped','后台服务已停止，已启用的计划暂不执行。'],['service_unknown','无法确认后台进程状态，请先核对。'],['service_duplicate','发现重复后台进程，请在后台服务中检查。'],['retry','任务正在等待重试，请核对上次错误。'],['paused','任务因错误暂停，请核对原因后恢复。'],['failed','任务执行失败，请查看原始记录。'],['unknown','执行结果未知，请先核对实际输出。'],['conflict','回写与当前待办状态冲突，请刷新待办后重新操作。']]);
   const issueText=issue=>issueLabels.get(issue.error)||issue.error||nextStep(issue);
-  let snapshot=null,ready=false,loading=false,generation=0,metric='messages',scope={},records=[],current=null,returnContext=null,detailGeneration=0,listGeneration=0;
+  let snapshot=null,runtime=null,runtimeKey='',ready=false,loading=false,generation=0,metric='messages',scope={},records=[],current=null,returnContext=null,detailGeneration=0,listGeneration=0;
+  const duration=seconds=>{seconds=Math.max(0,Math.floor(seconds));return (seconds>=3600?Math.floor(seconds/3600)+' 小时 ':'')+(seconds>=60?Math.floor(seconds/60)%60+' 分 ':'')+seconds%60+' 秒';};
+  const liveSample=()=>{const sample=runtime?.samples?.at(-1);return sample&&Array.isArray(sample.active_jobs)&&Date.now()/1000-sample.at<=15&&sample.at>=(snapshot?.generated_at||0)?sample:null;};
+  const sameModule=(task,job)=>job.source_id?task.source_id===job.source_id:task.module===job.module;
+  function runTimer(job){const timer=node('strong',null,'schedule-elapsed');if(job.last_start!=null){timer.dataset.runStart=job.last_start;timer.dataset.runObserved=liveSample()?.at||snapshot.generated_at;}else timer.textContent='开始时间未记录';return timer;}
+  function updateRunTimers(){
+    for(const timer of $('services').querySelectorAll('[data-run-start]'))timer.textContent=Date.now()/1000-Number(timer.dataset.runObserved)>15?'运行状态待刷新':'已运行 '+duration(Date.now()/1000-Number(timer.dataset.runStart));
+  }
+  window.setRuntimeSnapshot=value=>{
+    runtime=value;const sample=liveSample(),key=JSON.stringify(sample?.active_jobs??null);
+    const changed=sample&&(snapshot?.jobs||[]).some(job=>(job.state==='running')!==sample.active_jobs.some(task=>sameModule(task,job)));
+    if(snapshot&&(key!==runtimeKey||changed)){renderServices();if(changed)guard(refreshOverview);}
+    else if(sample)for(const timer of $('services').querySelectorAll('[data-run-start]'))timer.dataset.runObserved=sample.at;
+    runtimeKey=key;updateRunTimers();
+  };
 
   async function refreshOverview(){
-    if(!ready||loading)return;
+    if(!ready||loading||document.hidden||$('view-overview').hidden)return;
     loading=true;const request=++generation;
     try{
       const result=await api('/overview?hours='+$('overview-hours').value);
@@ -26,7 +40,7 @@
     }catch(error){
       if(request!==generation)return;
       $('last-refresh').textContent=(snapshot?'数据已过期 · ':'读取失败 · ')+error.message;
-      $('attention').classList.remove('good');
+      $('attention').hidden=false;$('attention').classList.remove('good');
       const retry=node('button','重新读取','secondary');retry.addEventListener('click',()=>guard(refreshOverview));
       const title=node('div',null,'alert-heading');title.append(node('h2','运行数据暂时无法读取'),retry);
       $('attention').replaceChildren(title,node('p','无法确认当前系统是否正常。'+(snapshot?'下方保留上次成功读取的数据。':'成功率、数量与状态均不按 0 处理。'),'scope'));
@@ -35,9 +49,9 @@
   function render(){
     const s=snapshot,summary=s.summary||{},issues=s.issues||[],service=s.service||{};
     $('last-refresh').textContent='刷新于 '+clock(s.generated_at);
-    $('overview-window-label').textContent='最近 '+s.window.hours+' 小时';
-    $('overview-window').textContent=stamp(s.window.start)+' — '+stamp(s.window.end);
-    const attention=$('attention');attention.replaceChildren();attention.classList.toggle('good',!issues.length);
+    const windowStamp=value=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(value*1000));
+    $('overview-window').textContent=windowStamp(s.window.start)+' — '+windowStamp(s.window.end);$('overview-window').title=stamp(s.window.start)+' — '+stamp(s.window.end);
+    const attention=$('attention');attention.hidden=!issues.length&&!!summary.valid_count;attention.replaceChildren();attention.classList.toggle('good',!issues.length);
     const heading=node('div',null,'alert-heading'),title=node('h2',issues.length?issues.length+' 项问题需要处理':summary.valid_count?'当前没有待处理异常':'等待首次有效采集');
     if(issues.length)title.prepend(node('span','● '));
     heading.append(title,node('span',issues.length?'先核对失败与未知结果':summary.valid_count?'结合进程与任务状态核对':'尚不能判断运行质量','muted'));attention.append(heading);
@@ -47,9 +61,9 @@
       row.append(node('span',unknown?'待确认':issue.severity==='warning'?'需检查':'失败','problem-tag'+(unknown||issue.severity==='warning'?' warn':'')),text,node('time',clock(issue.last_at)));
       const button=node('button','查看相关记录','secondary');button.dataset.issueKey=issue.key;button.addEventListener('click',()=>guard(()=>openIssue(issue)));row.append(button);attention.append(row);
     }
-    const metrics=[['待处理问题',issues.length+' 项',issues.length?'包含当前故障与结果未确认':'包含故障与结果未确认',!!issues.length],['后台服务',serviceState(service),service.note||'采集 / 处理 / 投递分别核对'],['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['正式采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本']];
+    const metrics=[['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['正式采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本'],['平均采集耗时',summary.avg_seconds==null?'—':summary.avg_seconds.toFixed(1)+' 秒',summary.sample_count?`${count(summary.sample_count)} 个有效结束轮次 · 含失败耗时`:'暂无有效样本']];
     $('kpis').replaceChildren(...metrics.map(([label,value,detail,bad])=>{const item=node('div',null,'metric');item.append(node('span',label),node('strong',value,bad?'bad':''),node('small',detail));return item;}));
-    renderSources();renderServices();renderChart();renderResources();
+    renderSources();renderServices();renderChart();renderResources();window.setOverviewSnapshot?.(s);
     const warnings=s.warnings||[];
     $('overview-coverage').textContent=warnings.length?'统计范围：'+warnings.map(warningText).join('；'):'统计按开始时间归入窗口；仅包含本地仍保留且可读取的记录。空间为当前项目文件逻辑大小，不代表整盘或物理占用。';
   }
@@ -77,24 +91,47 @@
     $('collection-table').replaceChildren(table);
   }
   function renderServices(){
-    const s=snapshot,service=s.service||{},jobs=s.jobs||[],queues=s.queues||{},sources=s.sources||[];
+    const s=snapshot,service=s.service||{},sample=liveSample(),queues=s.queues||{},sources=s.sources||[];
+    const jobs=(s.jobs||[]).map(job=>{if(!sample)return job;const active=sample.active_jobs.find(task=>sameModule(task,job));return active?{...job,state:'running',last_start:active.started_at}:job.state==='running'?{...job,state:'updating',next_run:null}:job;});
     $('system-pill').textContent='后台服务'+serviceState(service);
     $('system-pill').classList.toggle('warn',!service.running||service.verified===false);
     const collect=jobs.filter(job=>job.source_id),processor=jobs.find(job=>job.module==='processor'),delivery=jobs.find(job=>job.module==='messaging'),feedback=jobs.find(job=>job.module==='feedback');
     const queueNote=(queue,keys)=>queue?.counts?keys.map(([key,label])=>count(queue.counts[key]??0)+' '+label).join(' · '):'队列状态尚不可读';
-    const rows=[['collect','采集定时',collect.filter(job=>job.enabled).length+' / '+collect.length+' 已启用',sources.filter(source=>source.status==='retry').length?'有来源等待重试；点击核对记录':'按来源配置的间隔运行'],['process','待办处理',processor?processor.enabled?state(processor.state):'未启用':'状态未知',queues.processor?.pending_groups==null?'待处理分组：尚未计算':'待处理 '+queues.processor.pending_groups+' 组 · 可打开 Pi 工作流'],['delivery','消息投递',delivery?delivery.enabled?state(delivery.state):'未启用':'状态未知',queueNote(queues.messaging,[['pending','待投递'],['retry','待重试'],['unknown','结果未知']])],['feedback','状态回写',feedback?feedback.enabled?state(feedback.state):'未启用':'状态未知',queueNote(queues.feedback,[['queued','待回写'],['failed','失败'],['conflict','冲突']])]];
+    const running=collect.filter(job=>job.state==='running').length;
+    const rows=[['collect','信息源采集',collect.filter(job=>job.enabled).length+' 个来源'+(running?' · '+running+' 个执行中':''),''],['process','待办处理',processor?processor.state==='running'?'执行中':processor.enabled?state(processor.state):'已关闭':'状态未知',''],['delivery','消息投递',delivery?delivery.enabled?state(delivery.state):'未启用':'状态未知',queueNote(queues.messaging,[['pending','待投递'],['retry','待重试'],['unknown','结果未知']])],['feedback','状态回写',feedback?feedback.enabled?state(feedback.state):'未启用':'状态未知',queueNote(queues.feedback,[['queued','待回写'],['failed','失败'],['conflict','冲突']])]];
     $('services').replaceChildren();
     for(const [id,name,value,note]of rows){
-      const row=node('div',null,'service-row'),text=node('div'),status=node('div',null,'service-state');row.dataset.serviceId=id;text.append(node('strong',name),node('p',note));
+      const row=node('div',null,'service-row'),text=node('div'),status=node('div',null,'service-state');row.dataset.serviceId=id;text.append(node('strong',name));if(note)text.append(node('p',note));
       const issue=(s.issues||[]).find(issue=>id==='collect'?!!issue.source_id:issue.module===({process:'processor',delivery:'messaging',feedback:'feedback'})[id]);
       status.append(node('span',value,'pill'+(issue?' warn':'')));
       const button=node('button',issue?'查看问题':id==='process'?'查看 Pi 工作流':'自动化设置','text-button');
-      button.addEventListener('click',()=>guard(async()=>{if(issue)return openIssue(issue);if(id==='process'){await loadWorkflowRuns();const run=workflowRuns.find(run=>run.status==='running');if(run)await selectWorkflow(run.id);else{location.hash='pi-workflow';activatePanel('pi-workflow');}}else location.hash='automation/'+(['delivery','feedback'].includes(id)?'channels':'background');}));
-      if(issue)button.dataset.serviceProblem=issue.key;status.append(button);row.append(text,status);$('services').append(row);
+      button.addEventListener('click',()=>guard(async()=>{if(issue)return openIssue(issue);location.hash=id==='process'?'pi-workflow':'automation/'+(['delivery','feedback'].includes(id)?'channels':'background');}));
+      if(issue)button.dataset.serviceProblem=issue.key;
+      if(['collect','process'].includes(id)){
+        row.classList.add('schedule-service');const heading=node('div',null,'schedule-heading');text.append(...status.childNodes);heading.append(text,button);row.append(heading);
+        const entries=id==='collect'?sources.filter(source=>collect.some(job=>job.source_id===source.id)||sourceInfo(source.id)?.capabilities?.schedule).map(source=>[source.name,collect.find(job=>job.source_id===source.id)]):[[processor?.state==='running'?'当前处理':'下次处理',processor]];
+        for(const [label,job]of entries){const entry=node('div',null,'schedule-entry'),value=node('div'),name=node('div',null,'schedule-source');entry.dataset.module=job?.source_id||job?.module||'';
+          const executing=job?.state==='running'&&(service.verified&&service.running||job.manual_run_id||sample?.active_jobs.some(task=>sameModule(task,job)));entry.classList.toggle('is-running',!!executing);
+          if(executing){const button=node('button',label,'text-button');button.title='查看'+label+'执行记录';button.addEventListener('click',()=>guard(()=>openRuns({module:job.source_id||job.module,status:'running',label:label+' · 执行中'})));name.append(button,node('span','执行中','pill'));}else name.append(node('span',label));entry.append(name,value);
+          if(!job)value.append(node('span','未提供下次计划'),node('small','由来源自行调度或尚未计算'));
+          else if(executing){value.append(runTimer(job),node('small',job.last_start!=null?clock(job.last_start)+' 开始':'本轮结束后计算下次计划'));}
+          else if(!service.verified||service.state==='unknown')value.append(node('span','后台状态未知'),node('small','需核对实际调度状态'));
+          else if(!service.running)value.append(node('span','后台已停止'),node('small','启动后重新计算计划'));
+          else if(job.state==='updating')value.append(node('span','本轮已结束'),node('small','正在读取下次计划'));
+          else if(!job.enabled)value.append(node('span','定时计划关闭'),node('small','不会按原时间自动执行'));
+          else if(job.state==='paused')value.append(node('span','错误暂停 · 等待恢复'));
+          else if(job.next_run!=null){const time=node('time',new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(job.next_run*1000)));time.dateTime=new Date(job.next_run*1000).toISOString();time.title=job.state==='retry'?'计划重试':'下次执行';value.append(node('small',job.state==='retry'?'计划重试':'下次执行'),time);}
+          else value.append(node('span','未提供下次计划'),node('small','等待调度器计算'));row.append(entry);
+        }
+        if(!entries.length)row.append(node('p','尚未启用可调度的信息源','muted'));
+      }else{const job=id==='delivery'?delivery:feedback;if(job?.state==='running')text.append(runTimer(job));status.append(button);row.append(text,status);}
+      $('services').append(row);
     }
+    updateRunTimers();
   }
   function renderChart(){
-    const bins=snapshot.success_bins||[],width=640,height=220,left=44,right=20,top=20,bottom=36,plot=height-top-bottom;
+    if(!snapshot)return;
+    const bins=snapshot.success_bins||[],width=Math.max(200,$('rate-chart').querySelector('svg')?.clientWidth||$('rate-chart').clientWidth-40),height=Math.max(220,$('rate-chart').querySelector('svg')?.clientHeight||220),left=44,right=20,top=20,bottom=36,plot=height-top-bottom;
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('role','group');svg.setAttribute('aria-label','正式采集成功率，纵轴0到100%');
     const add=(tag,attrs,text)=>{const item=document.createElementNS(svg.namespaceURI,tag);for(const [key,value]of Object.entries(attrs))item.setAttribute(key,value);if(text!=null)item.textContent=text;svg.append(item);return item;};
     const x=i=>left+i*(width-left-right)/Math.max(1,bins.length-1),y=bin=>top+plot*(1-bin.success_rate);
@@ -108,7 +145,7 @@
       const circle=add('circle',{cx:x(i),cy:y(bin),r:bin.failed?5:3,fill:bin.failed?'#a43b32':'#12634f'}),title=document.createElementNS(svg.namespaceURI,'title');title.textContent=`${clock(bin.start)} — ${clock(bin.end)}：${bin.success} 成功、${bin.failed} 失败，成功率 ${rate(bin.success_rate)}`;circle.append(title);
       if(bin.failed){circle.setAttribute('role','button');circle.setAttribute('tabindex','0');circle.setAttribute('aria-label',title.textContent+'，查看记录');const open=()=>guard(()=>openRuns({action:'collect',status:'failed',start:bin.start,end:bin.end,label:clock(bin.start)+' — '+clock(bin.end)+' · 正式采集失败'}));circle.addEventListener('click',open);circle.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();open();}});}
     });
-    const legend=node('div',null,'legend');for(const [label,bad]of [['成功率',false],['包含失败的时间段',true]]){const span=node('span');span.append(node('i',null,bad?'bad':''),document.createTextNode(label));legend.append(span);}$('rate-chart').replaceChildren(svg,legend);
+    const legend=node('div',null,'legend');for(const [label,bad]of [['成功率',false],['包含失败的时间段',true]]){const span=node('span');span.append(node('i',null,bad?'bad':''),document.createTextNode(label));legend.append(span);}const area=node('div',null,'rate-plot');area.append(svg);$('rate-chart').replaceChildren(area,legend);
   }
   function formatStorage(value){return value==null?'未统计':value>=1e9?(value/1e9).toFixed(1)+' GB':value>=1e6?(value/1e6).toFixed(1)+' MB':value>=1e3?(value/1e3).toFixed(1)+' KB':value.toLocaleString()+' B';}
   function renderResources(){
@@ -251,6 +288,7 @@
   }
   window.openOverviewJob=openOverviewJob;
   window.initOverview=async()=>{
+    if(ready){if(!$('view-overview').hidden&&!document.hidden)await refreshOverview();return;}
     ready=true;
     for(const status of ['running','retry','warning']){const option=node('option',state(status));option.value=status;$('run-result-filter').append(option);}
     $('overview-hours').addEventListener('change',()=>{++generation;loading=false;guard(refreshOverview);});
@@ -258,8 +296,13 @@
     $('show-records').addEventListener('click',()=>guard(()=>openRuns({action:'collect'})));
     $('run-result-filter').addEventListener('change',()=>{scope.status=$('run-result-filter').value==='all'?'':$('run-result-filter').value;guard(renderRunList);});$('close-dialog').addEventListener('click',()=>{$('run-dialog').close();++detailGeneration;++listGeneration;});
     $('show-history').addEventListener('click',()=>guard(showHistory));$('overview-return-run').addEventListener('click',()=>guard(restoreRun));
+    $('show-metric-definition').addEventListener('click',()=>{const details=$('metric-definition');details.open=true;details.querySelector('summary').focus();details.scrollIntoView({block:'start'});});
+    let rateSize='';new ResizeObserver(entries=>{const {width,height}=entries[0].contentRect,size=width+':'+height;if(width>0&&size!==rateSize){rateSize=size;renderChart();}}).observe($('rate-chart'));
     window.addEventListener('operations-updated',()=>guard(refreshOverview));
-    window.addEventListener('hashchange',()=>{if(!$('view-overview').hidden)guard(refreshOverview);});
-    await refreshOverview();setInterval(()=>{if(!$('view-overview').hidden)guard(refreshOverview);},15000);
+    window.addEventListener('hashchange',()=>{if(!$('view-overview').hidden&&!document.hidden)guard(refreshOverview);});
+    document.addEventListener('visibilitychange',()=>{if(!$('view-overview').hidden&&!document.hidden)guard(refreshOverview);});
+    window.initRuntimeMonitor?.();
+    if(!$('view-overview').hidden&&!document.hidden)await refreshOverview();setInterval(()=>{if(!$('view-overview').hidden&&!document.hidden)guard(refreshOverview);},30000);
+    setInterval(()=>{if(!$('view-overview').hidden&&!document.hidden){updateRunTimers();window.updateRuntimeElapsed?.();}},1000);
   };
 })();

@@ -60,24 +60,27 @@ async function loadWorkflowRuns(append=false){
   if(!picker.children.length){const option=el('option','尚无处理运行');option.value='';picker.append(option);}
   $('workflow-older').hidden=!workflowRunsMore;
 }
-async function selectWorkflow(id,navigate=true){
+async function selectWorkflow(id,navigate=true,reload=true){
+  if(!workflowReady)await initWorkflow(false);
   workflowRun=id;const generation=++workflowGeneration;workflowCursor=0;workflowMore=false;workflowPending=false;workflowJob=null;workflowRecorded=false;workflowEvents.clear();$('workflow-feed').replaceChildren();
-  if(navigate){location.hash='processor';activatePanel('pi-workflow');}
-  await loadWorkflowRuns();if(generation!==workflowGeneration||id!==workflowRun)return;$('workflow-run').value=id;
+  if(navigate){location.hash='processor';activatePanel('pi-workflow',false,false);}
+  if(reload)await loadWorkflowRuns();if(generation!==workflowGeneration||id!==workflowRun)return;$('workflow-run').value=id;
   // A previous request may still be finishing; the next polling tick resumes this selection.
   await loadWorkflowPage();
 }
 async function refreshWorkflow(){
   if(!token)return;
-  await loadWorkflowRuns();if(!workflowRun&&workflowRuns.length)await selectWorkflow(workflowRuns[0].id,false);
+  await loadWorkflowRuns();if(!workflowRun&&workflowRuns.length)await selectWorkflow(workflowRuns[0].id,false,false);
   else if(workflowRun&&!workflowMore)await loadWorkflowPage();
 }
-async function initWorkflow(){
+let workflowReady=false;
+async function initWorkflow(refresh=true){
+  if(workflowReady)return;workflowReady=true;
   const matches=el('p','', 'scope');matches.id='workflow-matches';$('workflow-status').after(matches);
   const older=button('读取更早的运行',()=>loadWorkflowRuns(true));older.id='workflow-older';older.hidden=true;$('workflow-run').parentElement.append(older);
   $('workflow-run').addEventListener('change',()=>guard(()=>selectWorkflow($('workflow-run').value,false)));
   bind('workflow-refresh',refreshWorkflow);bind('workflow-more',loadWorkflowPage);
   $('workflow-search').addEventListener('input',filterWorkflow);$('workflow-filter').addEventListener('change',filterWorkflow);
-  await refreshWorkflow();
-  setInterval(()=>{if(!$('view-processor').hidden&&!$('pi-workflow').hidden&&!workflowMore)guard(loadWorkflowPage);},3000);
+  if(refresh)await refreshWorkflow();
+  setInterval(()=>{if(!document.hidden&&!$('view-processor').hidden&&!$('pi-workflow').hidden&&!workflowMore)guard(loadWorkflowPage);},3000);
 }
