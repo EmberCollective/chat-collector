@@ -1,0 +1,12 @@
+{
+  "capture_db": "./local/state/classroom-output/school-reception/inbox.local.sqlite",
+  "account_id": "configure-a-stable-account-label",
+  "source_ids": [
+    "configure-an-explicitly-authorized-source"
+  ],
+  "start_inclusive": 0,
+  "end_exclusive": 1,
+  "upstream_root": "./local/chat-collector",
+  "inbox": "./local/chat-collector/data/batches",
+  "ledger": "./local/state/provider-outbox.sqlite"
+}

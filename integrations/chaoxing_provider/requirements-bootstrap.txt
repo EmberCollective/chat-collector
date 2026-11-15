@@ -1,0 +1,2 @@
+# Only needed for explicit browser bootstrap; regular collection uses Python standard library.
+playwright>=1.50,<2
