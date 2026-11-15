@@ -1,6 +1,6 @@
 # 飞书、Notion 与 Notion Calendar 接入
 
-消息层投递通过数据契约校验的待办包，不调用模型，也不设置人工复核门槛。缺失信息作为 notes“说明”随任务展示。正式发送须同时启用 `config/messaging.toml` 的全局 `enabled` 与对应目标；启用状态以本机配置为准，预览和本地同步不要求凭据。接入新平台见 [渠道开发指南](channel-development.md)。
+消息层投递通过数据契约校验的待办包，不调用模型，也不设置人工复核门槛。缺失信息作为 notes“说明”随任务展示。正式发送须同时启用 `config/messaging.toml` 的全局 `enabled` 与对应目标；启用状态以本机配置为准，预览和本地同步不要求凭据。接入新平台见 [渠道开发指南](development.md)。
 
 安装可选渠道依赖：`python -m pip install -r messaging/requirements.txt`。Notion 使用社区维护的 `notion-client==3.1.0`，固定 API 版本 `2025-09-03`；不是自行实现 SDK。官方维护的 JavaScript SDK 是 `@notionhq/client`。
 

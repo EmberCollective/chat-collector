@@ -50,21 +50,22 @@
 
 当前提供 **Windows x64 本地使用预览包**，安装需要联网。
 
-1. 按 [安装指南](docs/installation.md) 准备预览包，解压后双击 `Install.cmd`，选择空目录安装。无需预装 Python、Node 或编译器。
+1. 按 [安装指南](docs/guides/installation.md) 准备预览包，解压后双击 `Install.cmd`，选择空目录安装。无需预装 Python、Node 或编译器。
 2. 按引导选择微信 / QQ，完成首次取钥，填写模型配置；飞书可选，稍后也能接入其他渠道。
 3. 引导首次处理最近 7 日符合 SQL 规则的消息；日常双击 `Start.cmd`，在本地调试台查看状态、预览筛选和调整规则。
 
-源码安装与分层运行见 [开发指南](docs/development.md)。源码目录的 `Install.cmd` 使用已有发布 ZIP，缺包时需先按安装指南构建。
+源码安装与分层运行见 [开发指南](docs/guides/development.md)。源码目录的 `Install.cmd` 使用已有发布 ZIP，缺包时需先按安装指南构建。
 
 ## 按需调整与扩展
 
 | 想做什么 | 从这里开始 |
 |---|---|
 | 只收集指定群、关键词、文件或上下文 | [SQL 规则](FILTERS.md) |
-| 自定义待办判断、优先级与模型 | [默认规则](processing-rules/default.md) · [处理配置](docs/processing.md) |
-| 配置飞书、Notion、提醒与操作反馈 | [渠道配置](docs/messaging-channels.md) · [飞书设置](docs/feishu-setup.md) |
-| 接入其他消息来源或通知平台 | [收集层开发](docs/collector-development.md) · [数据契约](docs/data-contract.md) · [渠道开发](docs/channel-development.md) |
-| 设置自动运行、失败重试与恢复 | [自动化](docs/automation.md) |
+| 自定义待办判断、优先级与模型 | [默认规则](processing-rules/default.md) · [处理配置](docs/processor/processing.md) |
+| 配置飞书、Notion、提醒与操作反馈 | [渠道配置](docs/information/channels/configuration.md) · [飞书设置](docs/information/channels/feishu-setup.md) |
+| 接入其他消息来源或通知平台 | [收集层开发](docs/collector/acquisition/development.md) · [数据契约](docs/processor/input-contract.md) · [渠道开发](docs/information/channels/development.md) |
+| 设置自动运行、失败重试与恢复 | [自动化](docs/information/dispatch/automation.md) |
+| 快速查询消息、分析索引与采集性能 | [查询方法](docs/collector/acquisition/fast-query.md) · [查询实现](docs/collector/compatibility/query-implementation.md) |
 
 ## 使用边界
 
@@ -74,4 +75,4 @@
 - **结果与数据**：模型可能误判，需结合来源核对。聊天、附件和凭据均属敏感数据，请保管好 `.env`、`secrets/` 与 `data/`；已有部署请勿用新包直接覆盖。
 - **第三方与分发**：仓库根目录尚无项目许可证文件，部分上游授权仍待解决，不能视为已获任意再分发许可。来源、许可证原文、修改记录及当前缺口见 [第三方说明](THIRD_PARTY_NOTICES.md)。以上使用边界不能替代第三方许可或平台授权。
 
-更多说明见 [文档索引](docs/README.md)，增量机制与实测见 [增量刷新](docs/incremental-refresh.md)。
+更多说明见 [文档索引](docs/README.md)，增量机制与实测见 [增量刷新](docs/collector/acquisition/incremental-refresh.md)。

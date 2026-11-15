@@ -41,7 +41,7 @@ python -m processor once --config config/processor.toml
 python -m processor run --config config/processor.toml
 ```
 
-无需安装调试台或 Web 依赖。处理层使用官方 Pi SDK 原生会话循环、工具调用、自动压缩与重试；接口需支持 OpenAI 兼容流式 tool calling。运行环境与安装见 [Pi 运行时](pi-runtime.md)，附件依赖为 `processor/requirements.txt`。不自写模型轮询，不降级成关键词算法或伪造结果。
+无需安装调试台或 Web 依赖。处理层使用官方 Pi SDK 原生会话循环、工具调用、自动压缩与重试；接口需支持 OpenAI 兼容流式 tool calling。运行环境与安装见 [Pi 运行时](pi/README.md)，附件依赖为 `processor/requirements.txt`。不自写模型轮询，不降级成关键词算法或伪造结果。
 
 ## 模型与本地凭据
 
@@ -68,7 +68,7 @@ API 地址与模型名在 `config/processor.toml` 配置。凭据读取顺序为
 
 模型初始数据是 `timezone + conversations[].segments[].messages[] + attachments`。每条消息只提供 `id=m1`、时间、发送者、正文及附件短引用；附件只提供 `ref=f1`、名称、类型、可用状态等索引。**初始不注入附件正文或图片。**
 
-Pi 原生扩展提供：`read_attachment` 读取 PDF 页、DOCX 段落/表格、DOC 转换结果或图像；`find_related_tasks` 实时查询完整待办库；`submit_tasks` 提交最终结构化结果并结束循环。附件解析使用 PyMuPDF、python-docx、Pillow 和本机 LibreOffice，见 [附件上下文](attachment-context.md)。
+Pi 原生扩展提供：`read_attachment` 读取 PDF 页、DOCX 段落/表格、DOC 转换结果或图像；`find_related_tasks` 实时查询完整待办库；`submit_tasks` 提交最终结构化结果并结束循环。附件解析使用 PyMuPDF、python-docx、Pillow 和本机 LibreOffice，见 [附件上下文](../collector/compatibility/attachment-context.md)。
 
 模型通过 `sources:["m1","f1:p2"]` 指出依据。程序核对证据确实存在、附件确实读过，再映射回真实消息身份和附件位置。不能将不同会话的证据拼成一个任务。只读取判断任务所需的附件内容；允许跳过无关附件，也允许提交空任务。证据缺失或视觉不可用时在 `notes` 中保留具体说明，不冒充已核实，也不阻止有依据的任务入库。
 
@@ -149,7 +149,7 @@ result = run_round(config)                  # 配置模型后显式执行
 tasks = list_tasks(config, limit=20)
 ```
 
-用户操作通过公开的 `update_task_status` 更新正式状态，持久化请求 ID 和操作者，再复用任务 outbox 发布；该接口不调用模型。按钮、卡片和外部接入方优先使用消息层反馈队列，完整签名、去重和重试见 [操作反馈与状态回写](messaging.md#操作反馈与状态回写)。
+用户操作通过公开的 `update_task_status` 更新正式状态，持久化请求 ID 和操作者，再复用任务 outbox 发布；该接口不调用模型。按钮、卡片和外部接入方优先使用消息层反馈队列，完整签名、去重和重试见 [操作反馈与状态回写](../information/dispatch/contract.md#操作反馈与状态回写)。
 
 在 `tests/test_processor.py` 中使用合成消息和替换后的模型调用，不需要真实凭据。测试覆盖乱序/重复输入、跨批次关联、历史背景边界、消息来源、错误模型输出、规则重提取、迟到重组、超出最近 40 项的来源相关旧任务、输出失败恢复、空发送者及配置错误。
 
@@ -157,4 +157,4 @@ tasks = list_tasks(config, limit=20)
 python -m pytest tests/test_processor.py -q
 ```
 
-扩展时优先增加明确输出字段及校验，并同步测试、调试页面和本说明。不要让模型直接写采集库、执行文件、修改规则或发送通知。当前支持按工具请求读取附件正文和视觉图像，没有安装额外 OCR 引擎，消息层的通知与处理独立配置，见 [消息层](messaging.md)。模拟测试不能代替真实模型质量验收；服务需支持流式 tool calling，模型上下文容量与视觉能力应按服务实际情况配置。
+扩展时优先增加明确输出字段及校验，并同步测试、调试页面和本说明。不要让模型直接写采集库、执行文件、修改规则或发送通知。当前支持按工具请求读取附件正文和视觉图像，没有安装额外 OCR 引擎，消息层的通知与处理独立配置，见 [消息层](../information/dispatch/contract.md)。模拟测试不能代替真实模型质量验收；服务需支持流式 tool calling，模型上下文容量与视觉能力应按服务实际情况配置。

@@ -1,10 +1,10 @@
 # 开发指南
 
-架构重构任务先读 [目标架构与边界契约](architecture.md) 和 [Agent 分工与验收](architecture-agent-tasks.md)。下文描述当前实现；不能据此把 SQL 数据适配留在筛选层，或把附件解码放进 Pi 工具。
+架构重构任务先读 [目标架构与边界契约](../architecture/README.md) 和 [Agent 分工与验收](../architecture/agent-tasks.md)。下文描述当前实现；不能据此把 SQL 数据适配留在筛选层，或把附件解码放进 Pi 工具。
 
 本地项目分为采集、筛选、处理、消息四个逻辑阶段。消息层交付行动与材料、按优先级提醒，并通过公开 API 回写用户操作；`automation` 独立调度各层。调试台放在 `tools/console`，只是调用核心的可选入口。
 
-接入提供方请先阅读 [数据契约](data-contract.md)、[收集层开发指南](collector-development.md) 和 [AI 输入结构](ai-context.md)。全部专题见 [文档索引](README.md)。
+接入提供方请先阅读 [数据契约](../processor/input-contract.md)、[收集层开发指南](../collector/acquisition/development.md) 和 [AI 输入结构](../processor/ai-context.md)。全部专题见 [文档索引](../README.md)。
 
 ## 数据如何流动
 
@@ -32,20 +32,20 @@ flowchart LR
 | 修改 QQ / 微信读取 | `collector/adapters/`，保持原始数据库只读、时间窗和稳定身份 |
 | 附件归档 | `providers/platforms/assets.py`，只处理命中消息，保留路径白名单和完整性检查；原收集路径兼容转发 |
 | 去重和发布 | `collector/store.py`，事件与断点同事务，文件通过 outbox 发布 |
-| 修改优先级/任务规则 | `processing-rules/default.md`，具体处理合同见 [处理层](processing.md) |
+| 修改优先级/任务规则 | `processing-rules/default.md`，具体处理合同见 [处理层](../processor/processing.md) |
 | 模型与上下文配置 | `config/processor.toml`，密钥通过环境变量或本地 `.env` 读取 |
-| AI 循环与工具 | `processor/pi-runtime/`，使用 Pi 原生扩展注册工具，见 [Pi 运行时](pi-runtime.md) |
-| 附件按需读取 | `providers/attachments.py`，初始输入仅提供索引，见 [附件上下文](attachment-context.md) |
-| 消息与渠道 | `messaging/`，消费正式待办事件，输出统一行动包，见 [消息层](messaging.md) |
+| AI 循环与工具 | `processor/pi-runtime/`，使用 Pi 原生扩展注册工具，见 [Pi 运行时](../processor/pi/README.md) |
+| 附件按需读取 | `providers/attachments.py`，初始输入仅提供索引，见 [附件上下文](../collector/compatibility/attachment-context.md) |
+| 消息与渠道 | `messaging/`，消费正式待办事件，输出统一行动包，见 [消息层](../information/dispatch/contract.md) |
 | 状态反馈 | `messaging.feedback` 持久排队，`processor.update_task_status` 幂等更新；不要让渠道直接写上游 SQL |
-| 全链路调度 | `automation/`，使用 APScheduler、有上限的重试和独立状态，见 [自动运行](automation.md) |
-| 调试入口 | `tools/console/`，见 [处理调试台](console-processing.md)，核心不可反向依赖它 |
+| 全链路调度 | `automation/`，使用 APScheduler、有上限的重试和独立状态，见 [自动运行](../information/dispatch/automation.md) |
+| 调试入口 | `tools/console/`，见 [处理调试台](../processor/pi/console.md)，核心不可反向依赖它 |
 
 ## 运行与验证
 
 本机 Python 为 `C:\veighna_studio\python.exe`，QQ 原生 SQLCipher wheel 位于 `runtime-deps`。迁移时按根目录及 `processor/requirements.txt` 安装依赖，并配置自己的路径与账号。AI 处理还需要 Node ≥22.19，在 `processor/pi-runtime` 执行 `npm ci --ignore-scripts`；本机已安装项目私有 Node。不要把 credentials 或真实样本写进测试、Git 或报告。
 
-消息渠道和统一调度的可选依赖分别是 `messaging/requirements.txt`、`automation/requirements.txt`。新增渠道见 [渠道开发指南](channel-development.md)。本机配置可能已启用外部投递和自动任务，开发检查使用独立配置，不应擅自调用真实模型或渠道。
+消息渠道和统一调度的可选依赖分别是 `messaging/requirements.txt`、`automation/requirements.txt`。新增渠道见 [渠道开发指南](../information/channels/development.md)。本机配置可能已启用外部投递和自动任务，开发检查使用独立配置，不应擅自调用真实模型或渠道。
 
 ```powershell
 $env:PYTHONPATH = "$PWD/runtime-deps"
@@ -63,7 +63,7 @@ $env:PYTHONPATH = "$PWD/runtime-deps"
 
 改动数据库刷新时验证：WAL 新消息、原始 rowid/序列、空表、索引、失败保留旧快照以及临时文件清理。改动筛选时验证：时间边界、同会话隔离、上下文条数、命中规则来源及多规则去重。改动处理层时使用模拟模型测试重试、无效 JSON/虚构来源拒绝、跨批次上下文和同一事件重复输入；真实模型验收必须明确区分于模拟测试。
 
-性能测量应拆成捕获、解密/导出、索引、发布、筛选和附件。用同一冻结样本比较算法，再执行一轮真实采集验证整体耗时。不要为了追求秒数取消校验或把分段测量冒充端到端结果。详见 [性能优化](optimization.md)。
+性能测量应拆成捕获、解密/导出、索引、发布、筛选和附件。用同一冻结样本比较算法，再执行一轮真实采集验证整体耗时。不要为了追求秒数取消校验或把分段测量冒充端到端结果。详见 [性能优化](../collector/acquisition/optimization.md)。
 
 ## 运行边界
 

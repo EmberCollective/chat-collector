@@ -43,7 +43,7 @@
 
 `sources[].text` 保留被引用消息的原文，不由模型改写。飞书折叠来源区与本地面板按群名、发信人、时间、原文展示，原有换行保留。卡片中的原文总预算为 2000 字符，超过时明确提示查看 `来源原文.txt`；完整文本由消息层归档，并通过已有材料投递、下载和校验机制提供。预览不写文件；关闭文件发送时可在本地面板查看完整原文或下载。原文对外提供，内部数据库路径、凭据和未引用的聊天内容仍不进入行动包。
 
-外部 `envelope` 提供 `delivery_id` 与 `kind=upsert|reminder`；自动化故障通知使用 `kind=alert`，没有业务待办操作按钮。字段映射和回执示例见 [渠道契约](messaging-channels.md#外部工作流契约)。信息整理和渠道映射是确定性的，不额外建立 AI 信息处理层。
+外部 `envelope` 提供 `delivery_id` 与 `kind=upsert|reminder`；自动化故障通知使用 `kind=alert`，没有业务待办操作按钮。字段映射和回执示例见 [渠道契约](../channels/configuration.md#外部工作流契约)。信息整理和渠道映射是确定性的，不额外建立 AI 信息处理层。
 
 ## 材料生命周期
 
@@ -138,7 +138,7 @@ python -m messaging retry-feedback --request-id "反馈请求ID"
 
 飞书未完成卡片保留「完成待办」，将「稍后提醒」替换为「调整优先级」下拉菜单，选中 P0–P4 即提交。操作不调用模型；入队后由后台回写，再更新原卡片的级别、颜色和后续提醒。人工级别优先于后续 AI 对同一待办的判断。已完成卡片仍可恢复；不新增忽略或丢弃状态。不需要的事项可以使用完成停止提醒，但记录将显示为已完成。
 
-旧卡片的稍后提醒 token 和本地 snooze 接口保留兼容，避免已发卡片或已有队列突然失效；新卡片不再生成该入口。权限、群、消息、token 和修订仍须逐项校验。人工优先级公开接口见 [状态与优先级 API](task-status-api.md)。
+旧卡片的稍后提醒 token 和本地 snooze 接口保留兼容，避免已发卡片或已有队列突然失效；新卡片不再生成该入口。权限、群、消息、token 和修订仍须逐项校验。人工优先级公开接口见 [状态与优先级 API](../../processor/task-status-api.md)。
 
 ```python
 from messaging import load_config, preview, sync, run_round, status
@@ -157,8 +157,8 @@ package = task_package(config, task_id)
 
 `set_task_state` 仍保留为消息层本地覆盖的兼容接口；接入按钮或外部操作应使用 `request_task_action`。反馈功能显式关闭时，后者退回本地覆盖，不能据此声称正式待办状态已回写。
 
-可选面板提供 `/api/messaging/status`、`preview`、`sync`、`feedback`、`tasks/{id}/state` 与 `tasks/{id}/materials/{resource_id}`，以及只读 `/api/automation/status`、`check`。通道配置、合成测试发送、自动化启停和投递恢复由 `/api/operations/` 提供，见 [通道管理](messaging-management.md)。这些接口复用本机来源检查与 `X-Console-Token`；本地调试令牌不是适合公网部署的长期访问凭据。
+可选面板提供 `/api/messaging/status`、`preview`、`sync`、`feedback`、`tasks/{id}/state` 与 `tasks/{id}/materials/{resource_id}`，以及只读 `/api/automation/status`、`check`。通道配置、合成测试发送、自动化启停和投递恢复由 `/api/operations/` 提供，见 [通道管理](../channels/management.md)。这些接口复用本机来源检查与 `X-Console-Token`；本地调试令牌不是适合公网部署的长期访问凭据。
 
-扩展渠道优先注册 `kind="webhook"` 接 n8n 或已有模块，复用稳定契约；确需进程内插件时，在 `channels.deliver` 加显式分发与对应测试。接口、注册位置和验收要求见 [渠道开发指南](channel-development.md)。只有本地配置决定运行什么代码，消息正文不能选择插件。新增提供方无需修改处理规则、采集 SQL 或 Pi 工具。
+扩展渠道优先注册 `kind="webhook"` 接 n8n 或已有模块，复用稳定契约；确需进程内插件时，在 `channels.deliver` 加显式分发与对应测试。接口、注册位置和验收要求见 [渠道开发指南](../channels/development.md)。只有本地配置决定运行什么代码，消息正文不能选择插件。新增提供方无需修改处理规则、采集 SQL 或 Pi 工具。
 
 验证覆盖事件重复/乱序/冲突、来源状态库隔离、提醒间隔与完成状态、素材校验及存续、投递退避/未知结果恢复、真实 Notion SDK 的本地模拟响应。尚未配置的外部账户与 OAuth 工作流需另行联调。

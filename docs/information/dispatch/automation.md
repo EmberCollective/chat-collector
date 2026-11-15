@@ -79,7 +79,7 @@ python -m automation stop --config config/automation.toml
 
 ## 飞书长连接生命周期
 
-调试台新增自动化与通道管理入口，提供后台服务启停、各任务间隔、提醒频率、通道实例配置、运行状态和合成测试。配置保存使用版本检查；新增目标可单独启停，密钥仍只存本机环境变量或 `.env`。面板关闭不停止独立后台服务。公共管理接口与测试记录见 [通道配置与合成测试](messaging-management.md)。
+调试台新增自动化与通道管理入口，提供后台服务启停、各任务间隔、提醒频率、通道实例配置、运行状态和合成测试。配置保存使用版本检查；新增目标可单独启停，密钥仍只存本机环境变量或 `.env`。面板关闭不停止独立后台服务。公共管理接口与测试记录见 [通道配置与合成测试](../channels/management.md)。
 
 飞书首次配置完成后，先停止 `listen --setup` 连接检查进程，再启用消息层全局开关、目标和自动化的 listener，最后启动后台服务。后台从已启用的 `feishu_app` 目标选择应用，目标可以使用自定义 ID；同一应用下其他群目标按已保存的卡片 token 自动路由，并分别核对群与操作者。自动监听只支持一个应用，启用的目标属于不同应用时会明确拒绝启动并记录 `feishu_listener_multiple_apps_not_supported`；需要多应用时，关闭自动化 listener，为各应用单独启动 `python -m messaging.feishu listen --config config/messaging.toml --target 目标ID`。不要为同一应用的多个群重复启动连接。
 

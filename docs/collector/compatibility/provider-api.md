@@ -19,7 +19,7 @@ published = ingest_batch([event], "D:/opt/chat-collector/data/batches")
 
 内置筛选层使用 `selection.Store` 的事务与 outbox。没有必要先写 outbox 再调用这个入口；它用于外部提供方的完整事件发布。
 
-需要复用本项目 SQL 规则时，注册 `providers.query_registry.register_query_provider` 的快照工厂，由兼容层执行 SQL，`selection` 合并命中与发布。读取、附件和待办接口的实际边界见 [候选实现与迁移](architecture-implementation.md)。
+需要复用本项目 SQL 规则时，注册 `providers.query_registry.register_query_provider` 的快照工厂，由兼容层执行 SQL，`selection` 合并命中与发布。读取、附件和待办接口的实际边界见 [候选实现与迁移](../../architecture/implementation.md)。
 
 ## 注册附件准备函数
 
@@ -58,7 +58,7 @@ class MyProvider:
 
 ## 可运行的本地文件示例
 
-[local_file_provider.py](../examples/local_file_provider.py) 只从配置中查找附件编号，适合验证外部平台接入。创建自己的 `examples/provider.toml`：
+[local_file_provider.py](../../../examples/local_file_provider.py) 只从配置中查找附件编号，适合验证外部平台接入。创建自己的 `examples/provider.toml`：
 
 ```toml
 platform = "demo"
@@ -80,7 +80,7 @@ notice = "../data/assets/demo-notice.pdf"
 
 ## 平台事实与调度边界
 
-`message.extensions.<platform>` 保存私有字段，默认不进入 AI；`message.context_notes` 只放契约允许的简短事实，类型和长度见 [数据契约](data-contract.md)。人物仍由提供方查询，且只包含选中消息涉及的人。处理层只分配短引用，不补查新平台联系人。
+`message.extensions.<platform>` 保存私有字段，默认不进入 AI；`message.context_notes` 只放契约允许的简短事实，类型和长度见 [数据契约](../../processor/input-contract.md)。人物仍由提供方查询，且只包含选中消息涉及的人。处理层只分配短引用，不补查新平台联系人。
 
 外部提供方自行运行采集、筛选和日程；面板采集卡片只管理内置 QQ、微信，`input.refresh_collectors` 已停用，处理不隐式启动采集。附件注册不会执行定时扫描。外部消息可在通用处理预览中查看，任务来源仍保留平台、账号、会话和原消息证据。
 

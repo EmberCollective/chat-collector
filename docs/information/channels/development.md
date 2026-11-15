@@ -2,9 +2,9 @@
 
 渠道接收消息层整理好的待办包，负责映射外部平台、发送材料、返回回执，以及接收用户操作。渠道不调用模型、不读取聊天数据库、不修改采集或 SQL 规则，也不直接写处理层数据库。
 
-已有账号的配置见 [渠道配置](messaging-channels.md)；输入字段见 [消息层契约](messaging.md)；自动调度见 [自动运行](automation.md)。本指南说明如何接入一个新渠道。
+已有账号的配置见 [渠道配置](configuration.md)；输入字段见 [消息层契约](../dispatch/contract.md)；自动调度见 [自动运行](../dispatch/automation.md)。本指南说明如何接入一个新渠道。
 
-候选实现已通过 `processor.service` 读取变更和写回状态；回调只入队，提交后由自动化唤醒，完整路径与重试边界见 [架构实现](architecture-implementation.md#消息消费与回调)。不要连接正式任务数据库，也不要在渠道里新增提醒时间策略。
+候选实现已通过 `processor.service` 读取变更和写回状态；回调只入队，提交后由自动化唤醒，完整路径与重试边界见 [架构实现](../../architecture/implementation.md#消息消费与回调)。不要连接正式任务数据库，也不要在渠道里新增提醒时间策略。
 
 ## 选择接入路径
 
@@ -37,7 +37,7 @@ timeout_seconds = 30
 | `sync` | 新建、内容/材料变化、状态变化；适合资料库和日历 |
 | `notify`（默认） | 变更投递，加上 P0–P4 配置允许的周期提醒 |
 
-Webhook 的请求、回执示例见 [外部工作流契约](messaging-channels.md#外部工作流契约)。接收端应完成以下步骤：
+Webhook 的请求、回执示例见 [外部工作流契约](configuration.md#外部工作流契约)。接收端应完成以下步骤：
 
 1. 验证 Bearer token 和请求结构，按 `delivery_id` 查持久去重记录；并发重复请求也只能执行一次。
 2. 按目标实例和 `task_id` 查远程对象映射。`upsert` 更新已有对象；`reminder` 发送提醒，不重复创建页面或日程。
@@ -145,7 +145,7 @@ ack = enqueue_feedback(
 
 该函数验证结构、目标注册与事件去重，**不代替平台鉴权或操作者授权**。动作支持 `complete`、`reopen`、`cancel`、`snooze`、`set_priority`；最后一项需传 `priority="P0"`–`"P4"`。平台重复投递必须复用同一个稳定 `event_id`；同一按钮双击若代表同一次操作，也应使用同一操作标识。下拉选择须把选中级别纳入操作标识，且保留卡片的预期修订，防止旧卡片覆盖新值。`queued` 只表示已持久入队，不能立即提示正式待办已完成。
 
-独立反馈任务调用 `process_pending(config)`，通过处理层公开 API 回写，成功成为 `applied`；修订冲突不覆盖新状态。详见 [状态 API](task-status-api.md) 和 [反馈队列](messaging.md#操作反馈与状态回写)。此过程不调用模型。新平台的外部回调 HTTP 服务需要自行提供鉴权入口，项目没有通用匿名回写端点。
+独立反馈任务调用 `process_pending(config)`，通过处理层公开 API 回写，成功成为 `applied`；修订冲突不覆盖新状态。详见 [状态 API](../../processor/task-status-api.md) 和 [反馈队列](../dispatch/contract.md#操作反馈与状态回写)。此过程不调用模型。新平台的外部回调 HTTP 服务需要自行提供鉴权入口，项目没有通用匿名回写端点。
 
 ## 本地验证与上线
 

@@ -15,7 +15,7 @@
 | 附件提供方注册 | 已实现，`attachments.providers` 配置本地 `module:factory` 与配置文件 |
 | 附件按编号自动准备与读取 | 提供方定位和解码，共享 `providers/` 读取器解析，处理层保留证据映射 |
 
-提供方的数据库不需要具有相同表结构；需要一致的是交付契约。最小可运行接入见 [提供方接入](provider-api.md)。
+提供方的数据库不需要具有相同表结构；需要一致的是交付契约。最小可运行接入见 [提供方接入](../collector/compatibility/provider-api.md)。
 
 ## 事件信封
 
@@ -34,7 +34,7 @@
 | `matched_rules` | 实际命中的 SQL 注册项数组，不能只保留最后一个规则 |
 | `message` | 下述标准消息 |
 
-完整合成样本：[provider-event-v1.json](examples/provider-event-v1.json)。这是格式示例，不是可投递到真实目录的生产事件。
+完整合成样本：[provider-event-v1.json](../examples/provider-event-v1.json)。这是格式示例，不是可投递到真实目录的生产事件。
 
 `matched_rules` 每项包含 `file`、`params`、`recent_count`、`sql_sha256`。它表示本轮哪些 SQL 实际返回了该消息，不表示这条消息在历史每一轮曾命中过哪些规则。规则来源留在本地证据中，默认不注入 AI。
 
@@ -79,7 +79,7 @@
 
 ## 时间、连续性与触发消息
 
-各规则独立查询同一轮标准消息表，合并去重后交付；不先用一个规则消费掉其他规则的输入。详见 [SQL 规则](../FILTERS.md)。
+各规则独立查询同一轮标准消息表，合并去重后交付；不先用一个规则消费掉其他规则的输入。详见 [SQL 规则](../../FILTERS.md)。
 
 普通规则查询 `candidates`，仅包含本轮 `[start,end)` 消息。`context.sql` 查询含有限历史的 `messages`，以文件或全员提及为中心，保留同会话前后 N 条已知消息。新消息进入旧触发点的邻域时，可以再次选中整段；消息重复由事件层去重。
 
@@ -95,7 +95,7 @@
 
 AI 只使用本批 `f1` 等短引用调用 `read_attachment(ref,pages?,query?)`。当前链路为：验证归档 → 若缺失，调用采集适配器定位及归档/解码 → 公共解析器生成文本或图片 → Pi 原生工具内容。已有有效归档直接复用；定时采集的 `metadata` 强度不阻止这次显式读取。主动关闭附件归档仍被尊重。
 
-提供方实现 `prepare_attachment(event,index)`，返回同一附件的标准归档信息。`providers/attachments.py` 和隔离读取进程负责确定性文件读取；处理层只消费工具结果、校验证据并映射来源。内置实现位于 `providers/platforms/attachments.py`，定位、解码与归档由同目录 `assets.py` 负责；原 `collector/attachment_provider.py`、`collector/assets.py` 保留兼容导入。新平台通过本地注册表接入，不需要修改处理核心。当前格式支持、页码、失败状态与限额以 [附件读取](attachment-context.md) 为准。
+提供方实现 `prepare_attachment(event,index)`，返回同一附件的标准归档信息。`providers/attachments.py` 和隔离读取进程负责确定性文件读取；处理层只消费工具结果、校验证据并映射来源。内置实现位于 `providers/platforms/attachments.py`，定位、解码与归档由同目录 `assets.py` 负责；原 `collector/attachment_provider.py`、`collector/assets.py` 保留兼容导入。新平台通过本地注册表接入，不需要修改处理核心。当前格式支持、页码、失败状态与限额以 [附件读取](../collector/compatibility/attachment-context.md) 为准。
 
 找不到本地文件、格式不支持、名称关联不明确、解码失败均返回明确状态；不伪造空文件内容，不要求 AI 读完所有附件，不影响其他会话结果。
 
@@ -114,6 +114,6 @@ AI 只使用本批 `f1` 等短引用调用 `read_attachment(ref,pages?,query?)`�
 5. 旧 v1 批次没有 `identity` 仍可读取，但人物名称显示缺失；重新预览或显式重放才能由提供方补齐，不能直接改写旧 JSONL。
 6. 新增可选字段保持 v1 兼容；改变身份或事件语义需要新主版本与迁移器。当前不自动接受所谓 v2 批次。消息稳定 ID 不能因补昵称、换目录或展示方式变化而重建。
 
-`contracts.validate_event` 校验核心身份、时间、修订、窗口、附件结构、人物范围和账户一致性、全员提及布尔值及事实入口。为兼容旧 v1，缺少可选身份或消息类型仍允许读取；提供这些字段时必须合法。扩展命名空间内部由各提供方验证，公共验证器不解释平台私有语义。开发验收见 [收集层开发指南](collector-development.md)。
+`contracts.validate_event` 校验核心身份、时间、修订、窗口、附件结构、人物范围和账户一致性、全员提及布尔值及事实入口。为兼容旧 v1，缺少可选身份或消息类型仍允许读取；提供这些字段时必须合法。扩展命名空间内部由各提供方验证，公共验证器不解释平台私有语义。开发验收见 [收集层开发指南](../collector/acquisition/development.md)。
 
 公开发布接口按完整批次内容生成文件名，相同批次重试不会新建文件；不同批次重复携带同一事件仍由处理层事件去重。它不替提供方生成消息 ID/修订，不推进采集断点；内置采集器继续使用已有事务 outbox。

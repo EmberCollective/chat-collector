@@ -1,10 +1,10 @@
 # 架构重构：Agent 分工与验收
 
-本文件与 [目标架构](architecture.md) 配套，固定任务分工和禁止偏移的边界。用户已批准候选实施；进展与实际入口见 [候选实现与迁移](architecture-implementation.md)。后续任务仍按依赖分阶段派发，不让每个 Agent 各自重构整条链路。
+本文件与 [目标架构](README.md) 配套，固定任务分工和禁止偏移的边界。用户已批准候选实施；进展与实际入口见 [候选实现与迁移](implementation.md)。后续任务仍按依赖分阶段派发，不让每个 Agent 各自重构整条链路。
 
 ## 每个 Agent 必须先读
 
-1. [目标架构](architecture.md) 的 B01–B13、数据所有权、相关接口和最终验收。
+1. [目标架构](README.md) 的 B01–B13、数据所有权、相关接口和最终验收。
 2. 本文自己的任务卡及其前置任务交付。
 3. 涉及文件的当前代码、调用方、配置和测试；记录当前 Git SHA、已有未提交修改和自己的文件范围。
 
@@ -215,7 +215,7 @@
 执行架构任务 A__，本次已授权的范围为：____。
 子 Agent 必须使用 gpt-6.1-sol，reasoning_effort=high；不使用 gpt-6-astra。
 工作目录：D:/opt/chat-collector；此次派发不继承聊天历史，必要上下文为：____。
-先读 docs/architecture.md 和 docs/architecture-agent-tasks.md 对应任务卡。
+先读 docs/architecture/README.md 和 docs/architecture/agent-tasks.md 对应任务卡。
 基线与已存在修改：____；允许修改的文件：____；前置交付：____。
 目标遵守 B01–B13，特别是 SQL 的适配/临时表/执行归兼容层，
 Pi 工具只通过兼容接口索取附件内容，不定位、解码或解析。
