@@ -21,6 +21,7 @@
 #view-overview .schedule-entry>.schedule-source{display:flex;align-items:center;gap:8px;flex-wrap:wrap;text-align:left}
 #view-overview .schedule-entry.is-running{background:var(--soft);box-shadow:-3px 0 var(--green);border-radius:4px}
 #view-overview .schedule-source .text-button{font-weight:600;min-height:0;padding:0}
+#view-overview .schedule-entry .schedule-recovery{display:block;min-height:0;padding:0;margin-left:auto;color:var(--warn)}
 #view-overview .schedule-source .pill{font-size:0.785714rem}
 #view-overview .schedule-elapsed{display:block;font-weight:600;font-variant-numeric:tabular-nums;color:var(--green);white-space:nowrap}
 #view-overview .schedule-entry time{display:block;font-variant-numeric:tabular-nums;white-space:nowrap}

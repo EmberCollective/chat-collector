@@ -394,7 +394,7 @@ class Overview:
                     if item['enabled'] and (item['error'] or item['state'] in {'paused', 'retry'}):
                         run = next((run for run in automatic if run['id'] == item['current_run_id']), None)
                         issues.append(_issue('job', module, source_id=source_id, run=run,
-                                             error=item['error'] or item['state'], last_at=item['last_start']))
+                                             error=item['error'] or item['state'], last_at=item['last_start'], status=item['state']))
                 if live.get('config_changed'):
                     issues.append(_issue('config', 'automation', error='config_changed'))
                 if live.get('enabled') and live.get('state') in {'stopped', 'unknown', 'duplicate'}:
@@ -480,6 +480,9 @@ class Overview:
             label = bridge.sources.get(issue['source_id'], {}).get('name') or {
                 'processor': '待办处理', 'messaging': '消息投递', 'feedback': '状态回写', 'automation': '后台服务'}.get(issue['module'], issue['module'])
             issue['title'] = label + '：' + ('投递结果待核对' if issue['next_action'] == 'verify_delivery' else '需要检查运行记录')
+            if issue['kind'] == 'job' and issue['status'] == 'paused':
+                issue['title'] = label + ('采集已暂停' if issue['source_id'] else '已暂停')
+                issue.update(next_action='open_config', next_action_label='连续失败后已暂停，不会自动继续。前往自动化中的对应任务，修复故障后点击“已解决，恢复重试”。')
             issue['severity'] = 'warning' if issue['status'] == 'unknown' or issue['kind'] in {'service', 'config'} else 'error'
         resources = self.storage.measure(specs, sources)
         for row in resources['sources']:

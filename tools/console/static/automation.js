@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     for(const key of ['max_attempts','backoff_seconds','max_backoff_seconds'])field(advanced,settings,key,'integer',{max:key==='max_attempts'?20:86400});
     const actions=node('div',null,'row wrap');section.append(actions);
     button(actions,'运行一轮',()=>operate('/jobs/'+encodeURIComponent(name)+'/once','已请求运行一轮；结果以运行记录为准。'));
-    button(actions,'恢复重试',()=>operate('/jobs/'+encodeURIComponent(name)+'/resume','已提交恢复重试。'));
+    button(actions,'已解决，恢复重试',()=>operate('/jobs/'+encodeURIComponent(name)+'/resume',(jobNames[name]||name)+'已解除暂停，等待下一轮运行结果。'));
   }
   function jobRow(parent,name,note) {
     const settings=config.automation.jobs[name],row=node('div',null,'automation-task-row'),main=node('div');row.dataset.job=name;parent.append(row);row.append(main);
@@ -193,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const [settings,catalog,sources] = await Promise.all([request('/config'),request('/catalog'),request('/catalog',{},'/api')]);
     config=settings;jobCatalog=catalog.jobs;sourceDescriptions=sources.sources;
     for(const [name,description]of Object.entries(jobCatalog))jobNames[name]=description.name;
-    renderConfig(); dirty = false; notice('设置已加载 · 未修改', false);
+    renderConfig(); dirty = false; notice('设置已加载 · 未修改', false);focusJob();
   }
   async function saveConfig(payload) {
     if (!config) throw Error('请先重新加载设置。');
@@ -324,7 +324,17 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('operations-updated',refreshStatus);
   window.addEventListener('beforeunload', event => {if (dirty) {event.preventDefault(); event.returnValue = '';}});
   let initialized=false;
-  function enterAutomation(){if(document.hidden||document.getElementById('view-automation').hidden)return;if(!initialized){initialized=true;action(loadConfig);refreshStartup();}refreshStatus();}
+  function focusJob(){
+    if(document.getElementById('view-automation').hidden)return;
+    for(const section of document.querySelectorAll('.automation-job-focus'))section.classList.remove('automation-job-focus');
+    const target=location.hash.slice(1).split('/')[2];if(!target)return;
+    let name;try{name=decodeURIComponent(target);}catch{notice('任务链接无效，请在当前自动化设置中选择任务。',false);return;}
+    const section=[...document.querySelectorAll('.automation-job-extra[data-job]')].find(section=>section.dataset.job===name);
+    if(!section){notice('该任务已移除或未关联自动化计划，请核对当前设置。',false);return;}
+    for(let parent=section.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+    activatePanel(section.closest('[role=tabpanel]').id);section.classList.add('automation-job-focus');section.tabIndex=-1;section.focus({preventScroll:true});section.scrollIntoView({block:'center'});
+  }
+  function enterAutomation(event){if(document.hidden||document.getElementById('view-automation').hidden)return;if(!initialized){initialized=true;action(loadConfig);refreshStartup();}else if(config&&event?.type==='hashchange')focusJob();refreshStatus();}
   window.addEventListener('hashchange',enterAutomation);document.addEventListener('visibilitychange',enterAutomation);enterAutomation();
   setInterval(()=>{if(!document.hidden&&!document.getElementById('view-automation').hidden)refreshStatus();},5000);
   setInterval(()=>{if(!document.hidden&&!document.getElementById('view-automation').hidden)countdowns();},1000);

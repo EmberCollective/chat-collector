@@ -29,6 +29,7 @@
 #view-automation .automation-policy-grid .settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 #view-automation .automation-boundary{line-height:1.6}#ops-status-error:empty{display:none}#ops-status-error{font-size:0.928571rem;color:#a43b32;margin:12px 0}
 #ops-action-notice:empty{display:none}#view-automation .automation-service-diagnostics{margin:0 0 0 auto}#view-automation .automation-service-diagnostics>summary{cursor:pointer;padding:0;min-height:24px}#view-automation .automation-service-diagnostics[open]{flex-basis:100%;margin-left:0}#ops-jobs{overflow-x:auto}#ops-jobs .scope{margin:12px 0}
+#view-automation .automation-job-focus{outline:2px solid var(--green);outline-offset:8px;border-radius:4px;scroll-margin-block:24px}
 #automation-rules{margin-bottom:20px}#automation-rules-slot{padding:20px}#automation-rules-slot #rulesets-editor{margin:0}#automation-rules-slot .rule-card{padding:12px 0}#automation-rules-slot :is(p,small,summary,button){font-size:0.928571rem}
 #ops-target-dialog{padding:20px;width:min(640px,calc(100% - 32px));max-height:88dvh}#ops-target-dialog .settings-grid{grid-template-columns:1fr 1fr}
 #view-automation .automation-savebar strong{overflow-wrap:anywhere}#view-automation .automation-status[data-state=stopped] .badge{color:var(--muted)}

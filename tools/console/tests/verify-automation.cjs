@@ -89,7 +89,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
   await page.locator('#ops-source-advanced').locator('..').locator('summary').first().click();
   const extra=page.locator('#ops-source-advanced [data-job="wechat"]');
   await extra.getByRole('button',{name:'运行一轮',exact:true}).click();
-  await extra.getByRole('button',{name:'恢复重试',exact:true}).click();
+  await extra.getByRole('button',{name:'已解决，恢复重试',exact:true}).click();
   await page.waitForFunction(()=>!document.getElementById('ops-save').disabled);
   assert.ok(posts.some(post=>post.path==='/api/operations/jobs/wechat/once'));assert.ok(posts.some(post=>post.path==='/api/operations/jobs/wechat/resume'));
   await page.locator('#tab-automation-background').click();

@@ -142,6 +142,31 @@ def test_retention_cap_marks_window_truncation_and_does_not_claim_all_history(co
     assert data['coverage']['automation']['status'] == 'retained_only'
 
 
+def test_paused_issue_names_source_and_preserves_automation_job_identity(console, monkeypatch):
+    from automation import SchedulerService, control, status
+    client, app, root, now = console
+    cfg = automation_config(app, root)
+    cfg['jobs']['wechat']['max_attempts'] = 1
+    source = app.state.bridge.sources.pop('wechat')
+    source.update(id='work-chat', name='工作微信')
+    app.state.bridge.sources['work-chat'] = source
+    app.state.bridge.paths['work-chat'] = app.state.bridge.paths.pop('wechat')
+    def fail():
+        raise RuntimeError('PRIVATE_DECODE_DETAILS')
+    SchedulerService(cfg, callbacks={'wechat': fail}, clock=lambda: now - 20).execute('wechat')
+    monkeypatch.setattr(control, 'status', lambda cfg: {'enabled': True, 'state': 'running', 'running': True,
+        'verified': True, 'jobs': status(cfg)['jobs']})
+    data = client.get('/api/overview').json()
+    issue = next(issue for issue in data['issues'] if issue['source_id'] == 'work-chat')
+    assert issue['module'] == 'wechat' and issue['status'] == 'paused'
+    assert issue['title'] == '工作微信采集已暂停'
+    assert issue['next_action'] == 'open_config'
+    assert '不会自动继续' in issue['next_action_label'] and '恢复重试' in issue['next_action_label']
+    assert issue['detail_target']['kind'] == 'run'
+    assert 'PRIVATE_DECODE_DETAILS' not in json.dumps(data)
+    assert next(job for job in status(cfg)['jobs'] if job['name'] == 'wechat')['state'] == 'paused'
+
+
 def test_replay_does_not_recover_formal_failure_and_no_finish_unknown_is_visible(console):
     client, app, _, now = console
     save_job(app, '1' * 32, 'wechat', now - 100, valid())
