@@ -90,3 +90,40 @@ def test_state_action_queues_feedback_without_claiming_completion(console):
     assert response.status_code == 200 and response.json()['status'] == 'queued'
     assert client.get('/api/messaging/feedback').json()['counts']['queued'] == 1
     assert client.get('/api/messaging/preview').json()['tasks'][0]['status'] == 'open'
+
+
+def test_schedule_and_digest_are_authenticated_read_only_and_bounded(console):
+    client, root = setup(console)
+    result = client.get('/api/messaging/schedule').json()
+    assert result['total_tasks'] == 1 and result['runtime']['state'] == 'unknown'
+    assert result['tasks'][0]['task_id'] == 't1'
+    assert 'resources' not in result['tasks'][0] and 'sources' not in result['tasks'][0]
+    assert client.get('/api/messaging/digest').json()['targets'] == []
+    assert not (root/'delivery/state.db').exists()
+    for url in ['/api/messaging/schedule', '/api/messaging/digest', '/api/messaging/tasks/t1']:
+        assert client.get(url, headers={'X-Console-Token':'invalid'}).status_code == 401
+    assert client.get('/api/messaging/schedule?limit=201').status_code == 422
+    assert client.get('/api/messaging/schedule?offset=-1').status_code == 422
+    assert client.get('/api/messaging/schedule?state=invalid').status_code == 422
+    assert client.get('/api/messaging/digest?date=2026-02-30').status_code == 400
+    assert client.get('/api/messaging/digest?target_id=missing').status_code == 400
+    task = client.get('/api/messaging/tasks/t1').json()
+    assert task['delivery_plan']['task_id'] == 't1' and task['action_steps']
+    assert not (root/'delivery/state.db').exists()
+
+
+def test_schedule_does_not_predict_runtime_from_unapplied_configuration(console, monkeypatch):
+    from automation import control
+    client, root = setup(console)
+    path = root/'automation.toml'
+    path.write_text('enabled=true\n[jobs.messaging]\nenabled=true\nconfig="messaging.toml"\ninterval_seconds=5\n', encoding='utf8')
+    console[1].state.bridge.settings['automation_config'] = str(path)
+    live = {'state': 'running', 'config_changed': False,
+            'jobs': [{'name': 'messaging', 'state': 'idle', 'next_run': 12345}]}
+    monkeypatch.setattr(control, 'status', lambda cfg: live)
+    assert client.get('/api/messaging/schedule').json()['runtime'] == {
+        'state': 'running', 'interval_seconds': 5, 'next_check_at': 12345}
+    live['config_changed'] = True
+    assert client.get('/api/messaging/schedule').json()['runtime'] == {
+        'state': 'config_changed', 'interval_seconds': 5, 'next_check_at': None}
+    assert not (root/'delivery/state.db').exists()

@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const labels = {enabled: '启用', interval_seconds: '间隔（秒）', max_attempts: '失败尝试上限', backoff_seconds: '首次重试等待（秒）', max_backoff_seconds: '最长重试等待（秒）', retry_base_seconds: '重试等待基数（秒）', max_deliveries_per_round: '每轮最多投递数', timeout_seconds: '请求超时（秒）', app_id_env: '应用 ID 环境变量名', app_secret_env: '应用密钥环境变量名', recipient_id: '目标群 chat_id', receive_id_type: '目标类型', allowed_operator_ids: '可操作人员 open_id（每行一个）', snooze_seconds: '稍后提醒等待（秒）', upload_files: '上传本地附件', max_file_bytes: '附件上传上限（字节）', url_env: 'Webhook 地址环境变量名', secret_env: '签名密钥环境变量名（可空）', token_env: '访问令牌环境变量名', data_source_id: 'Notion 数据源 ID', mode: '投递模式', purpose: '用途说明', title: '标题', task_id: '待办编号', priority: '优先级', status: '状态', date: '日期', instructions: '行动说明', files: '附件'};
   let config = null, dirty = false, busy = false, polling = false;
   let controls = [];
-  const notice = (text, service = true) => {byId('notice').textContent = text; byId('action-notice').textContent = service ? text : '';if(byId('target-dialog').open)byId('add-error').textContent=text;};
+  const notice = (text, service = true) => {byId('notice').textContent = text; byId('action-notice').textContent = service ? text : '';if(byId('target-dialog').open)byId('add-error').textContent=text;if(!document.getElementById('view-delivery').hidden)document.getElementById('delivery-recovery-notice').textContent=text;};
   const markDirty = () => {dirty = true; notice('有未保存的设置。运行控制与测试使用已保存的配置。', false);};
   async function request(path, options = {}, base = '/api/operations') {
     const session = await window.consoleSession();
@@ -283,8 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
   async function refreshStatus() {
     if (polling) return;
     polling = true;
-    try {renderStatus(await request('/status')); byId('status-error').textContent = '';}
-    catch (error) {byId('status-error').textContent = '状态刷新失败：' + error.message + '（稍后自动重试，未保存设置不受影响）';}
+    try {renderStatus(await request('/status')); byId('status-error').textContent = '';document.getElementById('delivery-recovery-notice').textContent='';}
+    catch (error) {byId('status-error').textContent = '状态刷新失败：' + error.message + '（稍后自动重试，未保存设置不受影响）';if(!document.getElementById('view-delivery').hidden)document.getElementById('delivery-recovery-notice').textContent='恢复记录读取失败：'+error.message+'。收起后重新展开可重试。';}
     finally {polling = false;}
   }
   function renderStartup(value) {
@@ -322,6 +322,7 @@ document.addEventListener('DOMContentLoaded', () => {
   byId('close-add').addEventListener('click',()=>byId('target-dialog').close());
   byId('close-rules').addEventListener('click',()=>{document.getElementById('automation-rules').hidden=true;});
   window.addEventListener('operations-updated',refreshStatus);
+  window.addEventListener('delivery-recovery-request',refreshStatus);
   window.addEventListener('beforeunload', event => {if (dirty) {event.preventDefault(); event.returnValue = '';}});
   let initialized=false;
   function focusJob(){

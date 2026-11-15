@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>行动与投递 · 拾序 · 静态草稿</title>
+<style>
+/* Builds on the approved console. Unslop by Damir Sokolovsky, CC BY 4.0. */
+:root{color-scheme:light;--ink:#24332e;--muted:#68756e;--line:#e0e6e2;--green:#12634f;--wash:#f7f8f7;--soft:#f1f3f2;--warn:#865b16;--error:#a43b32;font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-synthesis:none}
+*{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink)}button,input,select{font:inherit}button,a,input,select,summary{outline-offset:3px}:focus-visible{outline:2px solid var(--green)}a{color:var(--green);text-underline-offset:3px}button{cursor:pointer}button:disabled{cursor:default}h1,h2,h3,p{margin:0}h1{font-size:1.85rem;font-weight:600}h2{font-size:1.14rem;font-weight:600}h3{font-size:1rem;font-weight:600}small,.small{font-size:.86rem}.muted{color:var(--muted)}.number,time{font-variant-numeric:tabular-nums}.icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}.defs,.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}[hidden]{display:none!important}.skip{position:fixed;top:-60px;left:16px;z-index:10;background:#fff;padding:8px 16px}.skip:focus{top:8px}
+.sidebar{width:224px;position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;padding:24px 16px 16px;background:#f0f3f0;border-right:1px solid var(--line)}.brand{display:flex;gap:12px;padding:0 8px 28px;color:var(--ink);text-decoration:none;align-items:center}.brand svg{width:36px;height:36px;flex:none}.brand strong{font-size:1rem;font-weight:600}.brand small{display:block;font-size:10px;color:var(--muted)}.nav-label{font-size:11px;color:var(--muted);margin:0 12px 8px}.sidebar nav{display:grid;gap:4px;margin-bottom:28px}.sidebar nav a{display:flex;align-items:center;gap:12px;min-height:36px;padding:0 12px;border:1px solid transparent;border-radius:7px;text-decoration:none;color:#52615a;font-size:13px}.sidebar a[aria-current]{background:#fff;border-color:#dce4de;color:var(--green);font-weight:600}.sidebar-foot{margin-top:auto;border-top:1px solid var(--line);padding:16px 8px 0;font-size:11px;color:var(--muted)}.app{margin-left:224px;min-height:100dvh;display:flex;flex-direction:column}.topbar{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 32px;background:#fff;border-bottom:1px solid var(--line);font-size:.9rem}.topbar strong{font-weight:500}.preview-tag{color:var(--warn);white-space:nowrap;font-size:.85rem}.mobile-brand{display:none}.topbar-title{display:flex;align-items:center;gap:12px}main{padding:28px 32px 40px;width:100%;flex:1}.page-heading{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:24px}.page-heading p{margin-top:4px;color:var(--muted)}.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);text-decoration:none;font-weight:500}.btn:hover{background:var(--soft)}.btn.primary{background:var(--green);border-color:var(--green);color:#fff}.text-btn{padding:0;border:0;background:none;color:var(--green);text-align:left;font-weight:500}.text-btn:hover{text-decoration:underline;text-underline-offset:3px}.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:8px}.tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin-bottom:24px}.tabs button{background:transparent;border:0;border-bottom:2px solid transparent;padding:0 0 12px;color:var(--muted);font-weight:500}.tabs button[aria-selected=true]{color:var(--green);border-bottom-color:var(--green)}.statusline{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;font-size:.86rem}.issue-strip{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid #eadfce;border-radius:8px;background:#fcf8f0;padding:12px 16px;margin-bottom:20px}.issue-strip strong{font-weight:500;color:var(--warn)}.issue-strip .text-btn{color:var(--warn);white-space:nowrap}.panel{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;border-bottom:1px solid var(--line)}.panel-head p{margin-top:4px;font-size:.86rem;color:var(--muted)}.filters{display:flex;align-items:end;gap:12px;padding:16px 24px;border-bottom:1px solid var(--line)}label{display:grid;gap:4px;font-size:.86rem;color:var(--muted)}input,select{background:#fff;color:var(--ink);border:1px solid #cbd5ce;border-radius:8px;min-height:36px;padding:6px 12px;min-width:0;width:100%}.search{flex:1;max-width:440px}.select-filter{min-width:144px}.count{margin-left:auto;align-self:center;white-space:nowrap;font-size:.86rem;color:var(--muted)}table{border-collapse:collapse;width:100%;table-layout:fixed}th{text-align:left;font-size:.79rem;font-weight:500;color:var(--muted);padding:12px 24px;background:#fafbf9;border-bottom:1px solid var(--line)}td{padding:20px 24px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#fafcfb}th:nth-child(1){width:34%}th:nth-child(2){width:21%}th:nth-child(3){width:26%}th:nth-child(4){width:19%}.task-title{font-weight:500;line-height:1.6;color:var(--ink);border:0;background:transparent;padding:0;text-align:left}.task-title:hover{color:var(--green);text-decoration:underline;text-underline-offset:3px}.task-top{display:flex;align-items:baseline;gap:8px}.priority{flex:none;font-size:.72rem;padding:0 6px;border:1px solid var(--line);border-radius:4px;color:#52615a;line-height:1.6}.priority.high{color:var(--error);border-color:#ead5d1;background:#fcf5f3}.sub{display:block;margin-top:4px;color:var(--muted);font-size:.79rem}.eta{color:var(--green);font-weight:500;display:block}.eta.warn{color:var(--warn)}.eta.error{color:var(--error)}.date{white-space:nowrap}.badge{display:inline-flex;align-items:center;gap:6px;font-size:.79rem;color:#52615a;padding:0 8px;background:var(--soft);border-radius:4px;white-space:nowrap}.badge.green{color:var(--green);background:#edf5f0}.badge.warn{color:var(--warn);background:#faf3e5}.badge.error{color:var(--error);background:#fbefed}.table-foot{border-top:1px solid var(--line);padding:12px 24px;font-size:.79rem;color:var(--muted)}.empty{padding:48px 24px;text-align:center}.empty h3{margin-bottom:8px}.empty button{margin-top:16px}.source-note{padding-top:16px;font-size:.79rem;color:var(--muted)}
+.digest-grid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(0,2.1fr);gap:24px;align-items:start}.digest-controls{padding:24px}.digest-controls h2{margin-bottom:20px}.digest-controls label{margin-bottom:16px}.schedule-time{font-size:2.3rem;font-weight:500;line-height:1.2;margin:20px 0 4px}.schedule-time span{font-size:.9rem;color:var(--muted);font-weight:400}.schedule-caption{font-size:.86rem;color:var(--green);margin-bottom:20px}.definition-list{display:grid;grid-template-columns:auto 1fr;gap:12px 16px;margin:0;font-size:.86rem}.definition-list dt{color:var(--muted)}.definition-list dd{margin:0;text-align:right}.side-note{border-top:1px solid var(--line);padding-top:16px;margin-top:20px;color:var(--muted);font-size:.79rem}.digest-preview-head{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px}.digest-preview-head p{font-size:.79rem;color:var(--muted);margin-top:4px}.message-surface{background:#f1f3f2;padding:24px}.message-card{max-width:840px;margin:auto;background:white;border:1px solid #d7e0da;border-radius:8px;overflow:hidden}.message-heading{padding:20px 24px;background:#edf4ef;border-left:4px solid var(--green)}.message-heading p{font-size:.79rem;color:#52615a;margin-top:4px}.message-body{padding:20px 24px}.message-intro{font-size:.86rem;margin-bottom:8px;color:var(--muted)}.digest-item{padding:16px 0;border-bottom:1px solid var(--line)}.digest-item:last-child{border-bottom:0;padding-bottom:0}.digest-item-head{display:flex;gap:8px;align-items:baseline}.digest-item-head .text-btn{color:var(--ink)}.times{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px 34px}.time-chip{font-size:.86rem;background:#f3f5f3;padding:2px 8px;border-radius:4px;font-variant-numeric:tabular-nums}.digest-item .sub{margin-left:34px}.message-notes{border-top:1px solid var(--line);padding:12px 24px;font-size:.79rem;color:var(--muted)}.digest-excluded{padding:16px 24px;font-size:.86rem}.digest-excluded summary{cursor:pointer;color:var(--muted)}.digest-excluded ul{padding-left:20px;margin:12px 0 0}.digest-excluded li{margin:8px 0}.exclusion-empty{margin-top:12px;color:var(--muted)}.preview-scope{padding:16px 24px 20px;border-top:1px solid var(--line);color:var(--muted);font-size:.79rem}
+dialog{width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;border:1px solid var(--line);border-radius:12px;color:var(--ink);background:white}dialog::backdrop{background:rgba(24,38,30,.38)}.dialog-head{position:sticky;top:0;background:#fff;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:20px 24px;border-bottom:1px solid var(--line);z-index:1}.dialog-head p{margin-top:4px}.dialog-body{padding:24px}.detail-summary{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px}.detail-summary dt{font-size:.79rem;color:var(--muted);margin-bottom:4px}.detail-summary dd{margin:0}.detail-section{border-top:1px solid var(--line);padding-top:20px;margin-top:24px}.detail-section h3{margin-bottom:12px}.target-plan{padding:16px 0;border-bottom:1px solid var(--line)}.target-plan:last-child{border-bottom:0;padding-bottom:0}.target-plan-head{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:4px}.target-plan-head strong{font-weight:500}.target-plan p{font-size:.86rem}.timeline{list-style:none;margin:0;padding:0}.timeline li{display:grid;grid-template-columns:140px 1fr;gap:16px;position:relative;padding:0 0 20px 20px;border-left:1px solid #d6dfd9;margin-left:4px;font-size:.86rem}.timeline li:last-child{padding-bottom:0;border-color:transparent}.timeline li:before{content:"";position:absolute;width:7px;height:7px;background:#c6d0c9;border:3px solid #fff;box-sizing:content-box;left:-7px;top:3px;border-radius:50%}.timeline li.next:before{background:var(--green)}.timeline li.next{color:var(--green)}.timeline li.covered{color:var(--muted)}.timeline small{display:block;color:var(--muted)}.detail-section details{margin-top:12px;font-size:.86rem}.detail-section summary{cursor:pointer}.detail-section ol{padding-left:20px}.evidence{margin-top:12px;border-left:2px solid #cbd7cf;padding:8px 16px;background:#f7f9f7;color:#52615a}.dialog-footer{border-top:1px solid var(--line);padding:16px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;font-size:.79rem;color:var(--muted)}.rules-table{table-layout:auto;margin:16px 0}.rules-table th,.rules-table td{padding:10px 12px;width:auto}.rules-copy p{margin-bottom:12px}.rule-callout{padding:12px 16px;background:#f3f7f3;border-radius:8px;margin-bottom:20px}.footer{padding:8px 32px;border-top:1px solid var(--line);font-size:.79rem;color:var(--muted);background:#fff;display:flex;justify-content:space-between;gap:16px}
+@media(min-width:1920px){:root{font-size:16px}.sidebar{width:256px}.app{margin-left:256px}.brand strong{font-size:16px}.brand small,.sidebar-foot{font-size:12px}.sidebar nav a{font-size:15px;min-height:40px}.nav-label{font-size:12px}main{padding:32px 40px 48px}.topbar,.footer{padding-left:40px;padding-right:40px}.digest-grid{grid-template-columns:minmax(300px,.8fr) minmax(0,2.2fr)}th:nth-child(1){width:38%}th:nth-child(2){width:20%}th:nth-child(3){width:24%}th:nth-child(4){width:18%}}
+@media(max-width:1150px){td,th{padding-left:16px;padding-right:16px}.digest-grid{grid-template-columns:minmax(240px,.9fr) minmax(0,1.6fr)}.filters{flex-wrap:wrap}.search{max-width:none;min-width:240px}.count{display:none}.page-heading{align-items:flex-start}.page-heading>.btn{flex:none}.sidebar{width:200px;padding-left:12px;padding-right:12px}.app{margin-left:200px}.brand{gap:8px;padding-left:4px;padding-right:0}.brand strong{font-size:13px}.brand small{font-size:9px}main{padding:24px}.topbar{padding:12px 24px}.panel-head,.filters{padding-left:20px;padding-right:20px}}
+@media(max-width:1100px){#tasks-view table,#tasks-view thead,#tasks-view tbody,#tasks-view tr,#tasks-view td{display:block;width:100%}#tasks-view thead{display:none}#tasks-view tr{padding:16px;border-bottom:1px solid var(--line)}#tasks-view tbody tr:last-child{border-bottom:0}#tasks-view td{border:0;padding:0;margin:0 0 12px;display:grid;grid-template-columns:84px minmax(0,1fr);gap:8px}#tasks-view td:first-child{display:block}#tasks-view td:last-child{margin-bottom:0}#tasks-view td:before{content:attr(data-label);font-size:12px;color:var(--muted)}#tasks-view td:first-child:before{display:none}}
+@media(max-width:960px){.digest-grid{grid-template-columns:1fr}.digest-controls{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}.digest-controls h2,.digest-controls .side-note{grid-column:1/-1}.schedule-time{margin-top:4px}.schedule-caption{margin-bottom:0}.digest-controls dl{align-content:start}.sidebar{width:184px}.app{margin-left:184px}.brand svg{width:28px;height:28px}.brand strong{font-size:12px}.brand small{font-size:8px}.sidebar nav a{gap:8px;padding:0 8px}.brand{gap:6px}.date{white-space:normal}}
+@media(max-width:760px){.sidebar{display:none}.app{margin-left:0}.topbar{min-height:56px;padding:12px 16px;flex-wrap:wrap;gap:4px 12px}.mobile-brand{display:inline;color:var(--green);font-weight:600}.workspace-name{display:none}.topbar-title{gap:8px}.preview-tag{font-size:10px}main{padding:20px 16px 28px}.page-heading{gap:12px;flex-wrap:wrap;margin-bottom:20px}h1{font-size:24px}.page-heading p{font-size:12px}.page-heading>.btn{font-size:12px}.tabs{gap:24px;margin-bottom:20px}.statusline{align-items:flex-start;font-size:11px;gap:8px}.statusline>span:last-child{text-align:right}.issue-strip{padding:12px;font-size:12px;align-items:flex-start}.issue-strip span{display:block;margin-top:4px}.panel-head{padding:16px}.panel-head>span{font-size:11px}.filters{padding:16px;gap:12px}.search{min-width:100%;flex-basis:100%}.select-filter{flex:1;min-width:100px}table,thead,tbody,tr,td{display:block;width:100%}thead{display:none}tr{padding:16px;border-bottom:1px solid var(--line)}tbody tr:last-child{border-bottom:0}td{border:0;padding:0;margin:0 0 12px;display:grid;grid-template-columns:84px minmax(0,1fr);gap:8px}td:first-child{display:block}td:last-child{margin-bottom:0}td:before{content:attr(data-label);font-size:12px;color:var(--muted)}td:first-child:before{display:none}.task-top{align-items:baseline}.sub{font-size:11px}.task-title{font-size:14px}.table-foot{padding:12px 16px;font-size:11px}.digest-controls{display:block;padding:20px}.digest-controls h2{margin-bottom:16px}.digest-controls label{margin-bottom:12px}.schedule-time{margin-top:20px}.schedule-caption{margin-bottom:20px}.message-surface{padding:12px}.digest-preview-head{padding:16px}.message-heading{padding:16px}.message-body{padding:16px}.message-notes{padding:12px 16px}.digest-excluded,.preview-scope{padding:16px}.times{margin-left:0}.digest-item .sub{margin-left:0}.digest-preview-head .badge{font-size:10px}.detail-summary{gap:16px}.dialog-body,.dialog-head{padding:20px}.dialog-head h2{font-size:16px}.timeline li{grid-template-columns:110px 1fr;gap:12px}.dialog-footer{padding:16px 20px;flex-wrap:wrap}.footer{padding:8px 16px;font-size:10px;flex-wrap:wrap;gap:4px}.rules-table th,.rules-table td{display:table-cell}.rules-table tr{display:table-row}.rules-table thead{display:table-header-group}.rules-table tbody{display:table-row-group}.rules-table{display:table}.rules-table td:before{display:none}}
+@media(prefers-reduced-motion:no-preference){button,a{transition:background .15s,color .15s}}
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="logo" viewBox="0 0 128 128"><rect width="128" height="128" rx="32" fill="#12634f"/><path d="M39 29h50a15 15 0 0 1 15 15v29a15 15 0 0 1-15 15H60l-26 18V87a15 15 0 0 1-10-14V44a15 15 0 0 1 15-15Z" fill="#f4f6ef"/><path d="m45 58 13 13 25-25" fill="none" stroke="#12634f" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="collect" viewBox="0 0 24 24"><path d="M4 4h16v11H10l-6 5V4ZM8 8h8M8 11h5"/></symbol>
+<symbol id="tasks" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v3H9zM9 11l1.5 1.5L14 9M9 17h6"/></symbol>
+<symbol id="delivery" viewBox="0 0 24 24"><path d="m3 11 18-8-6 18-4-7-8-3ZM11 14 21 3"/></symbol>
+<symbol id="history" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 3 8M3 5v6h6M12 7v5l3 2"/></symbol>
+<symbol id="settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="#f0f3f0"/><circle cx="16" cy="12" r="2" fill="#f0f3f0"/><circle cx="10" cy="18" r="2" fill="#f0f3f0"/></symbol>
+</defs></svg>
+<a class="skip" href="#main">跳到工作区</a>
+<aside class="sidebar" aria-label="主导航">
+ <a class="brand" href="../runtime-monitoring/index.html#overview"><svg aria-hidden="true"><use href="#logo"/></svg><span><strong>拾序 · Loose Ends</strong><small>把零散信息，理成下一步。</small></span></a>
+ <p class="nav-label">工作区</p><nav aria-label="调试功能">
+ <a href="../runtime-monitoring/index.html#overview"><svg class="icon" aria-hidden="true"><use href="#overview"/></svg>运行概览</a>
+ <a href="../runtime-monitoring/index.html#sources"><svg class="icon" aria-hidden="true"><use href="#collect"/></svg>信息源调试</a>
+ <a href="../runtime-monitoring/index.html#processor"><svg class="icon" aria-hidden="true"><use href="#tasks"/></svg>待办处理</a>
+ <a href="#tasks-view" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#delivery"/></svg>行动与投递</a>
+ </nav><p class="nav-label">管理</p><nav aria-label="运行管理">
+ <a href="../runtime-monitoring/index.html#automation"><svg class="icon" aria-hidden="true"><use href="#settings"/></svg>自动化</a>
+ <a href="../runtime-monitoring/index.html#history"><svg class="icon" aria-hidden="true"><use href="#history"/></svg>运行记录</a>
+ <a href="../runtime-monitoring/index.html#settings"><svg class="icon" aria-hidden="true"><use href="#settings"/></svg>设置</a>
+ </nav><div class="sidebar-foot">数据保留在本机<br>操作结果以实际运行记录为准</div>
+</aside>
+<div class="app">
+ <header class="topbar"><div class="topbar-title"><span class="mobile-brand">拾序 /</span><span class="workspace-name muted">本机工作区 /</span><strong>行动与投递</strong></div><span class="preview-tag">静态草稿 · 合成数据 · 11/15 17:00</span></header>
+ <main id="main" tabindex="-1">
+ <div class="page-heading"><div><h1>行动与投递</h1><p>处理出了什么，什么时候提醒，最终是否送达。</p></div><button class="btn" id="open-rules">查看当前投递规则</button></div>
+ <div class="tabs" role="tablist" aria-label="行动与投递视图"><button role="tab" id="tab-tasks" aria-controls="tasks-view" aria-selected="true" tabindex="0">待办与投递</button><button role="tab" id="tab-digest" aria-controls="digest-view" aria-selected="false" tabindex="-1">每日早报</button></div>
+ <div class="statusline"><span><i class="status-dot" aria-hidden="true"></i>投递后台运行中 · 每 5 秒检查</span><span class="muted">时间均为上海时区 · 演示时刻固定</span></div>
+ <section id="tasks-view" role="tabpanel" aria-labelledby="tab-tasks">
+ <div class="issue-strip"><div><strong>2 项需要处理</strong><span class="muted"> · 1 项投递结果未知，1 项等待状态回写</span></div><button class="text-btn" id="filter-issues">查看这 2 项 →</button></div>
+ <section class="panel" aria-labelledby="processed-title">
+  <div class="panel-head"><div><h2 id="processed-title">处理后的待办</h2><p>一条待办可关联多条原文；各投递目标单独记录结果。</p></div><span class="small muted">按下一次投递时间排序</span></div>
+  <div class="filters"><label class="search">搜索待办<input type="search" id="task-search" placeholder="标题、来源或待办编号" autocomplete="off"></label><label class="select-filter">状态<select id="state-filter"><option value="all">全部状态</option><option value="scheduled">有投递计划</option><option value="attention">需要处理</option><option value="ended">已结束</option></select></label><label class="select-filter">投递目标<select id="target-filter"><option value="all">全部目标</option></select></label><span class="count" id="task-count" role="status"></span></div>
+  <table aria-label="处理后的待办与下次投递"><thead><tr><th scope="col">待办 / 来源</th><th scope="col">截止时间</th><th scope="col">下次预计投递</th><th scope="col">目标 / 状态</th></tr></thead><tbody id="task-rows"></tbody></table>
+  <div class="empty" id="task-empty" hidden><h3>没有符合条件的待办</h3><p class="muted">换个关键词，或清除当前筛选。</p><button class="btn" id="reset-filters">清除筛选</button></div>
+  <div class="table-foot">预计时间指开始投递的计划；队列、重试和后台运行情况会影响实际时间，以目标回执为准。</div>
+ </section>
+ <p class="source-note">来源：处理层待办、消息层本地状态及投递记录。当前页面为离线合成样例，不读取真实数据库。</p>
+ </section>
+ <section id="digest-view" role="tabpanel" aria-labelledby="tab-digest" hidden>
+  <div class="digest-grid">
+   <section class="panel digest-controls" aria-labelledby="digest-settings-title"><h2 id="digest-settings-title">早报投递安排</h2><label>早报日期<input type="date" id="digest-date" min="2026-11-16" value="2026-11-16" aria-describedby="digest-date-error"></label><p id="digest-date-error" class="small" role="alert" hidden>请选择 2026-11-16 或之后的日期；此稿仅预估未来早报。</p><label>投递目标<select id="digest-target"></select></label><div><div class="schedule-time">08:00 <span>上海时间</span></div><p class="schedule-caption" id="digest-eta"></p></div><dl class="definition-list"><dt>最晚补发</dt><dd id="digest-expiry"></dd><dt>内容范围</dt><dd>当天已知的通知安排</dd><dt>同步型目标</dt><dd>不接收早报</dd></dl><p class="side-note">早报是每日汇总，不替代首次通知或截止提醒。内容按所选目标独立生成；实际发送前仍会检查状态。</p></section>
+   <section class="panel" id="digest-preview" aria-labelledby="digest-preview-title"><div class="digest-preview-head"><div><h2 id="digest-preview-title">预计收到的内容</h2><p>按当前已知待办及规则预估</p></div><span class="badge green">早报已开启</span></div><div class="message-surface"><article class="message-card"><div class="message-heading"><h3 id="digest-message-title"></h3><p id="digest-recipient"></p></div><div class="message-body"><p class="message-intro" id="digest-intro"></p><div id="digest-items"></div></div><div class="message-notes" id="digest-message-notes"></div></article></div><details class="digest-excluded"><summary id="digest-exclusion-label"></summary><div id="digest-exclusions"></div></details><div class="preview-scope">这是内容预估，尚未入投递队列。新增、完成、改期、延后或反馈回写都会影响最终早报；未获取的新消息不在其中。</div></section>
+  </div>
+ </section>
+ </main>
+ <footer class="footer"><span>本机访问 · 关闭页面不会停止后台任务</span><span>静态预览不执行发送、导入或状态回写</span></footer>
+</div>
+<dialog id="task-dialog" aria-labelledby="detail-title"><div class="dialog-head"><div><h2 id="detail-title"></h2><p class="muted small" id="detail-id"></p></div><button class="btn" data-close>关闭</button></div><div id="detail-body" class="dialog-body"></div><div class="dialog-footer"><span>投递目标各自计时；已排队不等于已送达。</span><button class="text-btn" id="detail-to-digest">查看每日早报 →</button></div></dialog>
+<dialog id="rules-dialog" aria-labelledby="rules-title"><div class="dialog-head"><div><h2 id="rules-title">当前投递规则</h2><p class="muted small">沿用现有规则 · 此处为静态展示</p></div><button class="btn" data-close>关闭</button></div><div class="dialog-body rules-copy"><div class="rule-callout"><strong>处理并接收待办后首次通知 + 未完成时的截止提醒</strong></div><p>原始聊天先经过采集和 Pi 处理。消息层接收有效待办后，在后台下一轮检查时安排首次通知；不是每采集一条原文就发送。P0–P4 的首次通知目前均开启，待办修订也会更新。</p><h3>有截止日期：按优先级节点提醒</h3><table class="rules-table" aria-label="截止提醒节点"><thead><tr><th>优先级</th><th>截止前提醒</th></tr></thead><tbody id="rule-rows"></tbody></table><p class="small muted">仅日期的截止时间，按任务时区当天 23:59:59 补足。错过多个节点只检查最近一个；该节点已被成功通知覆盖则不再重复提醒。截止提醒与普通间隔提醒不叠加。</p><div class="detail-section"><h3>无截止日期：按间隔提醒</h3><p id="interval-rules"></p><p class="small muted">完成、取消或被替代后不再催办；延后期间暂停；等待反馈回写或结果未知时停止相关投递。结果未知需先核对，不直接重发。同步型目标只同步变更，不发送周期催办。</p></div><div class="detail-section"><h3>每天 08:00：发送当日通知安排</h3><p>上海时区，允许补发至当日 14:00。汇总生成时已知、当天有通知安排且未结束、未被反馈阻塞的待办；不把全部任务或只按“今天到期”当成早报范围。</p><p class="small muted">早报每个目标每天一份；未来日期预览不是已排队消息。关机、休眠或后台停止时不会发送，超过补发窗口不再补当日早报。</p></div><div class="detail-section"><h3>数据口径</h3><p class="small muted">正式功能拟组合处理层待办、消息层 tasks / local_state / deliveries，以及既有首次通知、截止提醒、普通间隔与早报配置。本稿所有待办、目标、回执及时间均为合成数据，没有调用接口或新建调度规则。</p></div></div></dialog>
+<script>
+'use strict';
+// Fixed snapshot and supplied plans keep this preview separate from the real scheduler.
+const demo = {
+ now:'2026-11-15T17:00:00+08:00',
+ targets:[
+  {id:'team',name:'项目群 · 飞书',mode:'notify',digest:true},
+  {id:'personal',name:'个人提醒 · Webhook',mode:'notify',digest:true},
+  {id:'archive',name:'待办资料库 · Notion',mode:'sync',digest:false}
+ ],
+ deadlineRules:{P0:[86400,21600,7200,1800,0],P1:[21600,7200,1800,0],P2:[7200,1800,0],P3:[1800,0],P4:[0]},
+ intervals:{P0:3600,P1:14400,P2:86400,P3:604800,P4:0},
+ tasks:[
+  {id:'TD-0236',title:'检查接口联调结果',priority:'P1',source:'研发协作群',messages:3,processed:'11/15 16:59',status:'open',deadline:'2026-11-16T15:00:00+08:00',
+   next:'2026-11-15T17:00:05+08:00',reason:'首次通知 · 下一轮检查',state:'queued',
+   nodes:[['2026-11-16T09:00:00+08:00','提前 6 小时'],['2026-11-16T13:00:00+08:00','提前 2 小时'],['2026-11-16T14:30:00+08:00','提前 30 分钟'],['2026-11-16T15:00:00+08:00','截止时']],
+   actions:['核对联调清单中的接口结果','将未通过项目和复现步骤整理到共享文档'],evidence:'联调清单已更新，请在明天下午三点前核对结果，把未通过项和复现步骤补全。'},
+  {id:'TD-0235',title:'确认设备采购报价',priority:'P2',source:'采购协作群',messages:2,processed:'11/14 15:50',status:'open',deadline:'2026-11-15T18:00:00+08:00',
+   next:'2026-11-15T17:30:00+08:00',reason:'截止前 30 分钟',state:'scheduled',last:'2026-11-15T16:05:00+08:00',
+   nodes:[['2026-11-15T16:00:00+08:00','提前 2 小时','covered'],['2026-11-15T17:30:00+08:00','提前 30 分钟','next'],['2026-11-15T18:00:00+08:00','截止时']],
+   actions:['核对供应商报价与设备规格','确认后在采购群回复'],evidence:'报价单已更新，今天十八点前确认设备规格和最终价格。'},
+  {id:'TD-0239',title:'确认会议场地',priority:'P2',source:'活动协调群',messages:4,processed:'11/14 10:10',status:'open',deadline:'2026-11-15T19:00:00+08:00',
+   next:'2026-11-15T18:00:00+08:00',reason:'已延后 · 18:00 恢复检查',state:'snoozed',snoozed:'2026-11-15T18:00:00+08:00',last:'2026-11-15T16:30:00+08:00',
+   nodes:[['2026-11-15T17:00:00+08:00','提前 2 小时 · 延后中'],['2026-11-15T18:30:00+08:00','提前 30 分钟'],['2026-11-15T19:00:00+08:00','截止时']],
+   actions:['确认场地容纳人数与可用时间','在协调群回复确认结果'],evidence:'请在今晚七点前确认场地人数和可用时间。'},
+  {id:'TD-0238',title:'补充测试环境访问清单',priority:'P2',source:'项目对接群',messages:2,processed:'11/14 09:00',status:'open',deadline:null,
+   next:'2026-11-16T09:00:00+08:00',reason:'无截止日期 · 每 24 小时',state:'scheduled',last:'2026-11-15T09:00:00+08:00',targetLast:{personal:'2026-11-15T10:00:00+08:00'},interval:86400,nodes:[],
+   actions:['补充需要访问测试环境的成员','核对权限范围后提交清单'],evidence:'测试环境访问清单还缺部分成员，补全后发到项目群。原文没有给出截止日期。'},
+  {id:'TD-0237',title:'提交联合项目立项材料',priority:'P1',source:'项目申报群',messages:5,processed:'11/15 16:40',status:'open',deadline:'2026-11-16T18:00:00+08:00',
+   next:'2026-11-16T12:00:00+08:00',reason:'截止前 6 小时',state:'scheduled',last:'2026-11-15T16:45:00+08:00',
+   nodes:[['2026-11-16T12:00:00+08:00','提前 6 小时','next'],['2026-11-16T16:00:00+08:00','提前 2 小时'],['2026-11-16T17:30:00+08:00','提前 30 分钟'],['2026-11-16T18:00:00+08:00','截止时']],
+   actions:['汇总项目说明与预算表','核对盖章材料后提交申报入口'],evidence:'明天十八点前提交立项材料，项目说明、预算表和盖章件都需要附上。'},
+  {id:'TD-0241',title:'提交月度对账单',priority:'P3',source:'财务协作群',messages:1,processed:'11/15 11:20',status:'open',deadline:'2026-11-16T23:59:59+08:00',dateOnly:true,
+   next:'2026-11-16T23:29:59+08:00',reason:'截止前 30 分钟',state:'scheduled',last:'2026-11-15T11:25:00+08:00',
+   nodes:[['2026-11-16T23:29:59+08:00','提前 30 分钟','next'],['2026-11-16T23:59:59+08:00','截止时']],
+   actions:['核对当月往来记录','整理对账单后提交财务'],evidence:'本月对账单请在 11 月 16 日提交。原文只给了日期。'},
+  {id:'TD-0240',title:'核对上线变更窗口',priority:'P1',source:'发布协调群',messages:3,processed:'11/14 14:00',status:'open',deadline:'2026-11-15T20:00:00+08:00',
+   next:null,reason:'项目群回执未知 · 先核对',state:'unknown',last:'2026-11-15T14:05:00+08:00',targetLast:{personal:'2026-11-15T16:52:01+08:00',archive:'2026-11-15T16:52:02+08:00'},
+   targetPlans:{team:{state:'unknown',label:'结果未知',reason:'16:52 更新请求超时，需先核对',next:null},personal:{state:'scheduled',label:'按节点提醒',reason:'截止前 2 小时',next:'2026-11-15T18:00:00+08:00'}},
+   nodes:[['2026-11-15T14:00:00+08:00','提前 6 小时','covered'],['2026-11-15T18:00:00+08:00','提前 2 小时'],['2026-11-15T19:30:00+08:00','提前 30 分钟'],['2026-11-15T20:00:00+08:00','截止时']],
+   actions:['核对上线窗口与执行人员','在发布群确认变更安排'],evidence:'今天二十点前确认上线窗口与执行人员。',
+   issue:'16:52 更新卡片时连接超时，远端是否接收尚不明确。项目群后续通知已停止；个人提醒仍按节点执行，资料库同步已完成。'},
+  {id:'TD-0243',title:'确认培训参会名单',priority:'P2',source:'培训通知群',messages:2,processed:'11/15 13:20',status:'open',deadline:'2026-11-16T11:00:00+08:00',
+   next:null,reason:'完成反馈等待处理层回写',state:'feedback',last:'2026-11-15T13:25:00+08:00',
+   nodes:[['2026-11-16T09:00:00+08:00','提前 2 小时'],['2026-11-16T10:30:00+08:00','提前 30 分钟'],['2026-11-16T11:00:00+08:00','截止时']],
+   actions:['汇总参会人员','核对名单并回复组织方'],evidence:'明天十一点前回复参会名单。',issue:'16:40 收到“标记完成”的反馈，处理层尚未确认写入。该待办暂停所有投递，也不进入早报，避免继续催办。'},
+  {id:'TD-0232',title:'提交周会纪要',priority:'P3',source:'例会群',messages:2,processed:'11/14 15:40',status:'completed',deadline:'2026-11-15T16:00:00+08:00',next:null,reason:'已完成 · 不再提醒',state:'ended',last:'2026-11-15T15:40:00+08:00',nodes:[],actions:['整理并提交周会纪要'],evidence:'今天十六点前提交周会纪要。已于 15:40 完成并同步。'}
+ ]
+};
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const epoch = value => Date.parse(value);
+const now = epoch(demo.now);
+const dateFormat = new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+function dateTime(value){
+ const date=new Date(value), seconds=date.getUTCSeconds();
+ return dateFormat.format(date)+(seconds?':'+String(seconds).padStart(2,'0'):'');
+}
+const clock = value => value.slice(11,19).replace(/:00$/,'');
+function duration(seconds){
+ if(seconds===0)return '截止时';
+ if(seconds%86400===0)return seconds/86400+' 天';
+ if(seconds%3600===0)return seconds/3600+' 小时';
+ return seconds/60+' 分钟';
+}
+function countdown(value){
+ const minutes = Math.ceil((epoch(value)-now)/60000);
+ if(minutes<=0)return '已到计划时间';
+ if(minutes<1 || epoch(value)-now<60000)return Math.ceil((epoch(value)-now)/1000)+' 秒后';
+ if(minutes<60)return minutes+' 分钟后';
+ return Math.floor(minutes/60)+' 小时'+(minutes%60?' '+minutes%60+' 分钟':'')+'后';
+}
+function priority(task){return `<span class="priority ${['P0','P1'].includes(task.priority)?'high':''}">${esc(task.priority)}</span>`;}
+function plan(task,target){
+ if(task.state==='feedback')return {state:'feedback',label:'等待回写',reason:task.reason,next:null};
+ if(task.status!=='open')return {state:'ended',label:'已完成',reason:'已同步完成状态，不再提醒',next:null};
+ if(target.mode==='sync')return task.state==='queued'
+  ? {state:'queued',label:'等待首次同步',reason:'仅同步变更，不发送催办',next:task.next}
+  : {state:'synced',label:'已同步',reason:'仅在内容或状态变化后同步',next:null};
+ if(task.targetPlans?.[target.id])return task.targetPlans[target.id];
+ let next=task.next;
+ if(task.interval)next=new Date(epoch(task.targetLast?.[target.id]||task.last)+task.interval*1000).toISOString();
+ return {state:task.state,label:({queued:'已排队',snoozed:'已延后',scheduled:'按计划提醒'})[task.state],reason:task.reason,next};
+}
+function selectedPlans(task){
+ const id=$('target-filter').value;
+ return demo.targets.filter(t=>id==='all'||id===t.id).map(target=>({target,...plan(task,target)}));
+}
+function rowInfo(task){
+ const plans=selectedPlans(task), problem=plans.find(p=>['unknown','feedback'].includes(p.state));
+ const upcoming=plans.filter(p=>p.next).sort((a,b)=>epoch(a.next)-epoch(b.next));
+ const next=upcoming[0];
+ if(problem)return {state:problem.state,next:null,title:problem.label,reason:problem.reason,plans};
+ if(next)return {state:next.state,next:next.next,title:dateTime(next.next),reason:next.reason,plans};
+ return {state:task.status!=='open'?'ended':'synced',next:null,title:task.status!=='open'?'不再投递':'等待内容变更',reason:task.status!=='open'?'已完成':'同步型目标不发送周期提醒',plans};
+}
+function renderTasks(){
+ const search=$('task-search').value.trim().toLocaleLowerCase(), state=$('state-filter').value;
+ const rows=demo.tasks.map(task=>({task,info:rowInfo(task)})).filter(({task,info})=>{
+  const matches=[task.title,task.source,task.id].join(' ').toLocaleLowerCase().includes(search);
+  return matches && (state==='all'||(state==='scheduled'&&info.next)||(state==='attention'&&['unknown','feedback'].includes(info.state))||(state==='ended'&&task.status!=='open'));
+ }).sort((a,b)=>(a.info.next?epoch(a.info.next):Infinity)-(b.info.next?epoch(b.info.next):Infinity));
+ $('task-rows').innerHTML=rows.map(({task,info})=>{
+  const problem=['unknown','feedback'].includes(info.state), tone=info.state==='unknown'?'error':info.state==='feedback'?'warn':'';
+  const normal=info.plans.filter(p=>!['unknown','feedback'].includes(p.state)).length;
+  const statuses=problem?`${normal?normal+' 个其他目标正常':'全部目标暂停'}`:info.state==='ended'?'完成状态已同步':info.plans.length===1?info.plans[0].target.name:info.plans.filter(p=>p.target.mode==='notify').length+' 个提醒目标 · '+info.plans.filter(p=>p.target.mode==='sync').length+' 个同步目标';
+  const nextText=problem && info.plans.some(p=>p.next)?'其他目标仍有投递计划':info.next?countdown(info.next):info.reason;
+  return `<tr data-task="${esc(task.id)}"><td><div class="task-top">${priority(task)}<button class="task-title" data-task-id="${esc(task.id)}">${esc(task.title)} <span class="muted" aria-hidden="true">↗</span></button></div><span class="sub">${esc(task.source)} · ${task.messages} 条原文 · ${esc(task.id)}</span><span class="sub">处理于 ${esc(task.processed)}</span></td><td data-label="截止时间"><div>${task.deadline?`<span class="date">${esc(dateTime(task.deadline))}</span><span class="sub">${task.dateOnly?'仅日期 · 按规则补足时刻':task.status!=='open'?'已结束':countdown(task.deadline)}</span>`:'未提供<span class="sub">按普通间隔提醒</span>'}</div></td><td data-label="下次投递"><div><span class="eta ${tone}">${esc(info.title)}</span><span class="sub">${esc(info.next?countdown(info.next)+' · '+info.reason:info.reason)}</span>${problem&&info.plans.some(p=>p.next)?`<span class="sub">${esc(nextText)}，展开查看</span>`:''}</div></td><td data-label="目标状态"><div><span class="badge ${tone||(['queued','scheduled'].includes(info.state)?'green':'')}">${esc(problem?info.state==='unknown'?'1 个目标需核对':'等待回写':info.state==='ended'?'已完成':info.plans.length===1?info.plans[0].label:({queued:'已排队',scheduled:'等待提醒',snoozed:'已延后',synced:'已同步'})[info.state])}</span><span class="sub">${esc(statuses)}</span></div></td></tr>`;
+ }).join('');
+ $('task-count').textContent=rows.length+' / '+demo.tasks.length+' 项';
+ $('task-empty').hidden=rows.length!==0;
+}
+function showTask(id){
+ const task=demo.tasks.find(item=>item.id===id);
+ if(!task)return;
+ $('detail-title').textContent=task.title;
+ $('detail-id').textContent=`${task.id} · ${task.priority} · ${task.source} · ${task.messages} 条来源原文`;
+ const nodes=task.nodes.map(([at,label,status])=>`<li class="${esc(status||'')}"><time datetime="${esc(at)}">${esc(dateTime(at))}</time><span>${esc(label)}<small>${task.status!=='open'?'已结束，不执行':task.state==='feedback'?'等待回写，暂停执行':status==='covered'?'已被 '+esc(dateTime(task.last))+' 的更新通知覆盖':task.state==='unknown'?'仅有回执正常的目标继续执行':status==='next'?'下一提醒节点':'未来规则节点'}</small></span></li>`).join('');
+ $('detail-body').innerHTML=`${task.issue?`<div class="rule-callout"><strong>${task.state==='unknown'?'项目群投递需要核对':'状态回写尚未完成'}</strong><p class="small" style="margin-top:8px">${esc(task.issue)}</p></div>`:''}<dl class="detail-summary"><div><dt>截止时间</dt><dd>${task.deadline?esc(dateTime(task.deadline)):'未提供'}${task.dateOnly?'<span class="sub">原文仅 11/16；按上海时区补足时刻</span>':''}</dd></div><div><dt>当前状态</dt><dd>${esc(({open:'待完成',completed:'已完成'})[task.status])}${task.snoozed?'<span class="sub">延后至 '+esc(dateTime(task.snoozed))+'</span>':''}</dd></div></dl><section class="detail-section"><h3>每个目标的投递计划</h3>${demo.targets.map(target=>{
+  const p=plan(task,target),tone=p.state==='unknown'?'error':p.state==='feedback'?'warn':p.state==='queued'?'green':'';
+  return `<div class="target-plan" data-target="${esc(target.id)}"><div class="target-plan-head"><strong>${esc(target.name)}</strong><span class="badge ${tone}">${esc(p.label)}</span></div><p>${p.next?`<span class="eta">预计 ${esc(dateTime(p.next))} · ${esc(countdown(p.next))}</span>`:''}${esc(p.reason)}</p>${task.last&&p.state!=='unknown'&&p.state!=='feedback'?`<span class="sub">最近${target.mode==='sync'?'同步':'成功通知'}：${esc(dateTime(task.targetLast?.[target.id]||task.last))} · 合成回执</span>`:''}${p.state==='unknown'?'<details><summary>核对记录与下一步</summary><p class="evidence">16:52:00 开始更新 → 请求超时 → 结果未知。先在项目群核对对应卡片，再到正式页面的“投递与回写恢复”登记结果；本稿不提供直接重发。</p></details>':''}${p.state==='feedback'?'<details><summary>查看回写记录</summary><p class="evidence">16:40:00 收到完成反馈 → 已入本地反馈队列 → 等待处理层写入完成状态。回写成功后才以新状态重新评估。</p></details>':''}</div>`;
+ }).join('')}</section><section class="detail-section"><h3>${task.interval?'普通间隔计划':'截止提醒节点'}</h3>${task.interval?`<p class="small">无截止日期，各通知目标以上次成功通知为起点，每 ${duration(task.interval)} 提醒。项目群下一次 11/16 09:00，个人提醒下一次 11/16 10:00；不是按全局统一时刻发送。</p>`:nodes?`<ol class="timeline">${nodes}</ol>`:'<p class="muted small">该待办已结束，不再安排提醒。</p>'}${task.snoozed?'<p class="source-note">18:00 延后到期后检查最近到点节点；不补发延后期间错过的全部节点。</p>':''}</section><section class="detail-section"><h3>行动与依据</h3><ol class="small">${task.actions.map(action=>`<li>${esc(action)}</li>`).join('')}</ol><details><summary>查看来源原文（合成）</summary><blockquote class="evidence">${esc(task.evidence)}</blockquote></details></section>`;
+ $('task-dialog').showModal();
+}
+function digestData(day,target){
+ const start=epoch(day+'T00:00:00+08:00'),end=start+86400000,items=[],excluded=[];
+ for(const task of demo.tasks){
+  if(task.status!=='open'){excluded.push({task,reason:'已完成，不再提醒'});continue;}
+  if(task.state==='feedback'){excluded.push({task,reason:'完成反馈等待回写，暂停通知'});continue;}
+  let notifications=task.nodes.filter(([at])=>epoch(at)>=start&&epoch(at)<end&&(!task.snoozed||epoch(at)>=epoch(task.snoozed))).map(([at,label])=>({at,label}));
+  if(task.interval){
+   const last=task.targetLast?.[target.id]||task.last;
+   let next=epoch(last)+task.interval*1000;
+   if(next<start)next+=Math.ceil((start-next)/(task.interval*1000))*task.interval*1000;
+   if(next<end)notifications.push({at:new Date(next).toISOString(),label:'起按 '+duration(task.interval)+' 间隔',interval:true});
+  }
+  // Only the supplied, already queued initial notification is known in this snapshot.
+  if(task.state==='queued'&&epoch(task.next)>=start&&epoch(task.next)<end)notifications.push({at:task.next,label:'首次通知'});
+  if(notifications.length)items.push({task,notifications});
+  else excluded.push({task,reason:'当天没有已知通知安排'});
+ }
+ items.sort((a,b)=>a.task.priority.localeCompare(b.task.priority)||epoch(a.notifications[0].at)-epoch(b.notifications[0].at)||a.task.id.localeCompare(b.task.id));
+ return {items,excluded};
+}
+function renderDigest(){
+ const day=$('digest-date').value;
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||day<'2026-11-16'){
+  $('digest-date').setCustomValidity('请选择 2026-11-16 或之后的日期');
+  $('digest-date-error').hidden=false;$('digest-preview').hidden=true;return;
+ }
+ $('digest-date').setCustomValidity('');
+ $('digest-date-error').hidden=true;$('digest-preview').hidden=false;
+ const target=demo.targets.find(t=>t.id===$('digest-target').value),{items,excluded}=digestData(day,target);
+ $('digest-eta').textContent=dateTime(day+'T08:00:00+08:00')+' 开始 · '+countdown(day+'T08:00:00+08:00');
+ $('digest-expiry').textContent=day.slice(5).replace('-','/')+' 14:00 前';
+ $('digest-message-title').textContent=day+' · 今日通知安排（'+items.length+' 项）';
+ $('digest-recipient').textContent='投递至 '+target.name+' · 提醒汇总';
+ $('digest-intro').textContent=items.length?'按当前规则，当天需要通知的事项如下。':'当天没有已知的通知安排。';
+ $('digest-items').innerHTML=items.map(({task,notifications})=>`<section class="digest-item"><div class="digest-item-head">${priority(task)}<button class="text-btn" data-task-id="${esc(task.id)}">${esc(task.title)} <span aria-hidden="true">↗</span></button></div><div class="times">${notifications.map(n=>{
+  const local=new Date(epoch(n.at)+28800000).toISOString();
+  return `<span class="time-chip" title="${esc(n.label)}">${esc(clock(local))}${n.interval?' 起按间隔':''}</span>`;
+ }).join('')}</div><span class="sub">${esc(task.interval?'普通间隔 · 每 '+duration(task.interval):'截止 '+dateTime(task.deadline)+(task.dateOnly?' · 原文仅日期，时刻按规则补足':''))}</span></section>`).join('');
+ $('digest-message-notes').textContent='预估基准：2026-11-15 17:00 · '+(items.length?'仅汇总当前已知安排，最终以生成时状态为准。':'后续新增待办可能改变此结果。');
+ $('digest-exclusion-label').textContent='为什么其余 '+excluded.length+' 项没有出现在这封早报里？';
+ $('digest-exclusions').innerHTML=excluded.length?'<ul>'+excluded.map(({task,reason})=>`<li><button class="text-btn" data-task-id="${esc(task.id)}">${esc(task.title)}</button><span class="muted"> · ${esc(reason)}</span></li>`).join('')+'</ul>':'<p class="exclusion-empty">当前全部待办均有当天通知安排。</p>';
+}
+function switchTab(name){
+ for(const key of ['tasks','digest']){
+  const selected=name===key;
+  $('tab-'+key).setAttribute('aria-selected',String(selected));
+  $('tab-'+key).tabIndex=selected?0:-1;
+  $(key+'-view').hidden=!selected;
+ }
+ if(name==='digest')renderDigest();
+ history.replaceState(null,'','#'+name+'-view');
+}
+for(const target of demo.targets){
+ const option=new Option(target.name,target.id);$('target-filter').add(option);
+ if(target.digest)$('digest-target').add(new Option(target.name,target.id));
+}
+$('rule-rows').innerHTML=Object.entries(demo.deadlineRules).map(([p,offsets])=>`<tr><td>${p}</td><td>${offsets.map(duration).join('、')}</td></tr>`).join('');
+$('interval-rules').textContent=Object.entries(demo.intervals).map(([p,seconds])=>p+'：'+(seconds?'每 '+duration(seconds):'不周期提醒')).join('；');
+for(const id of ['task-search','state-filter','target-filter'])$(id).addEventListener(id==='task-search'?'input':'change',renderTasks);
+for(const id of ['digest-date','digest-target'])$(id).addEventListener('change',renderDigest);
+$('filter-issues').addEventListener('click',()=>{$('task-search').value='';$('target-filter').value='all';$('state-filter').value='attention';renderTasks();$('state-filter').focus();});
+$('reset-filters').addEventListener('click',()=>{$('task-search').value='';$('state-filter').value='all';$('target-filter').value='all';renderTasks();$('task-search').focus();});
+$('open-rules').addEventListener('click',()=>$('rules-dialog').showModal());
+$('detail-to-digest').addEventListener('click',()=>{$('task-dialog').close();switchTab('digest');$('tab-digest').focus();});
+document.addEventListener('click',event=>{
+ const taskButton=event.target.closest('[data-task-id]');
+ if(taskButton)showTask(taskButton.dataset.taskId);
+ if(event.target.closest('[data-close]'))event.target.closest('dialog').close();
+});
+for(const key of ['tasks','digest']){
+ const tab=$('tab-'+key);
+ tab.addEventListener('click',()=>switchTab(key));
+ tab.addEventListener('keydown',event=>{
+  if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){
+   event.preventDefault();const next=event.key==='Home'?'tasks':event.key==='End'?'digest':key==='tasks'?'digest':'tasks';
+   switchTab(next);$('tab-'+next).focus();
+  }
+ });
+}
+document.querySelector('.sidebar a[aria-current]').addEventListener('click',()=>switchTab('tasks'));
+renderTasks();switchTab(location.hash==='#digest-view'?'digest':'tasks');
+</script>
+</body>
+</html>

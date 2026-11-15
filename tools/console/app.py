@@ -174,6 +174,19 @@ class SaveRules(Model):
     text: str = Field(min_length=1, max_length=1024*1024)
 
 
+class ProcessorTaskUpdate(Model):
+    request_id: str = Field(min_length=1, max_length=200)
+    expected_revision: int = Field(ge=1)
+    status: Literal['open', 'completed'] | None = None
+    priority: Literal['P0', 'P1', 'P2', 'P3', 'P4'] | None = None
+
+    @model_validator(mode='after')
+    def one_change(self):
+        if (self.status is None) == (self.priority is None):
+            raise ValueError('每次修改状态或优先级中的一项')
+        return self
+
+
 class ProcessorPreview(Model):
     limit: int = Field(default=5, ge=1, le=20)
     start: int | None = Field(default=None, ge=0)
@@ -495,6 +508,24 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     @app.get('/api/processor/tasks', dependencies=[Depends(authenticate)], summary='查看结构化待办及来源证据')
     def processor_tasks(limit: int = Query(20, ge=1, le=100)):
         return {'tasks': bridge.processor.core().list_tasks(bridge.processor.config(), limit=limit)}
+
+    @app.patch('/api/processor/tasks/{task_id}', dependencies=[Depends(authenticate)], summary='完成、恢复待办或修改优先级')
+    def processor_task_update(task_id: str, body: ProcessorTaskUpdate):
+        from processor.service import (update_task_status, update_task_priority, TaskStatusBusy,
+                                       TaskStatusConflict, TaskStatusExportPending, UnknownTask)
+        update = update_task_status if body.status is not None else update_task_priority
+        try:
+            return update(bridge.processor.config(), task_id, body.status or body.priority,
+                          request_id=body.request_id, expected_revision=body.expected_revision,
+                          actor={'platform': 'local', 'user_id': 'console', 'source': 'processor-console'})
+        except TaskStatusBusy:
+            raise HTTPException(409, '待办正在更新，请稍后重试') from None
+        except TaskStatusConflict:
+            raise HTTPException(409, '待办已发生变化，请核对最新状态后重试；已替代的待办不能修改') from None
+        except UnknownTask:
+            raise HTTPException(404, '待办不存在，请刷新列表') from None
+        except TaskStatusExportPending:
+            return JSONResponse({'task_id': task_id, 'sync_pending': True}, status_code=202)
 
     @app.get('/api/processor/reviews', dependencies=[Depends(authenticate)], summary='查看分组结果与附件读取状态')
     def processor_reviews(limit: int = Query(20, ge=1, le=100)):

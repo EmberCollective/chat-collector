@@ -34,6 +34,17 @@ for source in ('wechat','qq'):
     source_path.write_text(tomlkit.dumps(document),encoding='utf8')
 (root/'console.toml').write_text(tomlkit.dumps(settings),encoding='utf8')
 app=create_app(root/'console.toml',root/'runtime-ui')
+from processor import storage
+with storage._connect(app.state.bridge.processor.config(), write=True) as conn, conn:
+    for state in ('open', 'completed', 'superseded'):
+        storage._save_task(conn, {'task_id': 'ui-'+state, 'title': '合成待办 · '+state,
+            'event': '整理报告并提交方案', 'priority': 'P2', 'status': state, 'sources': [],
+            'action_steps': ['检查报告内容', '提交方案']})
+    for i in range(20):
+        conn.execute('INSERT INTO group_results VALUES(?,?)', (str(i), json.dumps({
+            'conversation': {'platform': 'qq'}, 'tasks_count': 0, 'updated_at': str(i),
+            'attachment_review': [{'ref': 'f1', 'name': '合成附件.pdf',
+                'status': 'unavailable' if i == 0 else 'not_requested'}]})))
 @app.middleware('http')
 async def fixture_only(request, call_next):
     # This review server can modify synthetic files only; never start services, install startup, or send externally.

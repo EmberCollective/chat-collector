@@ -34,7 +34,7 @@
 - [架构与数据所有权](architecture/README.md)、[批次契约](architecture/batch-contracts.md)。
 - 架构实施记录：[实现与迁移](architecture/implementation.md)、[审查与验收](architecture/audit.md)、[任务分工](architecture/agent-tasks.md)。这些记录有各自基线，不能代替当前部署状态。
 - 合成示例：[提供方事件](examples/provider-event-v1.json)、[AI 输入](examples/ai-context-v1.json)。
-- 面板设计与验收：[整体重写](design/console-redesign/README.md)、[运行概览](design/overview-dashboard/README.md)、[负载与加载优化](design/runtime-monitoring/README.md)。
+- 面板设计与验收：[整体重写](design/console-redesign/README.md)、[运行概览](design/overview-dashboard/README.md)、[负载与加载优化](design/runtime-monitoring/README.md)、[逐项投递计划与每日早报](design/delivery-schedule/README.md)。
 
 任务通过程序校验后直接入库；缺失信息记入 `notes`。模型与外部投递是否启用，以本机配置为准。使用边界与第三方授权见 [项目说明](../README.md) 和 [第三方说明](../THIRD_PARTY_NOTICES.md)。
 

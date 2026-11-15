@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from common.locking import InstanceLock
 from common.codec import canonical, digest
-from .notifications import deadline_node as _deadline_node, queue_digest
+from .notifications import deadline_node as _deadline_node, queue_digest, reminder_due
 
 
 SCHEMA = '''
@@ -405,18 +405,13 @@ def _queue(config, conn, tasks, local, packages, now):
                 current = False
             kind, anchor = 'upsert', ''
             if current:
-                interval = config['reminders'][task['priority']]
                 if (sync_only or _effective(task, state)['status'] != 'open'
                         or state.get('snoozed_until', 0) > now):
                     continue
-                if deadline_mode:
-                    if node is None or last['finished_at'] >= node['due_at']:
-                        continue
-                    anchor = digest(node)
-                else:
-                    if not interval or now < last['finished_at'] + interval:
-                        continue
-                    anchor = last['id']
+                due, reminder = reminder_due(config, _effective(task, state), state, last, now)
+                if due is None or due > now:
+                    continue
+                anchor = digest(reminder) if reminder is not None else last['id']
                 kind = 'reminder'
             elif state.get('snoozed_until', 0) > now and not sync_only:
                 continue

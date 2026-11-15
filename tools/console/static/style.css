@@ -675,6 +675,15 @@ pre {
   font-size:0.928571rem;
   gap:8px 12px;
 }
+.task-actions label {
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.task-actions select {
+  width:auto;
+  margin:0;
+}
 .task-facts dt {
   color:var(--muted);
 }

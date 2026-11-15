@@ -66,14 +66,50 @@ async function openProcessorSource(source){
   renderMessages([record],$('source-output'),false,platform);$('source-dialog').showModal();
 }
 async function loadProcessorRules(){processorRules=await api('/processor/rules');$('processor-rules-file').textContent=processorRules.file;$('processor-rules-text').value=processorRules.text;}
+function processorTaskControls(task,box){
+  const controls=el('div',undefined,'actions task-actions'),label=el('label','优先级'),priority=el('select');
+  priority.dataset.taskAction='priority';
+  for(const value of ['P0','P1','P2','P3','P4']){const option=el('option',value);option.value=value;priority.append(option);}
+  priority.value=task.priority;label.append(priority);
+  const feedback=el('p','','muted task-action-feedback');feedback.setAttribute('role','status');feedback.hidden=true;
+  let saving=false,pending;
+  async function update(change,focus){
+    if(saving)return;saving=true;
+    const key=JSON.stringify(change);
+    if(pending?.key!==key)pending={key,body:{...change,expected_revision:task.revision,request_id:crypto.randomUUID()}};
+    for(const node of controls.querySelectorAll('button,select'))node.disabled=true;
+    feedback.hidden=false;feedback.textContent='正在保存…';
+    let message,failed=false,saved=false;
+    try{
+      const result=await api('/processor/tasks/'+encodeURIComponent(task.task_id),'PATCH',pending.body);
+      saved=true;pending=null;
+      message=result.sync_pending?'修改已保存，后续同步暂未完成。':change.priority?'优先级已更新。':change.status==='completed'?'已标记完成。':'已恢复待办。';
+    }catch(error){message=error.message;failed=true;}
+    try{await refreshProcessor();}catch{message+=' 列表刷新失败，请刷新页面核对。';failed=true;}
+    saving=false;if(!saved)priority.value=task.priority;
+    for(const node of controls.querySelectorAll('button,select'))node.disabled=false;
+    const current=[...$('processor-tasks').children].find(node=>node.dataset.taskId===task.task_id)||box;
+    const output=current.querySelector('.task-action-feedback');
+    if(output){output.hidden=false;output.textContent=message;output.className=(failed?'error':'muted')+' task-action-feedback';}
+    current.querySelector(`[data-task-action="${focus}"]`)?.focus({preventScroll:true});
+  }
+  if(['open','completed','cancelled'].includes(task.status)){
+    const next=task.status==='open'?'completed':'open',action=el('button',next==='completed'?'标记完成':'恢复待办','secondary');
+    action.type='button';action.dataset.taskAction='status';action.addEventListener('click',()=>update({status:next},'status'));controls.append(action);
+  }
+  priority.addEventListener('change',()=>update({priority:priority.value},'priority'));
+  controls.append(label);box.append(controls,feedback);
+}
 function renderProcessorTasks(tasks,target=$('processor-tasks')){
   const signature=JSON.stringify(tasks);if(target.dataset.signature===signature)return;target.dataset.signature=signature;
   target.replaceChildren();
   if(!tasks.length){target.append(el('p','暂无待办。尚未执行处理或没有提取到待办时，这里保持为空。','empty'));return;}
   for(const task of tasks){
     const box=el('article',undefined,'message task'),head=el('div',undefined,'message-head');
+    box.dataset.taskId=task.task_id;
     head.append(el('span',task.priority||'待定','pill priority-'+(task.priority||'unknown')),el('span',({cancelled:'已取消',open:'待处理',completed:'已完成',superseded:'已替代'})[task.status]||'状态未知'));
     box.append(head,el('h4',task.title||'未命名待办'));
+    if(target===$('processor-tasks')&&!task.debug_run&&task.status!=='superseded')processorTaskControls(task,box);
     const when=task.time||{},people=Array.isArray(task.people)?task.people.map(person=>typeof person==='string'?person:[person.name,person.role].filter(Boolean).join(' · ')).join('、'):'';
     const facts=el('dl',undefined,'task-facts');
     for(const [label,value] of [['事件',task.event],['时间',[when.text,when.start?`开始 ${when.start}`:'',when.deadline?`截止 ${when.deadline}`:'',when.timezone].filter(Boolean).join(' · ')],['参与人员',people],['地点',task.location]])facts.append(el('dt',label),el('dd',value||'未明确'));
@@ -92,14 +128,20 @@ function renderProcessorTasks(tasks,target=$('processor-tasks')){
 function renderAttachmentReviews(groups,target){
   const signature=JSON.stringify(groups);if(target.dataset.signature===signature)return;target.dataset.signature=signature;
   target.replaceChildren();
+  const reviewed=(groups||[]).filter(group=>group.attachment_review?.length);
+  if(!reviewed.length)return;
+  const failures=reviewed.reduce((count,group)=>count+group.attachment_review.filter(item=>item.status==='unavailable').length,0);
+  const records=el('details',undefined,'attachment-reviews');
+  records.append(el('summary',`处理记录与附件读取情况 · ${reviewed.length} 组${failures?' · '+failures+' 个附件读取失败':''}`));
   const labels={read:'已读取',partial:'按需读取了部分内容',skipped:'无需读取',not_requested:'未选择读取',unavailable:'读取失败'};
-  for(const group of groups||[]){const items=group.attachment_review||[];if(!items.length)continue;
+  for(const group of reviewed){const items=group.attachment_review;
     const box=el('details');box.append(el('summary',`${names[group.conversation?.platform]||group.conversation?.platform} · ${group.tasks_count} 项待办 · ${items.filter(x=>x.status==='unavailable').length} 个附件读取失败`));
     box.append(el('p','结论基于消息与实际读取的内容；未选择的附件不等于已核实。','muted'));
     for(const item of items)box.append(el('p',[item.ref,item.name,labels[item.status]||item.status,item.reason,...(item.warnings||[])].filter(Boolean).join(' · '),'asset'));
     if(group.submission_file)box.append(el('p','原始模型提交（仅本地）：'+group.submission_file,'muted path'));
-    target.append(box);
+    records.append(box);
   }
+  target.append(records);
 }
 async function refreshProcessor(){
   const [state,result,reviews]=await Promise.all([api('/processor/status'),api('/processor/tasks?limit=20'),api('/processor/reviews?limit=20')]);
