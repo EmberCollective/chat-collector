@@ -439,7 +439,8 @@ def _queue(config, conn, tasks, local, packages, now):
 def run_round(config, *, now=None):
     live_clock = now is None
     now = time.time() if now is None else float(now)
-    with InstanceLock(config['storage']['state_file']), closing(_connect(config, True)) as conn:
+    # Feedback updates share this lock; brief overlap must not trigger failure alerts.
+    with InstanceLock(config['storage']['state_file'], timeout=45), closing(_connect(config, True)) as conn:
         tasks, local, packages, imported = _sync(config, conn)
         with conn:
             conn.execute("UPDATE deliveries SET status='unknown',error='interrupted_delivery' WHERE status='sending'")
