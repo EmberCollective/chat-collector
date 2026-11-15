@@ -15,16 +15,15 @@
 #view-overview .schedule-service{display:block}
 #view-overview .schedule-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
 #view-overview .schedule-heading>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#view-overview .schedule-entry{display:grid;grid-template-columns:minmax(48px,1fr) minmax(0,2.5fr);align-items:start;gap:8px;font-size:0.928571rem;padding:4px 0}
+#view-overview .schedule-entry{display:grid;grid-template-columns:minmax(48px,1fr) minmax(0,2.5fr);align-items:center;gap:8px;font-size:0.928571rem;padding:8px 0}
 #view-overview .schedule-entry>span{color:var(--secondary);overflow-wrap:anywhere}
-#view-overview .schedule-entry>div{text-align:right;overflow-wrap:anywhere}
-#view-overview .schedule-entry{padding:8px 0;align-items:center}
+#view-overview .schedule-entry>div{text-align:right;overflow-wrap:anywhere;min-height:3.2em}
 #view-overview .schedule-entry>.schedule-source{display:flex;align-items:center;gap:8px;flex-wrap:wrap;text-align:left}
-#view-overview .schedule-entry.is-running{background:var(--soft);border-left:3px solid var(--green);padding:8px 10px;margin:4px -10px;border-radius:4px}
-#view-overview .schedule-source .text-button{font-weight:600}
+#view-overview .schedule-entry.is-running{background:var(--soft);box-shadow:-3px 0 var(--green);border-radius:4px}
+#view-overview .schedule-source .text-button{font-weight:600;min-height:0;padding:0}
 #view-overview .schedule-source .pill{font-size:0.785714rem}
 #view-overview .schedule-elapsed{display:block;font-weight:600;font-variant-numeric:tabular-nums;color:var(--green);white-space:nowrap}
-#view-overview .schedule-entry time{font-variant-numeric:tabular-nums;white-space:nowrap}
+#view-overview .schedule-entry time{display:block;font-variant-numeric:tabular-nums;white-space:nowrap}
 #view-overview .schedule-entry small{display:block}
 #view-overview .monitor-plan-note{padding-top:8px}
 #view-overview .monitor-panel{margin-top:20px}

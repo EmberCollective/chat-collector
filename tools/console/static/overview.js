@@ -99,7 +99,7 @@
     const queueNote=(queue,keys)=>queue?.counts?keys.map(([key,label])=>count(queue.counts[key]??0)+' '+label).join(' · '):'队列状态尚不可读';
     const running=collect.filter(job=>job.state==='running').length;
     const rows=[['collect','信息源采集',collect.filter(job=>job.enabled).length+' 个来源'+(running?' · '+running+' 个执行中':''),''],['process','待办处理',processor?processor.state==='running'?'执行中':processor.enabled?state(processor.state):'已关闭':'状态未知',''],['delivery','消息投递',delivery?delivery.enabled?state(delivery.state):'未启用':'状态未知',queueNote(queues.messaging,[['pending','待投递'],['retry','待重试'],['unknown','结果未知']])],['feedback','状态回写',feedback?feedback.enabled?state(feedback.state):'未启用':'状态未知',queueNote(queues.feedback,[['queued','待回写'],['failed','失败'],['conflict','冲突']])]];
-    $('services').replaceChildren();
+    const serviceRows=[];
     for(const [id,name,value,note]of rows){
       const row=node('div',null,'service-row'),text=node('div'),status=node('div',null,'service-state');row.dataset.serviceId=id;text.append(node('strong',name));if(note)text.append(node('p',note));
       const issue=(s.issues||[]).find(issue=>id==='collect'?!!issue.source_id:issue.module===({process:'processor',delivery:'messaging',feedback:'feedback'})[id]);
@@ -124,9 +124,10 @@
           else value.append(node('span','未提供下次计划'),node('small','等待调度器计算'));row.append(entry);
         }
         if(!entries.length)row.append(node('p','尚未启用可调度的信息源','muted'));
-      }else{const job=id==='delivery'?delivery:feedback;if(job?.state==='running')text.append(runTimer(job));status.append(button);row.append(text,status);}
-      $('services').append(row);
+      }else{const job=id==='delivery'?delivery:feedback,timer=job?.state==='running'?runTimer(job):node('strong','\u00a0','schedule-elapsed');if(job?.state!=='running')timer.setAttribute('aria-hidden','true');text.append(timer);status.append(button);row.append(text,status);}
+      serviceRows.push(row);
     }
+    $('services').replaceChildren(...serviceRows);
     updateRunTimers();
   }
   function renderChart(){

@@ -8,7 +8,7 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
   try{
     const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],reads=[];
     let active='qq',manual=false;
-    const started=Date.now()/1000-72;
+    let started=Date.now()/1000-72;
     page.on('pageerror',error=>errors.push(error.message));
     page.on('request',request=>{if(new URL(request.url()).pathname.startsWith('/api/'))reads.push(request);});
     assert.equal((await(await page.request.get(base+'/__fixture__')).json()).synthetic,true);
@@ -20,7 +20,7 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
     });
     await page.route('**/api/runtime-monitor',route=>{
       const data=runtimeSnapshot();
-      for(const sample of data.samples)sample.active_jobs=active?[{module:active,source_id:active,name:active==='qq'?'QQ':'微信',started_at:started}]:[];
+      for(const sample of data.samples)sample.active_jobs=active?[{module:active,source_id:['qq','wechat'].includes(active)?active:null,name:active,started_at:started}]:[];
       return route.fulfill({json:data});
     });
     await page.goto(base+'/#overview');
@@ -44,8 +44,28 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
     manual=true;active='qq';
     await page.waitForSelector('#services [data-module="qq"].is-running',{timeout:8000});
     assert.match(await page.locator('#services [data-module="qq"]').textContent(),/已运行/);
+    manual=false;
+    const geometry=()=>page.evaluate(()=>{
+      const rect=node=>{const box=node.getBoundingClientRect();return {top:box.top+scrollY,height:box.height};};
+      return {rows:[...document.querySelectorAll('#services>.service-row')].map(rect),health:rect(document.getElementById('overview-health')),next:rect(document.getElementById('runtime-monitor')),scrollY};
+    });
+    const refresh=()=>page.evaluate(async()=>{window.setRuntimeSnapshot(await api('/runtime-monitor'));await window.initOverview();});
+    for(const width of [390,1440,2560]){
+      await page.setViewportSize({width,height:1000});active=null;await refresh();
+      await page.locator('#runtime-monitor').scrollIntoViewIfNeeded();
+      const idle=await geometry();
+      for(const module of ['qq','wechat','processor','messaging','feedback',null]){
+        active=module;started=Date.now()/1000-3661;await refresh();
+        const current=await geometry();
+        for(let i=0;i<idle.rows.length;i++)for(const key of ['top','height'])assert.ok(Math.abs(current.rows[i][key]-idle.rows[i][key])<1,`${width}px ${module}: service ${i} ${key} shifted ${idle.rows[i][key]} -> ${current.rows[i][key]}`);
+        for(const key of ['top','height'])assert.ok(Math.abs(current.health[key]-idle.health[key])<1,`${width}px ${module}: health ${key} shifted`);
+        assert.ok(Math.abs(current.next.top-idle.next.top)<1,`${width}px ${module}: following panel shifted`);
+        assert.ok(Math.abs(current.scrollY-idle.scrollY)<1,`${width}px ${module}: page scrolled during refresh`);
+        assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${width}px ${module}: horizontal overflow`);
+      }
+    }
     for(const width of [390,1440]){await page.setViewportSize({width,height:1000});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
     assert.deepEqual(errors,[]);assert.ok(reads.every(request=>request.method()==='GET'));
-    console.log('PASS live schedules: per-source execution, one-second local elapsed, five-second task transitions, refreshed next plan, running-record link, manual task with scheduler stopped, responsive layout');
+    console.log('PASS live schedules: per-source execution, local elapsed, task transitions, next plan, record link, manual task, stable row/panel/scroll geometry across all five modules at 390/1440/2560px');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
