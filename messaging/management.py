@@ -22,6 +22,56 @@ FIELDS = {
     'notion': {'token_env': 'env', 'data_source_id': 'string', 'properties': 'properties'},
     'webhook': {'url_env': 'env', 'token_env': 'env', 'mode': 'string', 'purpose': 'string'},
 }
+FIELD_DESCRIPTIONS = {
+    'enabled': {'label': '启用'},
+    'timeout_seconds': {'label': '请求超时（秒）', 'min': 1, 'max': 300},
+    'app_id_env': {'label': '应用 ID 环境变量名'},
+    'app_secret_env': {'label': '应用密钥环境变量名'},
+    'recipient_id': {'label': '目标群 chat_id'},
+    'receive_id_type': {'label': '目标类型', 'choices': {'chat_id': '群聊 chat_id'}},
+    'allowed_operator_ids': {'label': '可操作人员 open_id（每行一个）'},
+    'snooze_seconds': {'label': '稍后提醒等待（秒）', 'min': 1, 'max': 31536000},
+    'upload_files': {'label': '上传本地附件'},
+    'max_file_bytes': {'label': '附件上传上限（字节）', 'min': 1, 'max': 30000000},
+    'url_env': {'label': 'Webhook 地址环境变量名'},
+    'secret_env': {'label': '签名密钥环境变量名（可空）'},
+    'token_env': {'label': '访问令牌环境变量名'},
+    'data_source_id': {'label': '数据源 ID'},
+    'mode': {'label': '投递模式', 'choices': {'notify': '消息通知', 'sync': '同步更新'}},
+    'purpose': {'label': '用途说明'},
+    'properties': {'label': '属性名映射（留空沿用现有或默认值）', 'fields': {
+        'title': {'label': '标题'}, 'task_id': {'label': '待办编号'},
+        'priority': {'label': '优先级'}, 'status': {'label': '状态'},
+        'date': {'label': '日期'}, 'instructions': {'label': '行动说明'}, 'files': {'label': '附件'}}},
+}
+CHANNEL_TYPES = {
+    'feishu_app': {'name': '飞书应用（交互卡片）',
+                   'description': '支持附件上传与按钮回写。后台按钮监听只连接已配置的同一个应用。',
+                   'defaults': {'receive_id_type': 'chat_id', 'snooze_seconds': 3600,
+                                'upload_files': True, 'max_file_bytes': 30000000},
+                   'capabilities': {'files': True, 'feedback': True, 'listener': True}},
+    'feishu': {'name': '飞书群机器人',
+               'description': '发送文字与材料链接，本地文件只保存在本机。',
+               'defaults': {}, 'capabilities': {}},
+    'notion': {'name': 'Notion / Notion Calendar',
+               'description': '同步到 Notion 数据源；在 Notion Calendar 中连接该数据源的日期字段。',
+               'defaults': {}, 'capabilities': {'files': True}},
+    'webhook': {'name': '通用 Webhook',
+                'description': '向已配置的服务发送标准消息契约；接收端负责后续操作。',
+                'defaults': {'mode': 'notify'}, 'capabilities': {}},
+}
+
+
+def channel_types():
+    return {kind: {**deepcopy(CHANNEL_TYPES[kind]),
+                   'defaults': {'enabled': False, 'timeout_seconds': 30, **deepcopy(CHANNEL_TYPES[kind]['defaults'])},
+                   'capabilities': {'send': True, 'test': True, 'files': False, 'feedback': False,
+                                    'listener': False, 'recovery': True, **CHANNEL_TYPES[kind]['capabilities']},
+                   'fields': {key: {'type': field_type, **deepcopy(FIELD_DESCRIPTIONS.get(key, {}))}
+                              for key, field_type in {**COMMON, **fields}.items()}}
+            for kind, fields in FIELDS.items()}
+
+
 PROPERTIES = {'title', 'task_id', 'priority', 'status', 'date', 'instructions', 'files'}
 SECTIONS = {'schedule': {'interval_seconds', 'retry_base_seconds', 'max_attempts', 'max_deliveries_per_round'},
             'reminders': {'P0', 'P1', 'P2', 'P3', 'P4'},
@@ -45,6 +95,7 @@ def _view(raw, config):
     return {'version': hashlib.sha256(raw).hexdigest(), 'enabled': config['enabled'],
             'feedback_enabled': config['feedback']['enabled'], 'targets': targets,
             'schemas': {kind: {**COMMON, **fields} for kind, fields in FIELDS.items()},
+            'types': channel_types(),
             **{s: {k: config[s][k] for k in keys} for s, keys in SECTIONS.items()}}
 
 
@@ -170,6 +221,8 @@ def send_test(path, target_id):
     target = next((t for t in config['targets'] if t['id'] == target_id), None)
     if not target or not config['enabled'] or not target['enabled']:
         raise ValueError('test_target_not_enabled')
+    if target['kind'] not in FIELDS:
+        raise ValueError('unsupported_target_kind')
     identifier = 'synthetic-' + uuid.uuid4().hex
     folder = Path(config['storage']['state_file']).parent / 'tests'
     folder.mkdir(parents=True, exist_ok=True)

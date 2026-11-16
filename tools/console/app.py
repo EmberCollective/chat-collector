@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import sys
@@ -26,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge import Bridge, atomic_json
 
 ROOT = Path(__file__).resolve().parent
-Module = Literal['wechat', 'qq']
+Module = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')]
 TextPath = Annotated[str, Field(min_length=1, max_length=4096)]
 
 
@@ -152,18 +155,13 @@ class ProcessorLimitsPatch(Model):
     max_input_chars: int = Field(default=None, ge=1000, le=1000000)
 
 
-class SourceDescriptionsPatch(Model):
-    qq: str = Field(default=None, max_length=10000)
-    wechat: str = Field(default=None, max_length=10000)
-
-
 class ProcessorConfigPatch(Model):
     model: ProcessorModelPatch = Field(default_factory=ProcessorModelPatch)
     agent: ProcessorAgentPatch = Field(default_factory=ProcessorAgentPatch)
     context: ProcessorContextPatch = Field(default_factory=ProcessorContextPatch)
     processing: ProcessorLimitsPatch = Field(default_factory=ProcessorLimitsPatch)
     schedule: ProcessorSchedulePatch = Field(default_factory=ProcessorSchedulePatch)
-    source_descriptions: SourceDescriptionsPatch = Field(default_factory=SourceDescriptionsPatch)
+    source_descriptions: dict[Annotated[str, Field(min_length=1, max_length=100)], Annotated[str, Field(max_length=10000)]] = Field(default_factory=dict, max_length=128)
 
 
 class SaveProcessorConfig(Model):
@@ -174,6 +172,19 @@ class SaveProcessorConfig(Model):
 class SaveRules(Model):
     revision: str = Field(pattern=r'^[0-9a-f]{64}$')
     text: str = Field(min_length=1, max_length=1024*1024)
+
+
+class ProcessorTaskUpdate(Model):
+    request_id: str = Field(min_length=1, max_length=200)
+    expected_revision: int = Field(ge=1)
+    status: Literal['open', 'completed'] | None = None
+    priority: Literal['P0', 'P1', 'P2', 'P3', 'P4'] | None = None
+
+    @model_validator(mode='after')
+    def one_change(self):
+        if (self.status is None) == (self.priority is None):
+            raise ValueError('每次修改状态或优先级中的一项')
+        return self
 
 
 class ProcessorPreview(Model):
@@ -193,6 +204,7 @@ class ProcessorPreview(Model):
 class Jobs:
     def __init__(self, bridge, runtime):
         self.bridge, self.runtime = bridge, Path(runtime)
+        self.processor_history = lambda: Path(bridge.processor.config()['storage']['state_file']).parent/'pi-runs'
         self.directory = self.runtime/'jobs'
         self.directory.mkdir(parents=True, exist_ok=True)
         self.mutex = threading.RLock()
@@ -214,6 +226,8 @@ class Jobs:
             thread.join()
 
     def submit(self, name, action, request, origin='manual'):
+        if name != 'processor':
+            self.bridge.require(name, {'preview':'query', 'collect':'collect', 'replay':'replay'}.get(action, 'unsupported'))
         with self.mutex:
             if name in self.running:
                 raise HTTPException(409, '本模块已有任务运行，请等待完成')
@@ -268,15 +282,18 @@ class Jobs:
             self.running.pop(job['module'], None)
 
     def detail(self, identifier):
+        from workflow import find_run_folder, read_run_metadata, local_record_file
         with self.mutex:
-            if identifier not in self.jobs:
-                raise HTTPException(404, '任务不存在或不在最近 100 个启动历史内')
-            job = dict(self.jobs[identifier])
-        path = self.directory/identifier/'result.json'
+            if identifier in self.jobs and not re.fullmatch(r'[0-9a-f]{32}', identifier):
+                return dict(self.jobs[identifier])
+        folder = find_run_folder(self, identifier, self.processor_history)
+        with self.mutex:
+            job = dict(self.jobs[identifier]) if identifier in self.jobs else read_run_metadata(folder, self)
+        path = local_record_file(folder, 'result.json')
         if job['status'] != 'running' and path.is_file():
             job.update(json.loads(path.read_text(encoding='utf-8')))
-        log = self.directory/identifier/'worker.log'
-        progress = self.directory/identifier/'pi-events.jsonl'
+        log = local_record_file(folder, 'worker.log')
+        progress = local_record_file(folder, 'pi-events.jsonl')
         if progress.is_file():
             with progress.open('rb') as stream:
                 stream.seek(max(0, progress.stat().st_size-256000))
@@ -307,18 +324,38 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        jobs.close()
+        def prewarm():
+            try:
+                app.state.overview.snapshot(24)
+            except Exception:
+                logging.getLogger(__name__).warning('Overview prewarm unavailable; requests can retry')
+        warmup = threading.Thread(target=prewarm, name='overview-prewarm', daemon=True)
+        warmup.start()
+        app.state.runtime_monitor.start()
+        try:
+            yield
+        finally:
+            jobs.close()
+            warmup.join(timeout=3)
+            app.state.runtime_monitor.close()
 
-    app = FastAPI(title='聊天收集调试控制台', version='0.1.0', docs_url=None, redoc_url=None,
+    app = FastAPI(title='拾序 · Loose Ends · 本地调试台', version='0.1.0', docs_url=None, redoc_url=None,
                   description='消息收集项目的可选本机调试工具。预览不推进断点；正式采集和重放会写入主项目。', lifespan=lifespan)
     app.state.jobs, app.state.bridge = jobs, bridge
     from messaging_routes import register_messaging_routes
     register_messaging_routes(app, bridge, authenticate)
     from operations_routes import register_operations_routes
     register_operations_routes(app, bridge, authenticate)
+    from workflow import register_workflow_routes
+    register_workflow_routes(app, jobs, authenticate, jobs.processor_history)
+    from history import register_history_routes
+    register_history_routes(app, jobs, authenticate, jobs.processor_history, bridge)
     from activity_routes import register_activity_routes
     register_activity_routes(app, bridge, jobs, authenticate)
+    from overview import register_overview_routes
+    register_overview_routes(app, bridge, jobs, authenticate)
+    from runtime_monitor import register_runtime_monitor_routes
+    register_runtime_monitor_routes(app, bridge, jobs, authenticate)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
@@ -332,6 +369,8 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
         if request.url.path.startswith('/api/') and request.headers.get('sec-fetch-site') == 'cross-site':
             return JSONResponse({'detail': '不接受跨站数据访问'}, 403)
         response = await call_next(request)
+        if request.method not in {'GET', 'HEAD', 'OPTIONS'} and response.status_code < 400:
+            await asyncio.to_thread(app.state.overview.invalidate)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Referrer-Policy'] = 'no-referrer'
@@ -354,7 +393,7 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @app.get('/docs', include_in_schema=False)
     def docs():
-        return get_swagger_ui_html(openapi_url='/openapi.json', title='收集控制台 · OpenAPI',
+        return get_swagger_ui_html(openapi_url='/openapi.json', title='拾序 · Loose Ends · OpenAPI',
             swagger_js_url='/static/vendor/swagger-ui-bundle.js', swagger_css_url='/static/vendor/swagger-ui.css',
             swagger_favicon_url='/static/icon.svg', swagger_ui_parameters={'persistAuthorization': False})
 
@@ -363,7 +402,11 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
         return {'token': token, 'application': 'chat-collector-console',
                 'root': str(bridge.root), 'pid': os.getpid()}
 
-    @app.get('/api/status', dependencies=[Depends(authenticate)], summary='查看两模块状态')
+    @app.get('/api/catalog', dependencies=[Depends(authenticate)], summary='信息源实例与操作能力')
+    def catalog():
+        return bridge.catalog()
+
+    @app.get('/api/status', dependencies=[Depends(authenticate)], summary='查看信息源状态')
     def status():
         modules = {}
         with jobs.mutex:
@@ -382,6 +425,10 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     def config(module: Module):
         return bridge.read_config(module)
 
+    @app.get('/api/modules/{module}/rulesets', dependencies=[Depends(authenticate)], summary='发现允许目录内的 SQL 规则与参数')
+    def rulesets(module: Module):
+        return bridge.rulesets(module)
+
     @app.patch('/api/modules/{module}/config', dependencies=[Depends(authenticate)], summary='校验、备份并保存配置')
     def save(module: Module, body: SaveConfig):
         with jobs.mutex:
@@ -396,6 +443,7 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @app.post('/api/modules/{module}/schedule', dependencies=[Depends(authenticate)], deprecated=True, summary='旧定时入口已移除')
     def schedule(module: Module, body: ScheduleControl):
+        bridge.require(module, 'schedule')
         raise HTTPException(410, '调试台定时器已移除，请在“自动任务”区域配置微信或 QQ 采集')
 
     @app.post('/api/modules/{module}/collect', status_code=202, dependencies=[Depends(authenticate)], summary='执行一轮正式增量采集')
@@ -460,6 +508,24 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
     @app.get('/api/processor/tasks', dependencies=[Depends(authenticate)], summary='查看结构化待办及来源证据')
     def processor_tasks(limit: int = Query(20, ge=1, le=100)):
         return {'tasks': bridge.processor.core().list_tasks(bridge.processor.config(), limit=limit)}
+
+    @app.patch('/api/processor/tasks/{task_id}', dependencies=[Depends(authenticate)], summary='完成、恢复待办或修改优先级')
+    def processor_task_update(task_id: str, body: ProcessorTaskUpdate):
+        from processor.service import (update_task_status, update_task_priority, TaskStatusBusy,
+                                       TaskStatusConflict, TaskStatusExportPending, UnknownTask)
+        update = update_task_status if body.status is not None else update_task_priority
+        try:
+            return update(bridge.processor.config(), task_id, body.status or body.priority,
+                          request_id=body.request_id, expected_revision=body.expected_revision,
+                          actor={'platform': 'local', 'user_id': 'console', 'source': 'processor-console'})
+        except TaskStatusBusy:
+            raise HTTPException(409, '待办正在更新，请稍后重试') from None
+        except TaskStatusConflict:
+            raise HTTPException(409, '待办已发生变化，请核对最新状态后重试；已替代的待办不能修改') from None
+        except UnknownTask:
+            raise HTTPException(404, '待办不存在，请刷新列表') from None
+        except TaskStatusExportPending:
+            return JSONResponse({'task_id': task_id, 'sync_pending': True}, status_code=202)
 
     @app.get('/api/processor/reviews', dependencies=[Depends(authenticate)], summary='查看分组结果与附件读取状态')
     def processor_reviews(limit: int = Query(20, ge=1, le=100)):

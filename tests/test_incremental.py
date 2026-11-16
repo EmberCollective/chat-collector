@@ -342,6 +342,50 @@ def test_multi_page_schema_and_index_growth_publishes_header_last(fixture,monkey
     assert refresh()['pages_written']==0
 
 
+def test_qq_resize_reads_locked_page_through_native_engine(tmp_path):
+    from collector.native_delta import capture_rows
+
+    library=Path(__file__).parents[1]/'runtime-deps/native/sqlcipher-qq-pages.dll'
+    if not all(path.exists() for path in (library,library.with_name('sqlite-dbdata-qq.dll'))):
+        pytest.skip('Build the isolated QQ native engine and dbdata extension first')
+    # Move the real Windows byte lock into a small database instead of allocating 1 GiB.
+    options={'library':library,'pending_byte':16*4096-1024}
+    original,source,target=(tmp_path/name for name in ('source/encrypted.db','source/nt_msg.db','plain/qq-native.db'))
+    original.parent.mkdir()
+    try:
+        with NativeSQLite(original,**options) as db:
+            db.execute("PRAGMA key='test-only-key'")
+            for pragma in ('cipher_page_size=4096','kdf_iter=4000','cipher_hmac_algorithm=HMAC_SHA1','cipher_kdf_algorithm=PBKDF2_HMAC_SHA512'):
+                db.execute('PRAGMA '+pragma)
+            db.execute('CREATE TABLE messages(id INTEGER PRIMARY KEY,body BLOB)')
+            db.execute('BEGIN')
+            for number in range(80):db.execute('INSERT INTO messages VALUES(?,?)',(number,b'x'*5000))
+            db.execute('COMMIT')
+            def refresh():
+                source.write_bytes(bytes(1024)+original.read_bytes())
+                return incremental.refresh_database(source,target,platform='qq',account='test',key='test-only-key',collect_changes=capture_rows,**options)
+            first=refresh()
+            assert first['pages_total']>16
+            db.execute("UPDATE messages SET body=x'65646974' WHERE id=1")
+            db.execute('DELETE FROM messages WHERE id=2')
+            db.execute('INSERT INTO messages VALUES(?,?)',(1000,b'new'*20000))
+            second=refresh()
+            assert second['mode']=='incremental' and second['pages_total']>first['pages_total']
+            assert {1,2,1000}<=set(second['_row_candidates']['messages'])
+            with NativeSQLite(target,readonly=True,**options) as plain:
+                assert plain.execute('PRAGMA integrity_check')==[('ok',)]
+                assert plain.execute('SELECT * FROM messages ORDER BY id')==db.execute('SELECT * FROM messages ORDER BY id')
+            db.execute('DELETE FROM messages WHERE id>15')
+            db.execute('VACUUM')
+            third=refresh()
+            assert 16<third['pages_total']<second['pages_total']
+            with NativeSQLite(target,readonly=True,**options) as plain:
+                assert plain.execute('PRAGMA integrity_check')==[('ok',)]
+                assert plain.execute('SELECT * FROM messages ORDER BY id')==db.execute('SELECT * FROM messages ORDER BY id')
+    finally:
+        with NativeSQLite(':memory:',library=library,pending_byte=0x3ffffc00):pass
+
+
 def test_only_wechat_recovers_once_after_rollback_and_source_validation(fixture,monkeypatch):
     source,target,refresh=fixture
     refresh()

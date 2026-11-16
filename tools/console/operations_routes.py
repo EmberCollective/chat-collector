@@ -26,6 +26,7 @@ class JobSettings(StrictModel):
 
 class ListenerSettings(StrictModel):
     enabled: bool
+    check_interval_seconds: int = Field(default=5, ge=1, le=60)
 
 
 class AlertSettings(StrictModel):
@@ -73,6 +74,24 @@ def errors():
 
 
 def register_operations_routes(app, bridge, authenticate):
+    @app.get('/api/operations/catalog', dependencies=[Depends(authenticate)])
+    def catalog():
+        from automation import load_config
+        from automation.history import ACTIONS
+        labels = {'process': '待办处理', 'deliver': '消息投递', 'feedback': '状态回写'}
+        path = bridge.root / bridge.settings.get('automation_config', 'config/automation.toml')
+        with errors():
+            cfg = load_config(path)
+            result = {}
+            for name, settings in cfg['jobs'].items():
+                source = next((identifier for identifier, file in bridge.paths.items()
+                               if file == Path(settings['config']).resolve()), None)
+                action = ACTIONS[name]
+                label = bridge.sources[source]['name'] if source else Path(settings['config']).name
+                result[name] = {'name': label + ' · 采集' if action == 'collect' else labels.get(action, action),
+                                'action': action, 'source_id': source, 'config_file': settings['config']}
+            return {'jobs': result}
+
     @app.get('/api/operations/startup', dependencies=[Depends(authenticate)])
     def read_startup():
         from tools.install.startup import startup_status
@@ -103,7 +122,7 @@ def register_operations_routes(app, bridge, authenticate):
         auto = {'enabled': cfg['enabled'],
                 'jobs': {name: {key: cfg['jobs'][name][key] for key in JobSettings.model_fields}
                          for name in ('wechat', 'qq', 'processor', 'messaging', 'feedback')},
-                'listener': {'enabled': cfg['listener']['enabled']},
+                'listener': {key: cfg['listener'][key] for key in ListenerSettings.model_fields},
                 'alerts': {key: cfg['alerts'][key] for key in AlertSettings.model_fields}}
         return {'version': {'automation': _hash(raw), 'messaging': msg.pop('version')},
                 'automation': auto, 'messaging': msg}
@@ -126,7 +145,7 @@ def register_operations_routes(app, bridge, authenticate):
             old_config = load_config(auto_path)
             running = control.status(old_config)['running']
             document = tomlkit.parse(old_auto.decode('utf-8'))
-            patch = body.automation.model_dump()
+            patch = body.automation.model_dump(exclude_unset=True)
             document['enabled'] = patch['enabled']
             for name, values in patch['jobs'].items():
                 document.setdefault('jobs', {}).setdefault(name, {}).update(values)
@@ -144,7 +163,7 @@ def register_operations_routes(app, bridge, authenticate):
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 backup.write_bytes(old_auto)
                 backup.with_name(backup.name.replace('automation-', 'messaging-', 1)).write_bytes(old_msg)
-                payload = {k: v for k, v in body.messaging.items() if k not in {'schemas', 'version'}}
+                payload = {k: v for k, v in body.messaging.items() if k not in {'schemas', 'types', 'version'}}
                 saved = save_settings(msg_path, payload, body.version['messaging'])
                 try:
                     if auto_path.read_bytes() != old_auto:

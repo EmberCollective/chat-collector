@@ -1,0 +1,22 @@
+﻿<section class="panel monitor-panel" aria-labelledby="monitor-title" id="runtime-monitor">
+ <div class="panel-head"><div><h2 id="monitor-title">机器负载</h2><p id="monitor-current" class="muted"></p></div><label class="monitor-disk-picker"><span class="sr-only">监测的物理磁盘</span><select id="monitor-disk" aria-label="监测的物理磁盘"></select></label></div>
+ <div class="monitor-metrics" id="monitor-metrics"></div>
+ <div class="monitor-plot">
+  <div class="monitor-legend"><span><i class="cpu-key"></i>整机 CPU</span><span><i class="disk-key"></i>硬盘繁忙度</span><span class="muted" id="monitor-asof"></span></div>
+  <div id="monitor-chart" tabindex="0" role="group" aria-roledescription="交互式折线图" aria-label="最近 60 秒整机 CPU 与硬盘繁忙度" aria-describedby="monitor-chart-help"></div>
+  <span id="monitor-chart-help" class="sr-only">鼠标移入查看同刻数值；触屏点按或横向拖动查看。键盘左右方向键选点，Home 和 End 跳至首末，Escape 收起。</span>
+  <span id="monitor-announcement" class="sr-only" aria-live="polite"></span>
+  <p id="monitor-health" class="monitor-health" hidden></p>
+ </div>
+ <details class="monitor-attribution" id="monitor-attribution"><summary>模块占用与采样口径</summary><div class="monitor-attribution-body">
+  <div class="monitor-attribution-head"><p class="muted" id="monitor-process-asof"></p><label>模块<select id="monitor-module" aria-label="按模块筛选负载"></select></label></div>
+  <p id="monitor-attribution-note" class="monitor-attribution-note"></p>
+  <div class="table-wrap"><table><thead><tr><th>模块 / 进程</th><th>CPU</th><th>读取</th><th>写入</th><th>归属说明</th></tr></thead><tbody id="monitor-processes"></tbody></table></div>
+  <div class="monitor-definitions">
+   <p>CPU 以整机总算力为 100%；程序进程包含已核验的后台、控制台、监听与任务子进程，不含浏览器，父子进程去重。</p>
+   <p>上图为所选物理盘，包含其他程序访问。表中为进程 I/O，可能含缓存和其他磁盘，不能与整盘读写直接对账。共用进程不平分给各模块；“—”表示未运行或未取得。</p>
+   <p>拟采用轻量探针：仅概览可见时每 5 秒采样，最近 60 秒留在内存，不落库、不持续追踪调用栈；短任务可能漏采，曲线不是精确峰值。</p>
+   <p id="monitor-unavailable-reason">此为静态合成数据，尚未启动探针或测量实际监测开销。</p>
+  </div>
+ </div></details>
+</section>

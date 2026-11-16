@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from contextlib import closing
+from contextlib import closing, nullcontext
 import json
 import os
 from pathlib import Path
@@ -240,6 +240,7 @@ def _refresh_database(source,target,*,platform,account,key,key_mode,work_dir,lib
                     'pages_total':count,'cipher_bytes_written':written,'database':str(target),
                     'timings_seconds':{'capture':round(capture_seconds,3),'total':round(time.perf_counter()-started,3)}}
         phase=time.perf_counter()
+        stage_timings={}
         recovery=None
         if not full:
             try:
@@ -255,17 +256,39 @@ def _refresh_database(source,target,*,platform,account,key,key_mode,work_dir,lib
                     diagnostic['rollback']='pending'
                     try:
                         diagnostic['stage']='read_previous'
+                        step=time.perf_counter()
                         if collect_changes:
                             dirty_pages=set(changed)|set(range(count+1,len(previous)+1))
                             old_schema=destination.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
                             before_rows=collect_changes(destination, dirty_pages)
+                        stage_timings['candidates_before']=round(time.perf_counter()-step,3)
                         resized=count!=len(previous)
                         image=None
+                        step=time.perf_counter()
                         if resized:
+                            diagnostic['stage']='resize_image'
                             image=bytearray(count*PAGE_SIZE)
-                            for number,page in destination.iterate('SELECT pgno,data FROM sqlite_dbpage WHERE pgno<=?',(count,)):
-                                image[(number-1)*PAGE_SIZE:number*PAGE_SIZE]=page
+                            # The open SQLite transaction recovered journals and excludes other writers.
+                            with target.open('rb') as stream:
+                                size=min(count,len(previous))*PAGE_SIZE
+                                view=memoryview(image)
+                                lock_page=(pending_byte if pending_byte is not None else 0x40000000)//PAGE_SIZE+1
+                                lock_offset=(lock_page-1)*PAGE_SIZE
+                                offset=0
+                                while offset<size:
+                                    # Windows denies raw reads of SQLite's locked page, even in this process.
+                                    if offset==lock_offset:
+                                        view[offset:offset+PAGE_SIZE]=destination.execute('SELECT data FROM sqlite_dbpage WHERE pgno=?',(lock_page,))[0][0]
+                                        offset+=PAGE_SIZE
+                                        stream.seek(offset)
+                                        continue
+                                    end=min(offset+1024*1024,size,lock_offset if offset<lock_offset else size)
+                                    received=stream.readinto(view[offset:end])
+                                    if not received:raise RuntimeError('incremental_snapshot_image_incomplete')
+                                    offset+=received
+                        stage_timings['resize_image']=round(time.perf_counter()-step,3)
                         # Publish the new schema header only after its referenced pages are present.
+                        step=time.perf_counter()
                         for number in sorted(set(changed)-{1})+[1]:
                             diagnostic.update(stage='read_page',page=number)
                             page=encrypted.execute('SELECT data FROM sqlite_dbpage WHERE pgno=?',(number,))[0][0]
@@ -282,27 +305,29 @@ def _refresh_database(source,target,*,platform,account,key,key_mode,work_dir,lib
                         destination.execute('DELETE FROM page_state.pages WHERE pgno>?',(count,))
                         diagnostic.update(stage='schema_reload',page=None)
                         destination.execute('PRAGMA writable_schema=RESET')
+                        stage_timings['page_write']=round(time.perf_counter()-step,3)
                         diagnostic['stage']='verify'
                         _fault('before_integrity_check')
-                        if image is not None:
+                        with NativeSQLite(':memory:',**native_options) if image is not None else nullcontext(destination) as checked:
                             # dbpage changes the pager size at commit; check the prospective image in RAM.
-                            with NativeSQLite(':memory:',**native_options) as checked:
+                            if image is not None:
                                 checked.deserialize(image)
-                                _verify(checked,full=platform!='qq')
-                                if collect_changes:
-                                    after_rows=collect_changes(checked, dirty_pages)
-                                    new_schema=checked.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
-                        else:
-                            _verify(destination,full=platform!='qq')
+                            step=time.perf_counter()
+                            _verify(checked,full=platform!='qq')
+                            stage_timings['verify']=round(time.perf_counter()-step,3)
+                            step=time.perf_counter()
                             if collect_changes:
-                                after_rows=collect_changes(destination, dirty_pages)
-                                new_schema=destination.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
-                        if collect_changes and old_schema==new_schema:
-                            from .native_delta import merge_candidates
-                            candidates=merge_candidates(before_rows,after_rows)
+                                new_schema=checked.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
+                                if old_schema==new_schema:
+                                    from .native_delta import merge_candidates
+                                    after_rows=collect_changes(checked, dirty_pages)
+                                    candidates=merge_candidates(before_rows,after_rows,checked)
+                            stage_timings['candidates_after']=round(time.perf_counter()-step,3)
                         diagnostic['stage']='commit'
                         _fault('before_commit')
+                        step=time.perf_counter()
                         destination.execute('COMMIT')
+                        stage_timings['commit']=round(time.perf_counter()-step,3)
                         diagnostic['rollback']='not_needed'
                     except BaseException:
                         try:
@@ -363,4 +388,5 @@ def _refresh_database(source,target,*,platform,account,key,key_mode,work_dir,lib
                 'cipher_bytes_written':written,'quick_check_ok':True,
                 'validation':'integrity_check' if full or platform!='qq' else 'quick_check',
                 'timings_seconds':{'capture':round(capture_seconds,3),'update_and_verify':round(time.perf_counter()-phase,3),
+                                   **stage_timings,
                                    'total':round(time.perf_counter()-started,3)}}

@@ -156,3 +156,35 @@ def test_probe_exception_is_sanitized(settings, monkeypatch):
     result = management.send_test(settings, 'sample')
     assert result['status'] == 'unknown'
     assert 'secret-token' not in json.dumps(result)
+
+
+def test_channel_descriptors_supply_fields_defaults_and_capabilities(settings):
+    result = management.read_settings(settings)
+    for kind, schema in result['schemas'].items():
+        description = result['types'][kind]
+        assert set(description['fields']) == set(schema)
+        assert description['defaults']['enabled'] is False
+        assert description['capabilities']['send'] and description['capabilities']['test']
+        assert all(description['fields'][key]['type'] == value for key, value in schema.items())
+    assert result['types']['feishu_app']['capabilities']['listener']
+    assert not result['types']['webhook']['capabilities']['files']
+    assert not result['types']['notion']['capabilities']['listener']
+    assert result['types']['webhook']['fields']['mode']['choices']['notify'] == '消息通知'
+    assert result['types']['notion']['fields']['properties']['fields']['date']['label'] == '日期'
+    result['types']['feishu_app']['defaults']['upload_files'] = False
+    assert management.read_settings(settings)['types']['feishu_app']['defaults']['upload_files'] is True
+
+
+def test_unknown_targets_are_visible_but_secrets_and_actions_remain_unavailable(settings):
+    with settings.open('a', encoding='utf-8') as stream:
+        stream.write('\n[[targets]]\nid="future"\nkind="not-installed"\nenabled=true\nsecret="never-output-this"\n')
+    current = management.read_settings(settings)
+    unknown = current['targets'][-1]
+    assert unknown['id'] == 'future' and unknown['kind'] == 'not-installed'
+    assert unknown['kind'] not in current['types'] and unknown['kind'] not in current['schemas']
+    assert 'never-output-this' not in json.dumps(current)
+    with pytest.raises(ValueError, match='unsupported_target_kind'):
+        management.send_test(settings, 'future')
+    management.save_settings(settings, {'enabled': False}, current['version'])
+    stored = tomlkit.parse(settings.read_text(encoding='utf-8'))
+    assert stored['targets'][-1]['secret'] == 'never-output-this'

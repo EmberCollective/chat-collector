@@ -87,6 +87,17 @@ def test_real_pi_subprocess_reads_allowed_attachment_and_submits(endpoint, monke
     assert len({e['run_id'] for e in events}) == 1
     assert 'fixture-secret' not in json.dumps(events)
     assert 'Submit report tomorrow' not in json.dumps(events)
+    records = [json.loads(line) for line in (tmp_path/'pi-workflow.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert records[0]['type'] == 'run_created' and records[-1]['type'] == 'transport_end'
+    assert [record['seq'] for record in records] == list(range(1, len(records) + 1))
+    assert {record['run_id'] for record in records} == {events[0]['run_id']}
+    context = [record['body'] for record in records if record['type'] == 'request_prepared']
+    assert len(context) == len(requests) == 2
+    assert context[0]['messages'] == requests[0]['messages']
+    assert 'Submit report tomorrow' in json.dumps(context[1])
+    assert any(record['type'] == 'tool_execution_start' and record['body']['arguments'] == {'ref': 'f1', 'pages': '2'} for record in records)
+    assert any(record['type'] == 'tool_execution_end' and 'f1:p2' in json.dumps(record['body']) for record in records)
+    assert 'fixture-secret' not in json.dumps(records)
 
 
 def test_attachment_exception_is_redacted_before_returning_to_model(endpoint):

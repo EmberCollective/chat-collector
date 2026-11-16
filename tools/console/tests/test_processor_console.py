@@ -8,6 +8,75 @@ import pytest
 from test_console import console, wait_job
 
 
+@pytest.fixture
+def editable_task(console):
+    from processor import storage
+    client, app, _, _ = console
+    with storage._connect(app.state.bridge.processor.config(), write=True) as conn, conn:
+        storage._save_task(conn, {'task_id': 'editable', 'title': '测试事项', 'event': '提交方案',
+                                 'priority': 'P2', 'status': 'open', 'sources': []})
+    return client, app
+
+
+def test_task_edits_are_versioned_idempotent_and_published(editable_task, monkeypatch):
+    client, app = editable_task
+    from automation import wakeup
+    notified = []
+    monkeypatch.setattr(wakeup, 'notify', lambda *args: notified.append(args))
+    url = '/api/processor/tasks/editable'
+    first = {'request_id': 'complete-once', 'expected_revision': 1, 'status': 'completed'}
+    response = client.patch(url, json=first)
+    assert response.status_code == 200, response.text
+    assert response.json()['revision'] == 2
+    assert client.patch(url, json=first).json() == response.json()
+    assert client.patch(url, json={**first, 'request_id': 'stale'}).status_code == 409
+    for revision, change in [(2, {'status': 'open'}), (3, {'priority': 'P0'})]:
+        result = client.patch(url, json={'request_id': str(revision), 'expected_revision': revision, **change})
+        assert result.status_code == 200 and result.json()['revision'] == revision + 1
+    task = client.get('/api/processor/tasks').json()['tasks'][0]
+    assert task['status'] == 'open' and task['priority'] == 'P0'
+    assert task['priority_control']['actor']['source'] == 'processor-console'
+    config = app.state.bridge.processor.config()
+    assert (config['_config_path'], 'messaging') in notified
+    events = [json.loads(line) for path in Path(config['storage']['output_dir']).glob('*.jsonl')
+              for line in path.read_text(encoding='utf-8').splitlines()]
+    assert any(event['revision'] == 4 and event['task']['priority'] == 'P0' for event in events)
+
+
+def test_task_edits_validate_and_protect_existing_tasks(editable_task):
+    client, app = editable_task
+    url = '/api/processor/tasks/editable'
+    body = {'request_id': 'edit', 'expected_revision': 1, 'status': 'completed'}
+    for invalid in ({}, {**body, 'expected_revision': True}, {**body, 'status': 'cancelled'},
+                    {**body, 'priority': 'P0'}, {**body, 'status': None},
+                    {**body, 'status': None, 'priority': 'P9'}, {**body, 'actor': {}}):
+        assert client.patch(url, json=invalid).status_code == 422
+    assert client.patch(url, json=body, headers={'X-Console-Token': 'bad'}).status_code == 401
+    assert client.patch(url, json=body, headers={'Origin': 'https://evil.example'}).status_code == 403
+    assert client.patch('/api/processor/tasks/missing', json=body).status_code == 404
+    with app.state.bridge.lock(app.state.bridge.processor.config()['storage']['state_file']):
+        assert client.patch(url, json=body).status_code == 409
+    assert client.get('/api/processor/tasks').json()['tasks'][0]['revision'] == 1
+    from processor import storage
+    with storage._connect(app.state.bridge.processor.config(), write=True) as conn, conn:
+        task = json.loads(conn.execute('SELECT body FROM tasks').fetchone()[0])
+        storage._save_task(conn, dict(task, status='superseded'))
+    assert client.patch(url, json={**body, 'expected_revision': 2}).status_code == 409
+
+
+def test_task_edit_reports_saved_state_when_publication_needs_retry(editable_task, monkeypatch):
+    client, app = editable_task
+    from processor import service
+    body = {'request_id': 'retry-publication', 'expected_revision': 1, 'status': 'completed'}
+    with monkeypatch.context() as patch:
+        patch.setattr(service, '_export_pending', lambda *_: (_ for _ in ()).throw(OSError('disk unavailable')))
+        response = client.patch('/api/processor/tasks/editable', json=body)
+    assert response.status_code == 202 and response.json()['sync_pending'] is True
+    assert client.get('/api/processor/tasks').json()['tasks'][0]['status'] == 'completed'
+    response = client.patch('/api/processor/tasks/editable', json=body)
+    assert response.status_code == 200 and response.json()['revision'] == 2
+
+
 def test_preview_worker_is_read_only_and_unconfigured_run_is_blocked(console, monkeypatch):
     client, app, root, _ = console
     import urllib.request

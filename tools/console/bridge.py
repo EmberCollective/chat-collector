@@ -20,6 +20,7 @@ import uuid
 import tomlkit
 import psutil
 from processing_bridge import ProcessingBridge
+from catalog import SOURCE_KINDS, source_descriptor, source_entries
 
 
 def atomic_json(path, value):
@@ -45,17 +46,50 @@ class Bridge:
         self.load = load_config
         self.run_round, self.lock = run_round, InstanceLock
         self.processor = ProcessingBridge(self.root, self.settings)
-        self.paths = {name: (self.root / path).resolve(strict=True)
-                      for name, path in self.settings['modules'].items()}
-        if set(self.paths) != {'wechat', 'qq'}:
-            raise ValueError('modules 必须包含 wechat 和 qq')
-        for name in self.paths:
-            if self.config(name)['platform'] != name:
-                raise ValueError('模块与配置平台不匹配')
+        self.paths, self.sources = {}, {}
+        states = set()
+        for identifier, spec in source_entries(self.settings):
+            config = None
+            if spec.get('kind') in SOURCE_KINDS or not spec.get('kind'):
+                if not spec.get('config'):
+                    raise ValueError('内置信息源需要 config 路径')
+                path = (self.root / spec['config']).resolve(strict=True)
+                config = self.load(path)
+                if spec.get('kind', config['platform']) != config['platform']:
+                    raise ValueError('信息源类型与配置平台不匹配')
+                state = Path(config['storage']['state_file']).resolve()
+                if path in self.paths.values() or state in states:
+                    raise ValueError('信息源实例不能共享配置文件或状态库')
+                self.paths[identifier] = path
+                states.add(state)
+            self.sources[identifier] = source_descriptor(identifier, spec, config)
+
+    def catalog(self):
+        return {'sources': list(self.sources.values())}
+
+    def rulesets(self, name):
+        self.require(name, 'sql')
+        from rules import discover_rules
+        return discover_rules(self.root, self.paths[name], self.config(name))
+
+    def require(self, name, capability):
+        source = self.sources.get(name)
+        if not source:
+            raise ValueError('信息源不存在')
+        if not source['capabilities'].get(capability, False):
+            raise ValueError('此信息源不支持当前操作：' + capability)
+        return source
+
+    def source_instance(self, platform, account_id=None):
+        matches = [source['id'] for source in self.sources.values()
+                   if source['kind'] == platform and source['capabilities']['messages']
+                   and (account_id is None or source['account_id'] == account_id)]
+        return matches[0] if len(matches) == 1 else None
 
     def config(self, name):
         if name == 'processor':
             return self.processor.config()
+        self.require(name, 'configure')
         return self.load(self.paths[name])
 
     def external_runner(self):
@@ -78,6 +112,7 @@ class Bridge:
             return {'verified': False, 'message': '无法核验原定时采集状态：'+type(exc).__name__}
 
     def read_config(self, name):
+        self.require(name, 'configure')
         raw = self.paths[name].read_bytes()
         config = tomllib.loads(raw.decode('utf-8'))
         config.setdefault('processing', {}).setdefault('intensity', 'full')
@@ -88,6 +123,7 @@ class Bridge:
                 'config': config, 'file': str(self.paths[name])}
 
     def write_config(self, name, revision, patch, backup_dir):
+        self.require(name, 'configure')
         path = self.paths[name]
         before = path.read_bytes()
         if hashlib.sha256(before).hexdigest() != revision:
@@ -134,6 +170,7 @@ class Bridge:
                 temporary.unlink(missing_ok=True)
 
     def connect_state(self, name):
+        self.require(name, 'messages')
         path = Path(self.config(name)['storage']['state_file']).resolve()
         if not path.is_file():
             return None
@@ -192,6 +229,7 @@ class Bridge:
             connection.close()
 
     def asset(self, name, seq, filename):
+        self.require(name, 'files')
         if not re.fullmatch(r'[0-9a-f]{64}\.[a-z0-9]{1,12}', filename):
             raise ValueError('附件名称无效')
         connection = self.connect_state(name)
@@ -268,6 +306,10 @@ class Bridge:
             if action in {'processor_preview', 'process'} and request.get('start') is not None:
                 return self.context_window(request, process=action == 'process')
             return self.processor.execute(action, request)
+        capability = {'collect': 'collect', 'replay': 'replay', 'preview': 'query'}.get(action)
+        if not capability:
+            raise ValueError('未知采集操作')
+        self.require(name, capability)
         config = self.config(name)
         if action == 'collect':
             return self.run_round(config)

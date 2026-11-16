@@ -23,9 +23,15 @@
 ![飞书合成测试卡片：行动说明、完成待办和稍后提醒按钮，下方附带 connection-test.txt 文件](assets/readme/feishu-card.png)
 
 <details>
-<summary>查看本地调试台：采集状态、SQL 预览、待办处理与任务记录</summary>
+<summary>查看本地调试台：运行概览、自动化与 Pi 工作流</summary>
 
-![本地调试台：微信与 QQ 采集状态、SQL 筛选与重放、模型处理、消息层和任务记录](assets/readme/console.png)
+以下为已实现页面使用合成展示数据的截图，不代表本机真实运行情况。
+
+![拾序运行概览：当前故障、后台状态、入库变更、采集成功率与趋势](assets/readme/console.png)
+
+![拾序自动化：分类配置投递、提醒、监听与目标通道](assets/readme/console-automation.png)
+
+概览先显示故障与结果未知，再核对服务、积压、采集条数和耗时；来源占比可切换为文件逻辑大小占比。自动化统一配置采集与处理、投递与提醒、后台服务；SQL 规则按目录发现并勾选。运行记录可按操作、模块、触发方式和耗时筛选，Pi 工作流可追查上下文、模型可见输出与工具调用。
 
 </details>
 
@@ -44,26 +50,29 @@
 
 当前提供 **Windows x64 本地使用预览包**，安装需要联网。
 
-1. 按 [安装指南](docs/installation.md) 准备预览包，解压后双击 `Install.cmd`，选择空目录安装。无需预装 Python、Node 或编译器。
+1. 按 [安装指南](docs/guides/installation.md) 准备预览包，解压后双击 `Install.cmd`，选择空目录安装。无需预装 Python、Node 或编译器。
 2. 按引导选择微信 / QQ，完成首次取钥，填写模型配置；飞书可选，稍后也能接入其他渠道。
 3. 引导首次处理最近 7 日符合 SQL 规则的消息；日常双击 `Start.cmd`，在本地调试台查看状态、预览筛选和调整规则。
 
-源码安装与分层运行见 [开发指南](docs/development.md)。源码目录的 `Install.cmd` 使用已有发布 ZIP，缺包时需先按安装指南构建。
+源码安装与分层运行见 [开发指南](docs/guides/development.md)。源码目录的 `Install.cmd` 使用已有发布 ZIP，缺包时需先按安装指南构建。
 
 ## 按需调整与扩展
 
 | 想做什么 | 从这里开始 |
 |---|---|
 | 只收集指定群、关键词、文件或上下文 | [SQL 规则](FILTERS.md) |
-| 自定义待办判断、优先级与模型 | [默认规则](processing-rules/default.md) · [处理配置](docs/processing.md) |
-| 配置飞书、Notion、提醒与操作反馈 | [渠道配置](docs/messaging-channels.md) · [飞书设置](docs/feishu-setup.md) |
-| 接入其他消息来源或通知平台 | [收集层开发](docs/collector-development.md) · [数据契约](docs/data-contract.md) · [渠道开发](docs/channel-development.md) |
-| 设置自动运行、失败重试与恢复 | [自动化](docs/automation.md) |
+| 自定义待办判断、优先级与模型 | [默认规则](processing-rules/default.md) · [处理配置](docs/processor/processing.md) |
+| 配置飞书、Notion、提醒与操作反馈 | [渠道配置](docs/information/channels/configuration.md) · [飞书设置](docs/information/channels/feishu-setup.md) |
+| 接入其他消息来源或通知平台 | [收集层开发](docs/collector/acquisition/development.md) · [数据契约](docs/processor/input-contract.md) · [渠道开发](docs/information/channels/development.md) |
+| 设置自动运行、失败重试与恢复 | [自动化](docs/information/dispatch/automation.md) |
+| 快速查询消息、分析索引与采集性能 | [查询方法](docs/collector/acquisition/fast-query.md) · [查询实现](docs/collector/compatibility/query-implementation.md) |
 
 ## 使用边界
 
+- **数据授权**：仅处理你本人或已获明确授权的本地聊天与附件；保护其他参与者的隐私，并遵守微信、QQ 及所用服务的平台协议与适用法律。本项目不代表腾讯或相关上游项目，引用其名称不表示官方授权或背书。
 - **账号与兼容性**：本地解密减少了与平台服务的交互，但没有封号率实测，不能保证零风险。首次取钥涉及微信 Hook 或 QQ 进程内存读取；客户端升级可能影响兼容性。
 - **隐私与费用**：配置远程模型后，选中消息及实际读取的附件会发到该服务；启用通知渠道后，相应待办和材料会离开本机。修改待办规则可能重新处理历史分组并产生费用。
 - **结果与数据**：模型可能误判，需结合来源核对。聊天、附件和凭据均属敏感数据，请保管好 `.env`、`secrets/` 与 `data/`；已有部署请勿用新包直接覆盖。
+- **第三方与分发**：仓库根目录尚无项目许可证文件，部分上游授权仍待解决，不能视为已获任意再分发许可。来源、许可证原文、修改记录及当前缺口见 [第三方说明](THIRD_PARTY_NOTICES.md)。以上使用边界不能替代第三方许可或平台授权。
 
-更多说明见 [文档索引](docs/README.md)，增量机制与实测见 [增量刷新](docs/incremental-refresh.md)。
+更多说明见 [文档索引](docs/README.md)，增量机制与实测见 [增量刷新](docs/collector/acquisition/incremental-refresh.md)。

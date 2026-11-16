@@ -1,0 +1,224 @@
+{
+  "checked_at": "2026-11-14",
+  "scope": "Directly copied third-party code, installed primary Pi packages, native artifacts currently checked, and material copyleft runtime components; not a complete transitive-dependency or legal audit.",
+  "project_license": {
+    "root_LICENSE_present": false,
+    "license_selected_by_this_audit": false
+  },
+  "wechat_python_core": {
+    "repository": "https://github.com/LifeArchiveProject/WeChatDataAnalysis",
+    "tag": "v2.10.1",
+    "tag_commit_at_check": "3169559943a13e8e5af014acfb61ef77ec657375",
+    "installer_commit": "22583491de87c574d26547e80ecbf9520419237f",
+    "tree_api": "https://api.github.com/repos/LifeArchiveProject/WeChatDataAnalysis/git/trees/3169559943a13e8e5af014acfb61ef77ec657375?recursive=1",
+    "tree_complete": true,
+    "readme_url": "https://github.com/LifeArchiveProject/WeChatDataAnalysis/blob/3169559943a13e8e5af014acfb61ef77ec657375/README.md",
+    "readme_sha256": "01e39f486b429ed80b6762bb5a757c6ca4e466febb19a11232c951af6b69097e",
+    "covering_project_license_found": false,
+    "note": "Component-specific licenses elsewhere in the tree do not cover these Python files. The same file bytes occur in the installer commit. Absence of an identified license is not permission.",
+    "files": [
+      {
+        "path": "src/wechat_decrypt_tool/wechat_decrypt.py",
+        "url": "https://raw.githubusercontent.com/LifeArchiveProject/WeChatDataAnalysis/3169559943a13e8e5af014acfb61ef77ec657375/src/wechat_decrypt_tool/wechat_decrypt.py",
+        "upstream_sha256_lf": "829007e32f0b52e138de755448fe786891e5a0f02010cab2fb2566d1470a3563",
+        "extraction_sha256_crlf": "93fe0e93b221e0600c22cea341d2b0e543ff09f8e668b68c71bc929568c9a7ad"
+      },
+      {
+        "path": "src/wechat_decrypt_tool/sqlite_wal.py",
+        "url": "https://raw.githubusercontent.com/LifeArchiveProject/WeChatDataAnalysis/3169559943a13e8e5af014acfb61ef77ec657375/src/wechat_decrypt_tool/sqlite_wal.py",
+        "upstream_sha256_lf": "50b60543251f3c01c85bdb5d3bf40b446bea391c38f7a168c82eda49252b13d0",
+        "extraction_sha256_crlf": "fca53149972cba5c08bf89ff06ed6634468505947150dbeb01f2478d18ba8ba5"
+      },
+      {
+        "path": "src/wechat_decrypt_tool/sqlite_diagnostics.py",
+        "url": "https://raw.githubusercontent.com/LifeArchiveProject/WeChatDataAnalysis/3169559943a13e8e5af014acfb61ef77ec657375/src/wechat_decrypt_tool/sqlite_diagnostics.py",
+        "upstream_sha256_lf": "fa9ec6a8b84e2bd6c6cdb0ad89fc74cf5b40976ef35d1c56002040aa5044a06c",
+        "extraction_sha256_crlf": "e819e20afd4ec6950fdd24271c96fe2814be3c9dc1d17544a8f0c0281b3ddd80"
+      },
+      {
+        "path": "src/wechat_decrypt_tool/chat_helpers.py",
+        "url": "https://raw.githubusercontent.com/LifeArchiveProject/WeChatDataAnalysis/3169559943a13e8e5af014acfb61ef77ec657375/src/wechat_decrypt_tool/chat_helpers.py",
+        "upstream_sha256_lf": "2211d0320550bc696ed21e88894d10cb4b6ce04babcef4c05aeea482327cb284",
+        "extraction_sha256_crlf": "a8277263921fb9e80b0c92026d9591f280aca3acf76dce0d40c6e6fd06ee8823"
+      }
+    ],
+    "local_modification_record": "collector/vendor/wechat/UPSTREAM.md"
+  },
+  "wx_key": {
+    "name": "wx_key",
+    "version": "2.0.1",
+    "wheel_url": "https://raw.githubusercontent.com/LifeArchiveProject/WeChatDataAnalysis/22583491de87c574d26547e80ecbf9520419237f/tools/key_wheels/wx_key-2.0.1-cp313-cp313-win_amd64.whl",
+    "wheel_sha256": "f4a78ee8525baf93f712f4603ac9f1e98763c824d3e292060d067926a0f4f8c4",
+    "wheel_license_files": [],
+    "wheel_metadata_license_field_present": false,
+    "upstream_pointer_url": "https://github.com/LifeArchiveProject/WeChatDataAnalysis/blob/22583491de87c574d26547e80ecbf9520419237f/tools/key_wheels/README.md",
+    "pointed_repository": "https://github.com/H3CoF6/py_wx_key",
+    "pointed_tag": "v2.0.1",
+    "pointed_commit_at_check": "351c44af4dd3b0d21b92c94c842417357e88c47f",
+    "pointed_tree_api": "https://api.github.com/repos/H3CoF6/py_wx_key/git/trees/351c44af4dd3b0d21b92c94c842417357e88c47f?recursive=1",
+    "pointed_tree_complete": true,
+    "covering_project_license_found": false,
+    "binary_to_source_match_verified": false
+  },
+  "qq_parser": {
+    "repository": "https://github.com/QQBackup/nt_msg_db_util",
+    "commit": "317024ce2c5e3482fdf9f310a5a7159ab4927e34",
+    "license": "GPL-3.0 (upstream LICENSE text; no broader project-license selection implied)",
+    "license_url": "https://raw.githubusercontent.com/QQBackup/nt_msg_db_util/317024ce2c5e3482fdf9f310a5a7159ab4927e34/LICENSE",
+    "license_sha256_upstream": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "local_license": "collector/adapters/qq_vendor/LICENSE",
+    "files": [
+      {
+        "path": "msgdb/proto/c2c_40800_pb2.py",
+        "sha256_upstream": "28cc9559d0371b8f85d08c625daf35e2c3fcf163450e25996919e347bdb7777b",
+        "local_path": "collector/adapters/qq_vendor/c2c_40800_pb2.py",
+        "matches": "bytes after CRLF-to-LF normalization"
+      },
+      {
+        "path": "msgdb/proto/c2c_40800_parser.py",
+        "sha256_upstream": "1154c6af656aa732a8b349f50398bdd97ad712730fb9f820c064e999aed9d818",
+        "local_path": "collector/adapters/qq_vendor/c2c_40800_parser.py",
+        "matches": "bytes after CRLF-to-LF normalization"
+      },
+      {
+        "path": "msgdb/proto/wire.py",
+        "sha256_upstream": "8ff44d2877e307ab17d8da0dc7696a500a858dd21684809c2b3bcfe5860a2895",
+        "local_path": "collector/adapters/qq_vendor/wire.py",
+        "matches": "bytes after CRLF-to-LF normalization"
+      }
+    ]
+  },
+  "qq_key_scanner": {
+    "repository": "https://github.com/q957506633/qq-nt-export",
+    "verified_commit": "bec1504170f99e2752793320711c5653f3803670",
+    "source_url": "https://raw.githubusercontent.com/q957506633/qq-nt-export/bec1504170f99e2752793320711c5653f3803670/scripts/ntqq_key_scan.py",
+    "source_sha256": "484439bd0debe8b7797090a6d406a4c31b8fde0ff6f32fb3c06e8b40525ba91d",
+    "matches_local_bytes": true,
+    "license": "MIT",
+    "license_url": "https://raw.githubusercontent.com/q957506633/qq-nt-export/bec1504170f99e2752793320711c5653f3803670/LICENSE",
+    "license_sha256_upstream": "e1a3defb1e2e9145ce83ef141d788a592ec8253ab62d6734809ea1194f0b4798",
+    "local_license": "tools/qq-nt-export/LICENSE"
+  },
+  "pi_and_typebox": {
+    "packages": [
+      {
+        "name": "@earendil-works/pi-coding-agent",
+        "version": "1.5.2",
+        "registry_url": "https://registry.npmjs.org/@earendil-works%2fpi-coding-agent/1.5.2",
+        "license_metadata": "MIT",
+        "tarball": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.5.2.tgz",
+        "integrity": "sha512-mUWI04rqF1Vd/m1q+Ps1XeWsTXEVvRUnsmRa83I3Dzua0Tx5bYS93imeqtIfrXf7PkkaR6ERz+AuQhIJlom5yA==",
+        "matches_local_package_lock": true
+      },
+      {
+        "name": "@earendil-works/pi-ai",
+        "version": "1.5.2",
+        "registry_url": "https://registry.npmjs.org/@earendil-works%2fpi-ai/1.5.2",
+        "license_metadata": "MIT",
+        "tarball": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.5.2.tgz",
+        "integrity": "sha512-2tWPSnV3qzfiDIY3aWluBag3vC++Vs+VsXt/UquSU5onPMohPih72FUhIhaqmDdMYubOgB3Byl9uF4Vk40JLvQ==",
+        "matches_local_package_lock": true
+      },
+      {
+        "name": "typebox",
+        "version": "1.3.27",
+        "registry_url": "https://registry.npmjs.org/typebox/1.3.27",
+        "license_metadata": "MIT",
+        "tarball": "https://registry.npmjs.org/typebox/-/typebox-1.3.27.tgz",
+        "integrity": "sha512-zu+jc1pcy4UiNThxikUr36f0Rybk9PEeCg/NE6adeWr/SKsdNO4EzZHYRDlv2YCVAfj3Odq3dESSo/jNyoBXzA==",
+        "matches_local_package_lock": true
+      }
+    ],
+    "pi_release_commit": "b4afdddf44e059c67ccf5097e5317d913521b470",
+    "pi_license_url": "https://raw.githubusercontent.com/earendil-works/pi/b4afdddf44e059c67ccf5097e5317d913521b470/LICENSE",
+    "pi_license_sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+    "pi_npm_attestation_urls": [
+      "https://registry.npmjs.org/-/npm/v1/attestations/@earendil-works%2fpi-coding-agent@1.5.2",
+      "https://registry.npmjs.org/-/npm/v1/attestations/@earendil-works%2fpi-ai@1.5.2"
+    ],
+    "attestation_payload_read": true,
+    "attestation_signatures_independently_verified": false,
+    "typebox_tarball_license_matches_local_bytes": true
+  },
+  "sqlcipher": {
+    "source_distribution": "sqlcipher3-0.6.5",
+    "source_url": "https://files.pythonhosted.org/packages/8b/89/6f67a4ea4e837f32b837808665c03b9caca82b3df699c870676b362d6df5/sqlcipher3-0.6.5.tar.gz",
+    "archive_sha256": "368a77f1bc8f6a5b88a7b0774bcf681dc8127511948727a359223629efd9d634",
+    "amalgamation_sha256": "0f9aef09d4a80356f6b2d42dabfa3a8bd1ad2afc5b9cac04fb79f3873fa24bbc",
+    "amalgamation_matches_checked_local_artifact": true,
+    "sqlcipher_version_in_source": "4.20.0 community",
+    "sqlite_version_in_source": "3.54.1",
+    "sqlcipher_license": "BSD-3-Clause; original full notices copied from the exact amalgamation",
+    "python_wrapper_license": "Zlib-style; original archive LICENSE preserved separately",
+    "local_build_record": "runtime-deps/native/build.json",
+    "source_modified_per_build_record": false
+  },
+  "sqlite_dbdata": {
+    "source_url": "https://www.sqlite.org/2025/sqlite-src-3510000.zip",
+    "archive_sha256_per_local_build_record": "5330719b8b80bf563991ff7a373052943f5357aae76cd1f3367eab845d3a75b7",
+    "source_path": "ext/recover/dbdata.c",
+    "source_sha256_checked_local": "0a57eae22b51507c28f6c647fba00ccacd39b5aaf3393dfe9435fb04810a6e0e",
+    "source_modified_per_build_record": false,
+    "archive_independently_downloaded_this_audit": false,
+    "license": "Original source header disclaims copyright; SQLite public-domain policy",
+    "policy_url": "https://www.sqlite.org/copyright.html"
+  },
+  "openssl": {
+    "version_resource": "3.6.1",
+    "binary_filename": "libcrypto-3-x64__.dll",
+    "binary_sha256": "fafd384db586592bd42eb4bdc8b4017087bd221ca410cc8f5f50d193bac7d118",
+    "matches_strawberry_toolchain_binary": true,
+    "license": "Apache-2.0",
+    "official_license_url": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.6.1/LICENSE.txt",
+    "official_license_sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+    "toolchain_license_matches_official_bytes": true,
+    "source_build_correspondence_verified": false,
+    "toolchain_patch_record": "Pack diff not generated"
+  },
+  "pymupdf": {
+    "version": "2.1",
+    "metadata_url": "https://pypi.org/pypi/PyMuPDF/2.1/json",
+    "license_metadata": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+    "source_url": "https://files.pythonhosted.org/packages/13/d9/5ae3cce31a4a62de4f6979331b4d8d5b86a8f2520f06754cf5e69065c887/pymupdf-2.1.tar.gz",
+    "source_archive_sha256_published": "9ac95f98016e83eafb8f1d786396f9c60e400d559590596e5b2df9eb6384948b",
+    "license_path_in_source": "pymupdf-2.1/COPYING",
+    "license_sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6",
+    "windows_wheel_sha256_published": "e1122bbc3a1212396f0d70d19f78e084991b59ebdfc9d846c28ca8b509de01ad",
+    "windows_wheel_independently_downloaded_this_audit": false,
+    "compatibility_empty_package_metadata_urls": [
+      "https://pypi.org/pypi/pymupdf4llm/2.1/json",
+      "https://pypi.org/pypi/pymupdf_layout/2.1/json"
+    ],
+    "source_archive_sha256_independently_verified_this_audit": false
+  },
+  "license_copies": [
+    {
+      "file": "third_party/licenses/OpenSSL-Apache-2.0.txt",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+    },
+    {
+      "file": "third_party/licenses/OpenSSL-NOTICE.txt",
+      "sha256": "c0ef7a5f535b0b6b60deaa5753323ce71980b7d5f7fa3e0df364288ca56681bd"
+    },
+    {
+      "file": "third_party/licenses/Pi-MIT.txt",
+      "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
+    },
+    {
+      "file": "third_party/licenses/PyMuPDF-AGPL-3.0.txt",
+      "sha256": "57c8ff33c9c0cfc3ef00e650a1cc910d7ee479a8bc509f6c9209a7c2a11399d6"
+    },
+    {
+      "file": "third_party/licenses/SQLCipher-source-notices.txt",
+      "sha256": "ae620acfb624466f241f4cca74adf4808cb81c21dbeacc42ec32dd09128b2548"
+    },
+    {
+      "file": "third_party/licenses/sqlcipher3-Zlib.txt",
+      "sha256": "fa23cf250126548e90008fe92de4ee76d485bfbb3592f5be8aa731775892a960"
+    },
+    {
+      "file": "third_party/licenses/TypeBox-MIT.txt",
+      "sha256": "e8a7cc256941a26ba8234f04390165243a4d42f74fd6491934140605bf7eae2d"
+    }
+  ]
+}

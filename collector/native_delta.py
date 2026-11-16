@@ -1,7 +1,10 @@
-"""Find conservative row candidates using SQLite's own dbstat/dbdata extensions."""
+"""Find row candidates from changed leaves and changes in table page ownership."""
 from __future__ import annotations
 
+from array import array
 import ctypes as C
+from dataclasses import dataclass
+from itertools import zip_longest
 import json
 from pathlib import Path
 import re
@@ -22,76 +25,82 @@ def _register(db):
     db._dbdata_extension = extension
 
 
-def capture_rows(db, changed_pages):
-    """Capture before AND after a page update, then union the returned table/rowids.
+@dataclass
+class RowCapture:
+    rows: dict
+    tables: tuple
+    leaf_tables: array
+    dirty: set
 
-    An interior-page change includes its whole subtree, so disappearing or reused
-    leaves cannot lose deletions. Overflow changes include their owning row page.
-    None means the table must use the existing full logical comparison.
-    The caller must separately fall back on schema changes or a lost baseline.
+
+def _rowids(db, pages):
+    rows = {row[0] for row in db.iterate('''
+        SELECT data.value FROM json_each(?) AS page
+        JOIN sqlite_dbdata AS data ON data.pgno=page.value WHERE data.field=-1
+    ''', (json.dumps(sorted(pages)),))}
+    if any(type(row) is not int for row in rows):
+        raise RuntimeError('native_rowid_candidates_invalid')
+    return rows
+
+
+def capture_rows(db, changed_pages):
+    """Read changed row pages; retain compact leaf ownership for the before/after diff.
+
+    The caller must merge both captures on the verified after image, with unchanged
+    schema and a complete dirty-page set. An untouched detached leaf still contains
+    its old rowids; overwritten leaves have already been read in the before capture.
     """
     dirty = set(changed_pages)
     if not dirty:
-        return {}
+        return RowCapture({}, (), array('I'), dirty)
     _register(db)
-    tables = dict(db.execute("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'"))
-    touched = db.execute("""
-        SELECT name,path,pageno,pagetype FROM dbstat
-        WHERE name IN (SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%')
-          AND pageno IN (SELECT value FROM json_each(?))
-    """, (json.dumps(sorted(dirty)),))
-    owners = {}
-    for name, path, number, kind in touched:
-        if kind == 'overflow':
-            owners.setdefault(name, set()).add(path.rpartition('/')[0] + '/')
-    leaves = {}
-    for name, paths in owners.items():
-        leaves.update(((name,path),number) for path,number in db.iterate("""
-            SELECT path,pageno FROM dbstat WHERE name=? AND pagetype='leaf'
-              AND path IN (SELECT value FROM json_each(?))
-        """, (name,json.dumps(sorted(paths)))))
-    pages = {}
-    result = {}
-    for name, path, number, kind in touched:
-        if re.search(r'\bWITHOUT\s+ROWID\b', tables[name] or '', re.I):
-            result[name] = None
-            continue
-        if kind == 'overflow':
-            path = path.rpartition('/')[0] + '/'
-            owner = leaves.get((name, path))
-            if owner is None:
+    tables = db.execute("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    names = ('',) + tuple(name for name, _ in tables)
+    identities = {name: index for index, name in enumerate(names)}
+    unkeyed = {name for name, sql in tables if re.search(r'\bWITHOUT\s+ROWID\b', sql or '', re.I)}
+    leaves = array('I', [0]) * (db.execute('PRAGMA page_count')[0][0] + 1)
+    pages, result = {}, {}
+    for name, _ in tables:
+        owner = None
+        # One table per query lets DBSTAT supply this order without a temp sort.
+        for path, number, kind in db.iterate('''
+            SELECT path,pageno,pagetype FROM dbstat WHERE name=? ORDER BY name,path
+        ''', (name,)):
+            if kind == 'leaf':
+                leaves[number] = identities[name]
+                owner = (path, number)
+            if number not in dirty:
+                continue
+            if name in unkeyed:
                 result[name] = None
-                continue
-            number = owner
-        pages.setdefault(name, {})[path] = number
-    for name, roots in pages.items():
-        if name in result:
-            continue
-        rows = set()
-        included = []
-        for path, root in sorted(roots.items(), key=lambda item: (len(item[0]), item[0])):
-            if any(path.startswith(parent) for parent in included):
-                continue
-            included.append(path)
-            rows.update(row[0] for row in db.iterate("""
-                WITH RECURSIVE pages(pgno) AS (
-                    VALUES(?) UNION
-                    SELECT child FROM pages JOIN sqlite_dbptr AS pointer ON pointer.pgno=pages.pgno
-                )
-                SELECT DISTINCT data.value FROM pages JOIN sqlite_dbdata AS data ON data.pgno=pages.pgno
-                WHERE data.field=-1
-            """, (root,)))
-        if any(type(row) is not int for row in rows):
-            raise RuntimeError('native_rowid_candidates_invalid')
-        result[name] = sorted(rows)
-    return result
+            elif kind == 'leaf':
+                pages.setdefault(name, set()).add(number)
+            elif kind == 'overflow':
+                if owner is None or owner[0] != path.rpartition('/')[0] + '/':
+                    result[name] = None
+                else:
+                    pages.setdefault(name, set()).add(owner[1])
+    for name, numbers in pages.items():
+        if name not in result:
+            result[name] = sorted(_rowids(db, numbers))
+    return RowCapture(result, names, leaves, dirty)
 
 
-def merge_candidates(before, after):
+def merge_candidates(before, after, db):
+    if before.tables != after.tables or before.dirty != after.dirty:
+        raise ValueError('Row captures must describe the same schema and dirty pages')
     result = {}
-    for name in before.keys() | after.keys():
-        if before.get(name, []) is None or after.get(name, []) is None:
+    for name in before.rows.keys() | after.rows.keys():
+        if before.rows.get(name, []) is None or after.rows.get(name, []) is None:
             result[name] = None
         else:
-            result[name] = sorted(set(before.get(name, [])) | set(after.get(name, [])))
+            result[name] = sorted(set(before.rows.get(name, [])) | set(after.rows.get(name, [])))
+    moved = {}
+    for page, (old, new) in enumerate(zip_longest(before.leaf_tables, after.leaf_tables, fillvalue=0)):
+        if old != new and page not in before.dirty:
+            for identity in {old, new} - {0}:
+                moved.setdefault(before.tables[identity], set()).add(page)
+    for name, pages in moved.items():
+        if result.get(name, []) is not None:
+            result[name] = sorted(set(result.get(name, [])) | _rowids(db, pages))
     return result

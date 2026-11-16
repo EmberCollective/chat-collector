@@ -20,10 +20,17 @@ const processorFields = [
   ['context','gap_seconds','备用时间分组间隔（秒，SQL 模式不使用）','number'],
   ['context','max_messages','辅助消息条数软限（不切断关联片段）','number'],
   ['context','history_messages','每段附带的历史消息数','number'],
-  ['context','timezone','解释时间时使用的时区','text'],
-  ['source_descriptions','wechat','微信本地来源描述','textarea'],
-  ['source_descriptions','qq','QQ 本地来源描述','textarea']
+  ['context','timezone','解释时间时使用的时区','text']
 ];
+function processorConfigFields(){
+  const kinds=[...new Set([...Object.keys(processorConfig?.config.source_descriptions||{}),...sourceCatalog.map(source=>source.kind)])];
+  return [...processorFields,...kinds.map(kind=>['source_descriptions',kind,(sourceCatalog.find(s=>s.kind===kind)?.kind_name||kind)+' 来源描述','textarea'])];
+}
+function resolveSourceInstance(source){
+  const message=source.message||source,kind=message.platform||source.platform||source.collector_module,account=message.account_id||source.account_id;
+  const matches=sourceCatalog.filter(s=>s.capabilities.messages&&s.kind===kind&&(!account||s.account_id===account));
+  return matches.length===1?matches[0].id:null;
+}
 function processorDetails(title,value){const node=el('details');node.append(el('summary',title),el('pre',JSON.stringify(value,null,2)));return node;}
 function processorWindowRequest(){
   const start=$('processor-preview-start').value,end=$('processor-preview-end').value;
@@ -34,7 +41,7 @@ function processorWindowRequest(){
   return request;
 }
 function bindProcessorRun(id,handler){const node=$(id);node.addEventListener('click',async()=>{node.disabled=true;await guard(handler);node.disabled=processorBusy||(id==='processor-run'&&!processorConfigured);});}
-function processorAgentDetails(value){const counts=value?._agent||value||{},seconds=counts.elapsed_seconds??(counts.duration_ms==null?null:counts.duration_ms/1000),parts=['Pi 工具活动'];if(counts.turns!=null)parts.push(`${counts.turns} 回合`);if(counts.tool_calls!=null)parts.push(`${counts.tool_calls} 次工具调用`);if(counts.compactions!=null)parts.push(`${counts.compactions} 次压缩`);if(counts.retries!=null)parts.push(`${counts.retries} 次重试`);if(counts.max_context_chars!=null)parts.push(`最大请求 ${counts.max_context_chars} 字符`);if(seconds!=null)parts.push(`${Number(seconds).toFixed(1)} 秒`);return processorDetails(parts.join(' · '),value);}
+function processorAgentDetails(value){const counts=value?._agent||value||{},seconds=counts.elapsed_seconds??(counts.duration_ms==null?null:counts.duration_ms/1000),parts=['Pi 运行摘要'];if(counts.turns!=null)parts.push(`${counts.turns} 回合`);if(counts.tool_calls!=null)parts.push(`${counts.tool_calls} 次工具调用`);if(counts.compactions!=null)parts.push(`${counts.compactions} 次压缩`);if(counts.retries!=null)parts.push(`${counts.retries} 次重试`);if(counts.max_context_chars!=null)parts.push(`最大请求 ${counts.max_context_chars} 字符`);if(seconds!=null)parts.push(`${Number(seconds).toFixed(1)} 秒`);return processorDetails(parts.join(' · '),value);}
 function renderPiEvents(events,status){
   const target=$('processor-live'),labels={run_start:'Pi 会话开始',turn_start:'模型回合',request_prepared:'请求已准备',tool_execution_start:'开始调用工具',tool_execution_end:'工具返回',compaction_start:'原生压缩开始',compaction_end:'原生压缩结束',auto_retry_start:'原生重试开始',auto_retry_end:'原生重试结束',run_end:'Pi 会话结束'},tools={read_attachment:'读取附件',find_related_tasks:'查询关联待办',submit_tasks:'提交待办'};
   target.replaceChildren(el('h3','Pi 运行过程'),el('p',status==='running'?'正在执行 · 自动更新':'本轮已结束 · 原生事件记录','muted'));
@@ -46,26 +53,63 @@ function renderPiEvents(events,status){
 async function loadProcessorConfig(){
   processorConfig=await api('/processor/config');$('processor-config-file').textContent=processorConfig.file;
   $('processor-config-fields').replaceChildren();
-  for(const [section,key,title,type] of processorFields){const label=el('label',title),input=el(type==='textarea'?'textarea':type==='select'?'select':'input');input.id=`proc-${section}-${key}`;if(type==='select'){for(const [value,title] of [['auto','自动合批，保留会话边界'],['single_conversation','每批仅一个会话']]){const option=el('option',title);option.value=value;input.append(option);}}else if(type!=='textarea')input.type=type;else input.rows=3;if(type==='checkbox')input.checked=!!processorConfig.config[section]?.[key];else input.value=processorConfig.config[section]?.[key]??'';label.append(input);$('processor-config-fields').append(label);}
+  for(const [section,key,title,type] of processorConfigFields()){const label=el('label',title),input=el(type==='textarea'?'textarea':type==='select'?'select':'input');input.id=`proc-${section}-${key}`;if(type==='select'){for(const [value,title] of [['auto','自动合批，保留会话边界'],['single_conversation','每批仅一个会话']]){const option=el('option',title);option.value=value;input.append(option);}}else if(type!=='textarea')input.type=type;else input.rows=3;if(type==='checkbox')input.checked=!!processorConfig.config[section]?.[key];else input.value=processorConfig.config[section]?.[key]??'';label.append(input);$('processor-config-fields').append(label);}
   const path=processorConfig.config.paths.api_key_file;
   $('processor-key-file').textContent=path?'本机密钥文件（仅显示路径）：'+path:'尚未指定本机密钥文件；使用密钥环境变量。';
   const start=processorConfig.config.input?.start_at;
   $('processor-start-at').textContent='首次启用点（只读）：'+(typeof start==='number'?time(start):start||'尚未设定')+'。仅处理启用点之后的消息，不自动回扫历史。';
 }
 async function openProcessorSource(source){
-  const platform=source.collector_module||source.platform||source.message?.platform;
+  const platform=resolveSourceInstance(source);if(!platform)throw Error('没有唯一匹配的本地来源实例，请查看完整来源证据');
   const params=new URLSearchParams({message_key:source.message_key,revision:String(source.revision)});
-  const record=await api(`/modules/${platform}/source?${params}`);
+  const record=await api(`/modules/${encodeURIComponent(platform)}/source?${params}`);
   renderMessages([record],$('source-output'),false,platform);$('source-dialog').showModal();
 }
 async function loadProcessorRules(){processorRules=await api('/processor/rules');$('processor-rules-file').textContent=processorRules.file;$('processor-rules-text').value=processorRules.text;}
+function processorTaskControls(task,box){
+  const controls=el('div',undefined,'actions task-actions'),label=el('label','优先级'),priority=el('select');
+  priority.dataset.taskAction='priority';
+  for(const value of ['P0','P1','P2','P3','P4']){const option=el('option',value);option.value=value;priority.append(option);}
+  priority.value=task.priority;label.append(priority);
+  const feedback=el('p','','muted task-action-feedback');feedback.setAttribute('role','status');feedback.hidden=true;
+  let saving=false,pending;
+  async function update(change,focus){
+    if(saving)return;saving=true;
+    const key=JSON.stringify(change);
+    if(pending?.key!==key)pending={key,body:{...change,expected_revision:task.revision,request_id:crypto.randomUUID()}};
+    for(const node of controls.querySelectorAll('button,select'))node.disabled=true;
+    feedback.hidden=false;feedback.textContent='正在保存…';
+    let message,failed=false,saved=false;
+    try{
+      const result=await api('/processor/tasks/'+encodeURIComponent(task.task_id),'PATCH',pending.body);
+      saved=true;pending=null;
+      message=result.sync_pending?'修改已保存，后续同步暂未完成。':change.priority?'优先级已更新。':change.status==='completed'?'已标记完成。':'已恢复待办。';
+    }catch(error){message=error.message;failed=true;}
+    try{await refreshProcessor();}catch{message+=' 列表刷新失败，请刷新页面核对。';failed=true;}
+    saving=false;if(!saved)priority.value=task.priority;
+    for(const node of controls.querySelectorAll('button,select'))node.disabled=false;
+    const current=[...$('processor-tasks').children].find(node=>node.dataset.taskId===task.task_id)||box;
+    const output=current.querySelector('.task-action-feedback');
+    if(output){output.hidden=false;output.textContent=message;output.className=(failed?'error':'muted')+' task-action-feedback';}
+    current.querySelector(`[data-task-action="${focus}"]`)?.focus({preventScroll:true});
+  }
+  if(['open','completed','cancelled'].includes(task.status)){
+    const next=task.status==='open'?'completed':'open',action=el('button',next==='completed'?'标记完成':'恢复待办','secondary');
+    action.type='button';action.dataset.taskAction='status';action.addEventListener('click',()=>update({status:next},'status'));controls.append(action);
+  }
+  priority.addEventListener('change',()=>update({priority:priority.value},'priority'));
+  controls.append(label);box.append(controls,feedback);
+}
 function renderProcessorTasks(tasks,target=$('processor-tasks')){
+  const signature=JSON.stringify(tasks);if(target.dataset.signature===signature)return;target.dataset.signature=signature;
   target.replaceChildren();
   if(!tasks.length){target.append(el('p','暂无待办。尚未执行处理或没有提取到待办时，这里保持为空。','empty'));return;}
   for(const task of tasks){
     const box=el('article',undefined,'message task'),head=el('div',undefined,'message-head');
+    box.dataset.taskId=task.task_id;
     head.append(el('span',task.priority||'待定','pill priority-'+(task.priority||'unknown')),el('span',({cancelled:'已取消',open:'待处理',completed:'已完成',superseded:'已替代'})[task.status]||'状态未知'));
     box.append(head,el('h4',task.title||'未命名待办'));
+    if(target===$('processor-tasks')&&!task.debug_run&&task.status!=='superseded')processorTaskControls(task,box);
     const when=task.time||{},people=Array.isArray(task.people)?task.people.map(person=>typeof person==='string'?person:[person.name,person.role].filter(Boolean).join(' · ')).join('、'):'';
     const facts=el('dl',undefined,'task-facts');
     for(const [label,value] of [['事件',task.event],['时间',[when.text,when.start?`开始 ${when.start}`:'',when.deadline?`截止 ${when.deadline}`:'',when.timezone].filter(Boolean).join(' · ')],['参与人员',people],['地点',task.location]])facts.append(el('dt',label),el('dd',value||'未明确'));
@@ -74,7 +118,7 @@ function renderProcessorTasks(tasks,target=$('processor-tasks')){
     if(task.materials?.length)box.append(el('p','执行材料：'+task.materials.map(m=>m.attachment?.name||'未命名附件').join('、'),'muted'));
     const notes=task.notes||task.review_reasons||[];if(notes.length)box.append(el('p','说明：'+notes.join('；'),'muted'));
     const sources=el('details');sources.append(el('summary',`来源证据 · ${(task.sources||[]).length} 条`));
-    for(const source of task.sources||[]){const m=source.message||source,platform=m.platform||m.collector_module;const node=el('div',undefined,'source-evidence');node.append(el('p',[names[platform]||platform,...identitySummary(m),m.sent_at?time(m.sent_at):null].filter(Boolean).join(' · '),'muted'),el('div',m.text||source.text||'此来源无可显示正文','message-text'));if(!task.debug_run&&['wechat','qq'].includes(platform)&&source.message_key&&source.revision)node.append(button('打开本地原消息与附件',()=>openProcessorSource(source)));node.append(processorDetails('完整本地来源',source));sources.append(node);}
+    for(const source of task.sources||[]){const m=source.message||source,platform=m.platform||m.collector_module;const node=el('div',undefined,'source-evidence');node.append(el('p',[names[platform]||platform,...identitySummary(m),m.sent_at?time(m.sent_at):null].filter(Boolean).join(' · '),'muted'),el('div',m.text||source.text||'此来源无可显示正文','message-text'));if(!task.debug_run&&resolveSourceInstance(source)&&source.message_key&&source.revision)node.append(button('打开本地原消息与附件',()=>openProcessorSource(source)));node.append(processorDetails('完整本地来源',source));sources.append(node);}
     if(task.attachment_evidence?.length)box.append(processorDetails('附件证据 · 页码/位置与归档信息',task.attachment_evidence));
     const activity=task.processing?.agent_runtime||task.processing?.agent;
     if(activity)box.append(processorAgentDetails(activity));
@@ -82,22 +126,29 @@ function renderProcessorTasks(tasks,target=$('processor-tasks')){
   }
 }
 function renderAttachmentReviews(groups,target){
+  const signature=JSON.stringify(groups);if(target.dataset.signature===signature)return;target.dataset.signature=signature;
   target.replaceChildren();
+  const reviewed=(groups||[]).filter(group=>group.attachment_review?.length);
+  if(!reviewed.length)return;
+  const failures=reviewed.reduce((count,group)=>count+group.attachment_review.filter(item=>item.status==='unavailable').length,0);
+  const records=el('details',undefined,'attachment-reviews');
+  records.append(el('summary',`处理记录与附件读取情况 · ${reviewed.length} 组${failures?' · '+failures+' 个附件读取失败':''}`));
   const labels={read:'已读取',partial:'按需读取了部分内容',skipped:'无需读取',not_requested:'未选择读取',unavailable:'读取失败'};
-  for(const group of groups||[]){const items=group.attachment_review||[];if(!items.length)continue;
+  for(const group of reviewed){const items=group.attachment_review;
     const box=el('details');box.append(el('summary',`${names[group.conversation?.platform]||group.conversation?.platform} · ${group.tasks_count} 项待办 · ${items.filter(x=>x.status==='unavailable').length} 个附件读取失败`));
     box.append(el('p','结论基于消息与实际读取的内容；未选择的附件不等于已核实。','muted'));
     for(const item of items)box.append(el('p',[item.ref,item.name,labels[item.status]||item.status,item.reason,...(item.warnings||[])].filter(Boolean).join(' · '),'asset'));
     if(group.submission_file)box.append(el('p','原始模型提交（仅本地）：'+group.submission_file,'muted path'));
-    target.append(box);
+    records.append(box);
   }
+  target.append(records);
 }
 async function refreshProcessor(){
   const [state,result,reviews]=await Promise.all([api('/processor/status'),api('/processor/tasks?limit=20'),api('/processor/reviews?limit=20')]);
   renderAttachmentReviews(reviews.groups,$('processor-review-output'));
   const configured=state.model.configured;processorConfigured=configured;processorBusy=!!state.running_job||!!state.automation_running;
   if(state.running_job&&!processorJob)processorJob=state.running_job;
-  $('processor-state').textContent=processorBusy?'处理任务执行中':configured?'模型已配置':'模型未配置';
+  $('processor-state').textContent=processorBusy?'处理任务执行中':configured?'已配置 · 连接未验证':'模型未配置';
   $('processor-state').className='pill'+(configured?'':' warn');$('processor-run').disabled=!configured||processorBusy;$('processor-preview').disabled=processorBusy;
   $('processor-run').textContent=($('processor-preview-start').value||$('processor-preview-end').value)?'处理所选时间（调试）…':'执行一轮处理…';
   for(const id of ['processor-preview-start','processor-preview-end','processor-preview-reset'])$(id).disabled=processorBusy;
@@ -137,14 +188,14 @@ async function initProcessor(){
   bind('processor-load-rules',async()=>{if(confirm('重新加载会丢弃尚未保存的规则编辑，继续？'))await loadProcessorRules();});
   bind('processor-save-config',async()=>{
     if(!processorConfig)throw Error('请先加载处理配置');const patch={};
-    for(const [section,key,,type] of processorFields){const input=$(`proc-${section}-${key}`),value=type==='checkbox'?input.checked:type==='number'?Number(input.value):input.value.trim();if(value!==processorConfig.config[section]?.[key])(patch[section]??={})[key]=value;}
+    for(const [section,key,,type] of processorConfigFields()){const input=$(`proc-${section}-${key}`),value=type==='checkbox'?input.checked:type==='number'?Number(input.value):input.value.trim();if(value===''&&processorConfig.config[section]?.[key]===undefined)continue;if(value!==processorConfig.config[section]?.[key])(patch[section]??=Object.create(null))[key]=value;}
     processorConfig=await api('/processor/config','PATCH',{revision:processorConfig.revision,patch});notice('处理配置已保存并备份。');await refreshProcessor();
   });
   bind('processor-save-rules',async()=>{if(!processorRules)throw Error('请先加载规则');processorRules=await api('/processor/rules','PUT',{revision:processorRules.revision,text:$('processor-rules-text').value});notice('规则已保存并备份；下一轮处理使用新版本。');await refreshProcessor();});
   const updatePreviewWindow=async()=>{const custom=!!($('processor-preview-start').value||$('processor-preview-end').value);$('processor-preview-scope').textContent=custom?'手动调试（最多 7 天，浏览器本地时间）：预览与处理均使用所选时间和当前 SQL。处理会调用模型，结果独立保存，不改变默认值或正式断点。':'默认增量：起止时间留空，沿用已保存的处理起点。手动时间不会保存为默认值。';$('processor-preview-output').replaceChildren(el('p','范围已更新，请点击预览。','empty'));await refreshProcessor();};
   for(const id of ['processor-preview-start','processor-preview-end'])$(id).addEventListener('change',()=>updatePreviewWindow().catch(error=>notice(error.message,true)));
   bind('processor-preview-reset',async()=>{$('processor-preview-start').value='';$('processor-preview-end').value='';await updatePreviewWindow();});
-  bindProcessorRun('processor-preview',async()=>{const job=await api('/processor/preview','POST',{limit:5,...processorWindowRequest()});processorJob=job.id;$('processor-preview-output').replaceChildren(el('p','正在本机整理上下文，可在任务记录中查看进度…','empty'));await refreshProcessor();});
-  bindProcessorRun('processor-run',async()=>{const request=processorWindowRequest(),scope=request.start!=null?`调试 ${time(request.start)} 至 ${time(request.end)}，结果独立保存，不改变正式断点。`:'执行默认增量处理。';if(!confirm(scope+'会发送聊天片段与规则，并由 Pi 按需读取附件文字或图片发送给已配置的模型服务。继续？'))return;const job=await api('/processor/run','POST',request);processorJob=job.id;notice('处理任务已启动；关闭页面不会中断任务。');await refreshProcessor();});
+  bindProcessorRun('processor-preview',async()=>{const job=await api('/processor/preview','POST',{limit:5,...processorWindowRequest()});processorJob=job.id;activatePanel('processor-context');$('processor-preview-output').replaceChildren(el('p','正在本机整理上下文，可在任务记录中查看进度…','empty'));await refreshProcessor();});
+  bindProcessorRun('processor-run',async()=>{const request=processorWindowRequest(),scope=request.start!=null?`调试 ${time(request.start)} 至 ${time(request.end)}，结果独立保存，不改变正式断点。`:'执行默认增量处理。';if(!confirm(scope+'会发送聊天片段与规则，并由 Pi 按需读取附件文字或图片发送给已配置的模型服务。继续？'))return;const job=await api('/processor/run','POST',request);processorJob=job.id;await selectWorkflow(job.id);notice('处理任务已启动；关闭页面不会中断任务。');await refreshProcessor();});
   try{await Promise.all([loadProcessorConfig(),loadProcessorRules(),refreshProcessor()]);}catch(error){$('processor-state').textContent='处理模块未就绪';$('processor-warning').textContent=error.message;}
 }

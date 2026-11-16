@@ -70,6 +70,43 @@ def test_settings_are_safe_versioned_and_preserve_unexposed_fields(console, monk
     assert not (root/'automatic/state.db').exists()
 
 
+def test_job_catalog_matches_source_by_config_path_not_platform_name(console, monkeypatch):
+    client, root, path = configured(console, monkeypatch)
+    from test_catalog import rewrite_settings
+    bridge = rewrite_settings(console[1], lambda settings: settings.update(
+        sources={'work': {'kind': 'qq', 'config': settings['modules'].pop('qq'), 'name': '工作账号'}}))
+    console[1].state.bridge.sources = bridge.sources
+    console[1].state.bridge.paths = bridge.paths
+    with path.open('a', encoding='utf8') as stream:
+        stream.write('\n[jobs.qq]\nconfig="' + bridge.paths['work'].as_posix() + '"\n')
+    catalog = client.get('/api/operations/catalog').json()['jobs']
+    assert catalog['qq']['source_id'] == 'work'
+    assert catalog['qq']['name'] == '工作账号 · 采集'
+    assert catalog['wechat']['source_id'] is None
+    assert client.get('/api/operations/catalog', headers={'X-Console-Token':'wrong'}).status_code == 401
+
+
+def test_listener_health_interval_roundtrip_and_older_client(console, monkeypatch):
+    client, root, path = configured(console, monkeypatch)
+    body = client.get('/api/operations/config').json()
+    assert body['automation']['listener']['check_interval_seconds'] == 5
+    body['automation']['listener']['check_interval_seconds'] = 30
+    saved = client.put('/api/operations/config', json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['automation']['listener']['check_interval_seconds'] == 30
+    body = client.get('/api/operations/config').json()
+    del body['automation']['listener']['check_interval_seconds']
+    saved = client.put('/api/operations/config', json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['automation']['listener']['check_interval_seconds'] == 30
+    before = path.read_bytes(), (root/'messaging.toml').read_bytes()
+    for invalid in (0, 61, True, '10', 1.5):
+        body = client.get('/api/operations/config').json()
+        body['automation']['listener']['check_interval_seconds'] = invalid
+        assert client.put('/api/operations/config', json=body).status_code == 422
+        assert before == (path.read_bytes(), (root/'messaging.toml').read_bytes())
+
+
 def test_invalid_changes_do_not_partially_save(console, monkeypatch):
     client, root, path = configured(console, monkeypatch)
     before = path.read_bytes(), (root/'messaging.toml').read_bytes()

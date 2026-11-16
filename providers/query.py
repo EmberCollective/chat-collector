@@ -32,18 +32,42 @@ def _read_only(action, first, second, database, trigger):
     return sqlite3.SQLITE_OK if action in {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE} else sqlite3.SQLITE_DENY
 
 
-def validate_rule(sql, params, recent_count, file):
-    """Validate SQL in the same compatibility schema used for real execution."""
+def _explain_rule(sql, params):
     db = sqlite3.connect(':memory:')
     try:
         _schema(db)
         db.set_authorizer(_read_only)
-        db.execute('EXPLAIN ' + sql, dict(params, window_start=0, window_end=1,
-                                        recent_count=recent_count)).fetchall()
-    except sqlite3.Error as exc:
-        raise ValueError(f'Invalid read-only SQL ruleset {Path(file).name}: {exc}') from exc
+        db.execute('EXPLAIN ' + sql, params).fetchall()
     finally:
         db.close()
+
+
+def validate_rule(sql, params, recent_count, file):
+    """Validate SQL in the same compatibility schema used for real execution."""
+    try:
+        _explain_rule(sql, dict(params, window_start=0, window_end=1, recent_count=recent_count))
+    except sqlite3.Error as exc:
+        raise ValueError(f'Invalid read-only SQL ruleset {Path(file).name}: {exc}') from exc
+
+
+def inspect_rule(sql, file):
+    """Describe actual SQLite bindings by compiling EXPLAIN; never execute the submitted SQL."""
+    class Bindings(dict):
+        def __missing__(self, key):
+            if len(self) >= 1000:
+                raise ValueError('SQL binding limit exceeded (1000)')
+            self[key] = None
+            return None
+
+    bindings, error = Bindings(), None
+    try:
+        _explain_rule(sql, bindings)
+    except (sqlite3.Error, ValueError) as exc:
+        error = f'Invalid read-only SQL ruleset {Path(file).name}: {exc}'
+    parameters = sorted(set(bindings) - {'window_start', 'window_end', 'recent_count'})
+    if any(name.startswith('_') for name in parameters):
+        error = error or 'Ruleset parameter names beginning with _ are reserved'
+    return {'parameters': parameters, 'recent_count': 'recent_count' in bindings, 'error': error}
 
 
 def query_rules(scope, window, rules):
