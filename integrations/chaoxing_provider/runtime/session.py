@@ -24,8 +24,12 @@ def save_session(root,cookies):
  if target.exists():
   prior=json.loads(_crypt(target.read_bytes(),False))
   if prior.get('account_hash')!=account:raise SourceError('account_changed_use_new_state',3600)
- value={'account_hash':account,'cookies':filtered};tmp=target.with_suffix('.tmp');tmp.write_bytes(_crypt(json.dumps(value).encode(),True));os.replace(tmp,target)
- return {'session_saved':True,'authenticated':True,'password_stored':False}
+ from .storage import bind_account
+ from .locking import state_lock
+ with state_lock(root):
+  bind_account(root,account)
+  value={'account_hash':account,'cookies':filtered};tmp=target.with_suffix('.tmp');tmp.write_bytes(_crypt(json.dumps(value).encode(),True));os.replace(tmp,target)
+ return {'session_saved':True,'authenticated':True,'password_stored':False,'account_id':account}
 
 def bootstrap_browser(root,port):
  if type(port) is not int or not 1024<=port<=65535:raise SourceError('invalid_cdp_port')

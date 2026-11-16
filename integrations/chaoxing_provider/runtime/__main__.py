@@ -1,33 +1,11 @@
 """Independent CLI/scheduler entry; no n8n, original workspace, or downstream AI."""
 import argparse,json,os,signal,threading,time
-from contextlib import contextmanager
 from pathlib import Path
 from .reception import SchoolReception
 from .transport import SourceError,load_session
 from .sources import NativeSources
 from .session import bootstrap_browser,private_directory,save_session
-
-@contextmanager
-def state_lock(root):
- stream=(Path(root)/'capture.lock').open('a+b')
- try:
-  stream.seek(0,2)
-  if not stream.tell():stream.write(b'0');stream.flush()
-  stream.seek(0)
-  try:
-   if os.name=='nt':
-    import msvcrt
-    msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1)
-   else:
-    import fcntl
-    fcntl.flock(stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
-  except OSError:raise SourceError('collector_already_running',60) from None
-  try:yield
-  finally:
-   stream.seek(0)
-   if os.name=='nt':msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
-   else:fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
- finally:stream.close()
+from .locking import state_lock
 
 def collect_once(root):
  with state_lock(root):return _collect_once(root)

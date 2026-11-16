@@ -6,12 +6,14 @@ from integrations.chaoxing_provider.runtime.sources import NativeSources
 from integrations.chaoxing_provider.runtime.transport import SourceError,ReadSession,approved_url
 from integrations.chaoxing_provider.runtime.__main__ import collect_once,state_lock
 class RuntimeTests(unittest.TestCase):
- def setUp(self):self.tmp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent);self.root=Path(self.tmp.name)
+ def setUp(self):
+  network=patch('urllib.request.OpenerDirector.open',side_effect=AssertionError('live_network_forbidden_in_tests'));network.start();self.addCleanup(network.stop)
+  self.tmp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent);self.root=Path(self.tmp.name)
  def tearDown(self):self.tmp.cleanup()
  def test_clean_folder_runs_without_original_project(self):
   target=self.root/'delivery';shutil.copytree(Path(__file__).parent,target,ignore=shutil.ignore_patterns('__pycache__','tmp*','*.sqlite*'))
   result=subprocess.run([sys.executable,'-m','runtime','--help'],cwd=target,capture_output=True,text=True,env={**os.environ,'PYTHONPATH':''},timeout=10)
-  self.assertEqual(result.returncode,0);self.assertIn('--state-dir',result.stdout)
+  self.assertEqual(result.returncode,0,result.stderr);self.assertIn('--state-dir',result.stdout)
  def test_default_denied_and_no_implicit_network(self):
   with patch('integrations.chaoxing_provider.runtime.reception.load_session',side_effect=AssertionError('no network')):
    r=SchoolReception(self.root)

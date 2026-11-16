@@ -1,0 +1,23 @@
+platform = "chaoxing"
+
+[source]
+# Copy account_id returned by successful runtime bootstrap; it is a verified UID hash.
+account_id = "replace-with-bootstrap-account-id"
+database = "../../data/chaoxing/capture/classroom-output/school-reception/inbox.local.sqlite"
+# Explicit authorized chat IDs from runtime catalog/permit. No implicit all-chat export.
+source_ids = ["replace-with-authorized-source-id"]
+
+[storage]
+state_file = "../../data/chaoxing/selection/state.db"
+output_dir = "../../data/batches"
+
+[schedule]
+initial_lookback_seconds = 3600
+
+[[filters.rulesets]]
+file = "../../rulesets/keyword.sql"
+enabled = true
+params = {keyword = "作业"}
+
+[attachments]
+enabled = false

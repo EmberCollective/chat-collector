@@ -10,6 +10,7 @@
 | 编写筛选 SQL | [规则与参数](../FILTERS.md) |
 | 配置模型、待办与提醒 | [处理配置](processor/processing.md) · [渠道配置](information/channels/configuration.md) · [自动运行](information/dispatch/automation.md) |
 | 接入新来源或新渠道 | [提供方接入](collector/compatibility/provider-api.md) · [渠道开发](information/channels/development.md) |
+| 配置学习通只读信息源 | [学习通来源](collector/compatibility/chaoxing.md) |
 
 ## 收集层
 
