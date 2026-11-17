@@ -88,7 +88,7 @@
     for(const [key,color]of [['cpu','#12634f'],['disk','#865b16']])marker.append(svgNode('circle',{id:'monitor-point-'+key,cx:right,cy:bottom,r:3,fill:color,stroke:'white','stroke-width':1.5}));svg.append(marker);
     const tooltip=node('div',null,'monitor-tooltip');tooltip.id='monitor-tooltip';tooltip.role='tooltip';tooltip.hidden=true;$('monitor-chart').replaceChildren(svg,tooltip);hidePoint();
   }
-  function hidePoint(){selectedSample=null;selectedAt=null;$('monitor-marker')?.setAttribute('visibility','hidden');for(const key of ['cpu','disk'])$('monitor-point-'+key)?.setAttribute('visibility','hidden');if($('monitor-tooltip'))$('monitor-tooltip').hidden=true;delete $('monitor-chart').dataset.sampleIndex;}
+  function hidePoint(){selectedSample=null;selectedAt=null;$('monitor-marker')?.setAttribute('visibility','hidden');for(const key of ['cpu','disk'])$('monitor-point-'+key)?.setAttribute('visibility','hidden');if($('monitor-tooltip'))$('monitor-tooltip').hidden=true;delete $('monitor-chart').dataset.sampleIndex;delete $('monitor-chart').dataset.sampleAt;}
   function appendTaskDetails(tooltip,at){
     const section=node('div',null,'monitor-tooltip-tasks');
     if(taskReadError){section.append(node('p','性能任务记录暂不可读，不能据此判断当前没有任务执行。','monitor-tooltip-warning'));tooltip.append(section);return;}
@@ -129,7 +129,8 @@
     if(announce){const active=tasksAt(at),taskText=taskReadError?'性能任务记录未确认':active.length?'性能任务 '+active.map(taskLabel).join('、')+' 正在执行':'没有采集或 AI 处理任务执行';$('monitor-announcement').textContent=`${clock(at)}，整机 CPU ${percent(sample.cpu)}，硬盘繁忙度 ${percent(io?.busy)}，读 ${speed(io?.read_mbps)}，写 ${speed(io?.write_mbps)}。${taskText}。`;}
   }
   function showPoint(index,announce=false){const sample=samples[Math.max(0,Math.min(samples.length-1,index))];if(sample)showAt(sample.at,announce);}
-  function showPointer(event){if(!samples.length)return;const rect=$('monitor-chart').getBoundingClientRect(),at=plotStart+(event.clientX-rect.left-40)/(plotRight-40)*60;showAt(at);}  function renderAttribution(){
+  function showPointer(event){if(!samples.length)return;const rect=$('monitor-chart').getBoundingClientRect(),at=plotStart+(event.clientX-rect.left-40)/(plotRight-40)*60;showAt(at);}
+  function renderAttribution(){
     const modules=data?.modules||[],groups=processes();options($('monitor-module'),[{id:'all',name:'全部模块'},...modules]);
     const selected=$('monitor-module').value,selection=modules.find(item=>item.id===selected),unknown=stale(),rows=[];
     for(const group of groups){if(selection&&!selection.group_ids.includes(group.id))continue;rows.push({...group,detail:group.id==='shared'?'共用进程 · 仅计一次':'仅统计已核验归属的进程',note:group.id==='shared'?'进程探针可计量合计，无法拆分模块':group.status==='stopped'?'当前未运行':group.status==='warming'?'正在建立计数基线':group.status==='unknown'?'未取得进程用量':'独立进程，可单独归属'});if(group.id==='shared')for(const module of modules.filter(item=>item.attribution==='shared'&&item.group_ids.includes(group.id)&&(selected==='all'||item.id===selected)))rows.push({id:module.id,name:module.name,sharedModule:true,note:group.status==='stopped'?'后台未运行':'无法单独拆分；已含于共享合计'});}
