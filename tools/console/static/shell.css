@@ -164,3 +164,4 @@ h1 { letter-spacing:-.5px; }
   .text-button,.text-btn { min-height:36px; }
   #rate-chart text { font-size:.928571rem; }
 }
+.sidebar-foot .console-version{display:block;margin-top:8px;font-variant-numeric:tabular-nums}

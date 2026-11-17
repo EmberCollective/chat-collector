@@ -6,7 +6,7 @@ const states = {running:'执行中',retry:'等待重试',succeeded:'已完成',w
 const intensities = {metadata:'轻量',standard:'标准',full:'完整'};
 const assetStates = {deferred:'按强度暂缓保存',archived:'已归档',missing:'本地未找到',thumbnail_only:'仅缩略图',unverified:'内容待核验',encrypted_only:'仅保留密文',unsupported:'格式未支持'};
 let sourceCatalog=[], lastStatus=null, sourceSignature='', sourceGeneration=0;
-let sessionPromise;
+let sessionPromise, consoleVersion='';
 function consoleSession(){return sessionPromise??=fetch('/api/session').then(async response=>{if(!response.ok)throw Error('无法建立本机会话');return response.json();}).catch(error=>{sessionPromise=null;throw error;});}
 window.consoleSession=consoleSession;
 const sourceDrafts=new Map();
@@ -216,7 +216,7 @@ async function initializeView(){
   if(visible('history'))await onceView('history',initHistory);
 }
 async function init(){
-  lastDay();token=(await consoleSession()).token;await loadCatalog();
+  lastDay();const session=await consoleSession();token=session.token;consoleVersion=session.version||'';$('console-version').textContent=consoleVersion?'v'+consoleVersion:'未知';await loadCatalog();
   $('connection').textContent='已连接 · '+time(Date.now()/1000);$('connection').className='muted';
   await onceView('overview',initOverview);
   await initializeView();

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
-const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'C:/Users/Administrator/AppData/Roaming/npm/node_modules/browser-use/node_modules/playwright');
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.CONSOLE_TEST_URL;
 assert.ok(base && ['127.0.0.1','localhost'].includes(new URL(base).hostname),'Use a local synthetic console fixture');
 const root = path.resolve(__dirname,'../../..');

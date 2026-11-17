@@ -1,6 +1,7 @@
 """Installation checks use synthetic inputs and never call clients or a model."""
 import importlib.util
 import json
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -44,7 +45,10 @@ def test_defaults_valid_offline_and_private_data_absent(install_root):
     messaging = load_messaging(install_root / 'config/messaging.toml')
     assert not messaging['enabled'] and not any(t['enabled'] for t in messaging['targets'])
     text = '\n'.join(p.read_text(encoding='utf-8') for p in (install_root / 'config').glob('*'))
-    assert not any(s in text for s in ('Administrator', 'wxid_jxfwv4ublsp322', '997698095', 'oc_56ba', 'ou_b04'))
+    assert not re.search(r'(?i)wxid_[a-z0-9_-]+', text)
+    assert not re.search(r'account_id\s*=\s*["\']\d{5,12}["\']', text)
+    assert not re.search(r'\b(?:oc|ou|cli)_[a-f0-9]{16,}\b', text, re.I)
+    assert not re.search(r'[A-Za-z]:[\\/](?:Users|UserFolders)[\\/]', text)
 
 
 def test_first_run_drains_batches_and_resumes_without_recollecting(install_root, monkeypatch):
@@ -113,6 +117,8 @@ def test_release_payload_never_copies_accounts_keys_or_installed_node():
     assert all(name in files for name in ('common/locking.py', 'application/collection.py',
         'selection/__init__.py', 'providers/query.py', 'providers/content.py',
         'providers/platforms/qq.py', 'processor/service.py', 'automation/wakeup.py'))
+    assert 'version.json' in files
+    assert 'mcp_service/server.py' in files and 'mcp_service/README.md' in files
     assert 'tools/install/defaults/processor.toml' in files
     assert 'tools/install/console.toml' in files
     assert all(path.relative_to(ROOT).as_posix() in files

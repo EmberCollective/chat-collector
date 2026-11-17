@@ -152,6 +152,48 @@ def test_activity_combines_manual_and_automatic_runs_with_retry_details(console)
     assert client.get('/api/activity/automation/missing').status_code == 404
 
 
+def test_performance_activity_returns_only_recent_collect_and_process_runs(console):
+    from automation import load_config, SchedulerService
+
+    client, app, folder, now = console
+    path = folder / 'performance-automation.toml'
+    path.write_text('enabled=true\n[storage]\nstate_file="performance.db"\n[jobs.wechat]\nenabled=true\n', encoding='utf-8')
+    app.state.bridge.settings['automation_config'] = str(path)
+    service = SchedulerService(load_config(path), callbacks={'wechat': lambda: {'messages': 2}}, clock=lambda: now)
+    assert service.execute('wechat')['state'] == 'idle'
+
+    app.state.jobs.jobs.clear()
+    app.state.jobs.jobs.update({
+        'manual-collect': dict(id='manual-collect', module='qq', action='collect', origin='manual',
+                               status='succeeded', started_at=now - 50, finished_at=now - 30),
+        'manual-process': dict(id='manual-process', module='processor', action='process', origin='manual',
+                               status='running', started_at=now - 20, finished_at=None),
+        'manual-retry': dict(id='manual-retry', module='qq', action='collect', origin='schedule',
+                             status='retry', started_at=now - 25, finished_at=None),
+        'manual-delivery': dict(id='manual-delivery', module='messaging', action='deliver', origin='manual',
+                                status='succeeded', started_at=now - 10, finished_at=now - 9),
+        'manual-old': dict(id='manual-old', module='qq', action='collect', origin='manual',
+                           status='succeeded', started_at=now - 150, finished_at=now - 100),
+    })
+    data = client.get('/api/activity/performance?window_seconds=75').json()
+    assert data['warnings'] == []
+    assert {record['action'] for record in data['records']} == {'collect', 'process'}
+    assert {record['source'] for record in data['records']} == {'automation', 'console'}
+    automation_ids = {record['id'] for record in data['records'] if record['source'] == 'automation'}
+    assert {record['id'] for record in data['records']} == {'manual-collect', 'manual-process'} | automation_ids
+    assert not {'manual-retry', 'manual-delivery', 'manual-old'} & {record['id'] for record in data['records']}
+    running = next(record for record in data['records'] if record['id'] == 'manual-process')
+    assert running['finished_at'] is None
+
+    app.state.bridge.settings['automation_config'] = str(folder / 'invalid-automation.toml')
+    (folder / 'invalid-automation.toml').write_text('this is not toml', encoding='utf-8')
+    partial = client.get('/api/activity/performance?window_seconds=75').json()
+    assert partial['warnings']
+    assert partial['records']
+
+    client.headers.pop('X-Console-Token')
+    assert client.get('/api/activity/performance?window_seconds=75').status_code == 401
+
 def test_activity_keeps_manual_records_when_automation_configuration_is_invalid(console):
     client, app, folder, now = console
     path = folder / 'invalid-automation.toml'
@@ -174,8 +216,10 @@ def test_activity_keeps_manual_records_when_automation_configuration_is_invalid(
 
 def test_security_and_local_docs(console):
     client,app,*_=console
+    from common.version import project_version
     session = client.get('/api/session').json()
     assert session['application'] == 'chat-collector-console'
+    assert session['version'] == project_version()
     assert Path(session['root']) == app.state.bridge.root
     assert session['pid'] == os.getpid()
     assert client.get('/').status_code==200

@@ -17,7 +17,7 @@
 在 `config/qq.toml` 已有 `[source]` 中配置：
 
 ```toml
-work_dir = 'C:\Users\Administrator\AppData\Local\Temp\chat-collector-qq'
+work_dir = 'C:\Temp\chat-collector-qq'
 ```
 
 选择本机 SSD 的目录即可，不应指向 QQ 原始数据库目录。CLI 和可选调试台读取同一配置；正式解密库、批次和附件路径分别由原有配置决定。

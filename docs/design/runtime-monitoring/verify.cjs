@@ -1,7 +1,7 @@
-﻿'use strict';
+'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {pathToFileURL}=require('node:url');
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'C:/Users/Administrator/AppData/Roaming/npm/node_modules/browser-use/node_modules/playwright');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 require('node:child_process').execFileSync(process.execPath,[path.join(__dirname,'build.cjs'),'--check'],{stdio:'inherit'});
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
