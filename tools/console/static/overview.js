@@ -62,7 +62,7 @@
       row.append(node('span',issue.status==='paused'?'已暂停':unknown?'待确认':issue.severity==='warning'?'需检查':'失败','problem-tag'+(unknown||issue.severity==='warning'?' warn':'')),text,node('time',clock(issue.last_at)));
       const button=node('button',issue.status==='paused'?'前往'+(names[issue.source_id||issue.module]||issue.module)+'处理 →':'查看相关记录','secondary');button.dataset.issueKey=issue.key;button.addEventListener('click',()=>guard(()=>openIssue(issue)));row.append(button);attention.append(row);
     }
-    const metrics=[['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['正式采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本'],['平均采集耗时',summary.avg_seconds==null?'—':summary.avg_seconds.toFixed(1)+' 秒',summary.sample_count?`${count(summary.sample_count)} 个有效结束轮次 · 含失败耗时`:'暂无有效样本']];
+    const metrics=[['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本'],['平均采集耗时',summary.avg_seconds==null?'—':summary.avg_seconds.toFixed(1)+' 秒',summary.sample_count?`${count(summary.sample_count)} 个有效结束轮次 · 含失败耗时`:'暂无有效样本']];
     $('kpis').replaceChildren(...metrics.map(([label,value,detail,bad])=>{const item=node('div',null,'metric');item.append(node('span',label),node('strong',value,bad?'bad':''),node('small',detail));return item;}));
     renderSources();renderServices();renderChart();renderResources();window.setOverviewSnapshot?.(s);
     const warnings=s.warnings||[];
@@ -79,7 +79,7 @@
         if(source.emitted_complete===false)amount.append(node('small','统计不完整'));
         duration.append(node('small',count(source.sample_count)+' 个有效样本'));success.append(node('span',rate(source.success_rate),'rate'+(source.failed?' warn':'')));
         const ticks=node('div',null,'run-ticks');ticks.setAttribute('role','group');ticks.setAttribute('aria-label','最近 '+source.recent.length+' 次有效轮次');
-        for(const run of source.recent){const tick=node('button',null,run.outcome==='failed'?'failed':'success');tick.title=source.name+' · '+state(run.outcome)+' · '+stamp(run.started_at);tick.setAttribute('aria-label',tick.title);tick.addEventListener('click',()=>guard(()=>openOverviewJob(run.run_id,run.run_source,{module:source.id,action:'collect',label:source.name+' · 正式采集'})));ticks.append(tick);}
+        for(const run of source.recent){const tick=node('button',null,run.outcome==='failed'?'failed':'success');tick.title=source.name+' · '+state(run.outcome)+' · '+stamp(run.started_at);tick.setAttribute('aria-label',tick.title);tick.addEventListener('click',()=>guard(()=>openOverviewJob(run.run_id,run.run_source,{module:source.id,action:'collect',label:source.name+' · 采集'})));ticks.append(tick);}
         success.append(ticks,node('small',`${source.success}/${source.valid_count} 成功 · 跳过 ${source.skipped}${source.unknown?' · 未确认 '+source.unknown:''}`));
         const sameDay=source.last_success!=null&&new Date(source.last_success*1000).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'})===new Date(snapshot.generated_at*1000).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'});
         row.append(amount,duration,success,node('td',source.last_success==null?'尚无成功':sameDay?clock(source.last_success):stamp(source.last_success)));
@@ -134,7 +134,7 @@
   function renderChart(){
     if(!snapshot)return;
     const bins=snapshot.success_bins||[],width=Math.max(200,$('rate-chart').querySelector('svg')?.clientWidth||$('rate-chart').clientWidth-40),height=Math.max(220,$('rate-chart').querySelector('svg')?.clientHeight||220),left=44,right=20,top=20,bottom=36,plot=height-top-bottom;
-    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('role','group');svg.setAttribute('aria-label','正式采集成功率，纵轴0到100%');
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('role','group');svg.setAttribute('aria-label','采集成功率，纵轴0到100%');
     const add=(tag,attrs,text)=>{const item=document.createElementNS(svg.namespaceURI,tag);for(const [key,value]of Object.entries(attrs))item.setAttribute(key,value);if(text!=null)item.textContent=text;svg.append(item);return item;};
     const x=i=>left+i*(width-left-right)/Math.max(1,bins.length-1),y=bin=>top+plot*(1-bin.success_rate);
     for(const pct of [0,25,50,75,100]){const at=top+plot*(1-pct/100);add('line',{x1:left,y1:at,x2:width-right,y2:at,stroke:'#e0e6e2','stroke-width':1});add('text',{x:left-8,y:at+4,'text-anchor':'end',fill:'#68756e','font-size':13},pct+'%');}
@@ -145,7 +145,7 @@
     bins.forEach((bin,i)=>{
       if(bin.success_rate==null)return;
       const circle=add('circle',{cx:x(i),cy:y(bin),r:bin.failed?5:3,fill:bin.failed?'#a43b32':'#12634f'}),title=document.createElementNS(svg.namespaceURI,'title');title.textContent=`${clock(bin.start)} — ${clock(bin.end)}：${bin.success} 成功、${bin.failed} 失败，成功率 ${rate(bin.success_rate)}`;circle.append(title);
-      if(bin.failed){circle.setAttribute('role','button');circle.setAttribute('tabindex','0');circle.setAttribute('aria-label',title.textContent+'，查看记录');const open=()=>guard(()=>openRuns({action:'collect',status:'failed',start:bin.start,end:bin.end,label:clock(bin.start)+' — '+clock(bin.end)+' · 正式采集失败'}));circle.addEventListener('click',open);circle.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();open();}});}
+      if(bin.failed){circle.setAttribute('role','button');circle.setAttribute('tabindex','0');circle.setAttribute('aria-label',title.textContent+'，查看记录');const open=()=>guard(()=>openRuns({action:'collect',status:'failed',start:bin.start,end:bin.end,label:clock(bin.start)+' — '+clock(bin.end)+' · 采集失败'}));circle.addEventListener('click',open);circle.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();open();}});}
     });
     const legend=node('div',null,'legend');for(const [label,bad]of [['成功率',false],['包含失败的时间段',true]]){const span=node('span');span.append(node('i',null,bad?'bad':''),document.createTextNode(label));legend.append(span);}const area=node('div',null,'rate-plot');area.append(svg);$('rate-chart').replaceChildren(area,legend);
   }
@@ -168,7 +168,7 @@
     $('resource-scope').textContent=messageMode?'消息贡献：最近 '+snapshot.window.hours+' 小时已提供统计的 '+rows.filter(row=>row.messages!=null).length+' 个来源；包含新增与修订，未统计来源不按 0 处理。':'存储占用：盘点于 '+stamp(resources.measured_at)+'，仅含配置指定的状态库、明文快照、消息批次与附件归档；为逻辑大小，不等同于整盘或物理占用。'+(resources.complete===false?'存在不可读或未完成的目录，缺口不按 0 计算。':'');
   }
 
-  function windowScope(options={}){return {start:snapshot?.window.start,end:snapshot?.window.end,label:'正式采集 · 所有来源',...options};}
+  function windowScope(options={}){return {start:snapshot?.window.start,end:snapshot?.window.end,label:'采集 · 所有来源',...options};}
   async function openRuns(options={}){
     scope=windowScope(options);current=null;$('run-result-filter').value=scope.status||'all';
     if(!$('run-dialog').open)$('run-dialog').showModal();await renderRunList();
@@ -210,7 +210,7 @@
       const value=collection[section]?.timings_seconds?.[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0)facts.push([label,durationText(value)]);
     }
     if(!facts.length)return;
-    block.append(node('h4','采集耗时'),node('p','分阶段耗时已包含在刷新合计中；未记录的阶段不推算。','muted'));addFacts(block,facts);
+    block.append(node('h4','采集阶段耗时'),node('p','分阶段耗时已包含在刷新合计中；未记录的阶段不推算。','muted'));addFacts(block,facts);
     const counts=[];
     for(const [section,key,label]of [['page_refresh','pages_total','数据库页数'],['page_refresh','pages_written','更新页数'],['logical_sync','candidate_rows','候选记录'],['logical_sync','rows_written','写入记录']]){
       const value=collection[section]?.[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0)counts.push([label,count(value)]);
@@ -218,7 +218,7 @@
     if(counts.length)addFacts(block,counts);
   }
   function renderJob(job){
-    const detail=detailHeader((names[job.module]||job.module)+' · '+(actions[job.action]||job.action));
+    const detail=detailHeader(job.action==='collect'?'采集':(names[job.module]||job.module)+' · '+(actions[job.action]||job.action));
     addFacts(detail,[['操作',actions[job.action]||job.action],['模块',names[job.module]||job.module],['触发方式',originLabels[job.origin]||job.origin],['开始时间',stamp(job.started_at)],['耗时',durationText(job.duration_seconds,!!job.finished_at)],['结果',state(job.status)],['运行编号',job.id]]);
     detail.append(node('h3','错误与当前结果'),node('p',job.error||'没有已记录的错误；保存与送达结果仍以本轮原始结果为准。'),node('h3','下一步'),node('p',job.status==='failed'?'先核对错误位置、输入与实际输出，再决定后续操作。原失败证据会保留。':job.status==='interrupted'?'结果未确认，请先核对实际输出，避免重复执行。':job.status==='running'?'当前任务仍在执行，尚不能确认最终结果。':'核对本轮结果与后续处理记录。'));
     const controls=node('div',null,'actions'),target=jobConfig(job);if(scope.module&&sourceInfo(scope.module))target.source_id=scope.module;controls.append(configButton(target));

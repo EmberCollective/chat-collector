@@ -32,7 +32,7 @@ def test_resume_tool_rejects_reused_pid_without_touching_other_process(monkeypat
 
 @pytest.fixture
 def console(tmp_path):
-    original=tomlkit.parse((ROOT/'console.toml').read_text(encoding='utf-8'))
+    original=tomlkit.parse((ROOT.parent/'install/console.toml').read_text(encoding='utf-8'))
     settings={'collector_root':str((ROOT/original['collector_root']).resolve()), 'port':10400,'modules':{}}
     settings['automation_config'] = str(tmp_path/'absent-automation.toml')
     settings['messaging_config'] = str(tmp_path/'absent-messaging.toml')
