@@ -115,6 +115,36 @@ def _stats(result):
             if isinstance(key, str) and re.fullmatch('[a-z_]{1,60}', key) and type(value) in (bool, int, float) and not (isinstance(value, float) and not math.isfinite(value))}
 
 
+def _collection_details(result):
+    refresh = result.get('refresh') if isinstance(result, dict) else None
+    if not isinstance(refresh, dict) or refresh.get('reused') is True:
+        return None
+    counts = {'pages_total', 'pages_decrypted', 'pages_written', 'cipher_bytes_written',
+              'candidate_rows', 'rows_written', 'rows_deleted'}
+    phases = {'total', 'capture', 'update_and_verify', 'candidates_before', 'resize_image',
+              'page_write', 'verify', 'candidates_after', 'commit', 'compare_and_write',
+              'logical_sync', 'export', 'integrity_check', 'time_indexes', 'publish'}
+    modes = {'incremental', 'baseline', 'logical_incremental', 'logical_baseline', 'decrypted_only'}
+    sections = {}
+    for name, value in (('refresh', refresh), ('page_refresh', refresh.get('page_refresh')),
+                        ('logical_sync', refresh.get('logical_sync'))):
+        if not isinstance(value, dict):
+            continue
+        section = {key: item for key, item in _stats(value).items()
+                   if key in counts and type(item) in (int, float) and item >= 0}
+        if type(value.get('changed')) is bool:
+            section['changed'] = value['changed']
+        if isinstance(value.get('mode'), str) and value['mode'] in modes:
+            section['mode'] = value['mode']
+        timings = {key: item for key, item in _stats(value.get('timings_seconds')).items()
+                   if key in phases and type(item) in (int, float) and item >= 0}
+        if timings:
+            section['timings_seconds'] = timings
+        if section:
+            sections[name] = section
+    return {'collection': sections} if sections else None
+
+
 def _callback(config, name):
     path = config['jobs'][name]['config']
     if name in {'wechat', 'qq'}:
@@ -344,6 +374,7 @@ class SchedulerService:
             if isinstance(result, dict) and result.get('status') == 'failed':
                 raise RuntimeError('job_returned_failed')
             summary = _stats(result)
+            details = _collection_details(result) if name in {'wechat', 'qq'} else None
             attention = any(summary.get(key, 0) > 0 for key in ('failed', 'conflict', 'unknown', 'unresolved_deliveries'))
             code = 'downstream_attention' if attention else None
         except Exception as exc:
@@ -355,7 +386,8 @@ class SchedulerService:
             conn.execute("UPDATE jobs SET state='idle',attempts=0,next_run=CASE WHEN wake_seq>? THEN ? ELSE ? END,wake_consumed=?,last_success=?,error=?,active_error=?,result=? WHERE name=?",
                          (row['wake_seq'], finished, finished + self.config['jobs'][name]['interval_seconds'],
                           row['wake_seq'], finished, code, code, canonical(summary), name))
-            history._finish(conn, name, 'warning' if attention else 'succeeded', finished, error=code, result=summary)
+            history._finish(conn, name, 'warning' if attention else 'succeeded', finished,
+                            error=code, result=summary, details=details)
             result = dict(conn.execute('SELECT * FROM jobs WHERE name=?', (name,)).fetchone())
             if operation:
                 conn.execute('UPDATE operations SET state=?,updated_at=?,error=? WHERE id=?',
