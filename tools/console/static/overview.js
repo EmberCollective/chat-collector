@@ -203,6 +203,20 @@
   function detailHeader(title){$('dialog-heading').textContent=title;$('run-list').hidden=true;$('run-detail').hidden=false;$('show-history').hidden=false;$('run-scope').textContent=scope.label||'运行详情';const detail=$('run-detail');detail.replaceChildren();const back=node('button','返回相关运行','text-button');back.id='back-to-runs';back.addEventListener('click',()=>guard(renderRunList));detail.append(back);return detail;}
   function addFacts(detail,values){const facts=node('dl',null,'run-facts');for(const [label,value]of values)facts.append(node('dt',label),node('dd',value??'未记录'));detail.append(facts);}
   function configButton(target){const button=node('button','打开相关配置','secondary');button.addEventListener('click',()=>guard(()=>goConfig(target)));return button;}
+  function collectionTimings(block,collection){
+    if(!collection)return;
+    const facts=[];
+    for(const [section,key,label]of [['refresh','total','数据库刷新合计'],['page_refresh','capture','源库读取与快照检查'],['page_refresh','candidates_before','更新前候选定位'],['page_refresh','resize_image','扩缩容校验准备'],['page_refresh','verify','原生快照校验'],['page_refresh','candidates_after','更新后候选定位'],['logical_sync','compare_and_write','记录比较与写入'],['logical_sync','verify','标准快照校验']]){
+      const value=collection[section]?.timings_seconds?.[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0)facts.push([label,durationText(value)]);
+    }
+    if(!facts.length)return;
+    block.append(node('h4','采集耗时'),node('p','分阶段耗时已包含在刷新合计中；未记录的阶段不推算。','muted'));addFacts(block,facts);
+    const counts=[];
+    for(const [section,key,label]of [['page_refresh','pages_total','数据库页数'],['page_refresh','pages_written','更新页数'],['logical_sync','candidate_rows','候选记录'],['logical_sync','rows_written','写入记录']]){
+      const value=collection[section]?.[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0)counts.push([label,count(value)]);
+    }
+    if(counts.length)addFacts(block,counts);
+  }
   function renderJob(job){
     const detail=detailHeader((names[job.module]||job.module)+' · '+(actions[job.action]||job.action));
     addFacts(detail,[['操作',actions[job.action]||job.action],['模块',names[job.module]||job.module],['触发方式',originLabels[job.origin]||job.origin],['开始时间',stamp(job.started_at)],['耗时',durationText(job.duration_seconds,!!job.finished_at)],['结果',state(job.status)],['运行编号',job.id]]);
@@ -221,7 +235,7 @@
     if(job.action==='process'&&job.source!=='automation')workflows.unshift({id:job.id});
     for(const run of workflows){const button=node('button',run.attempt?'查看第 '+run.attempt+' 次 Pi 工作流':'查看 Pi 工作流','secondary');button.addEventListener('click',()=>guard(async()=>{rememberReturn();$('run-dialog').close();await selectWorkflow(run.id);}));controls.append(button);}detail.append(controls);
     detail.append(node('h3','本轮上下文'),node('p','完整模型上下文、请求与工具结果从关联 Pi 工作流读取。未记录的正文无法还原。','muted'));
-    for(const attempt of job.attempts||[]){const block=node('details');block.open=job.attempts.length===1;block.append(node('summary','第 '+attempt.number+' 次 · '+state(attempt.status)+' · '+stamp(attempt.started_at)));if(attempt.error)block.append(node('p',attempt.error));if(attempt.details)block.append(node('pre',JSON.stringify(attempt.details,null,2)));if(attempt.result!=null)block.append(node('pre',JSON.stringify(attempt.result,null,2)));detail.append(block);}
+    for(const attempt of job.attempts||[]){const block=node('details');block.open=job.attempts.length===1;block.append(node('summary','第 '+attempt.number+' 次 · '+state(attempt.status)+' · '+stamp(attempt.started_at)));if(attempt.error)block.append(node('p',attempt.error));collectionTimings(block,attempt.details?.collection);if(attempt.details?.failures)block.append(node('pre',JSON.stringify(attempt.details,null,2)));if(attempt.result!=null)block.append(node('pre',JSON.stringify(attempt.result,null,2)));detail.append(block);}
     const raw=node('details');raw.append(node('summary','查看日志与原始记录'));if(job.log_tail)raw.append(node('pre',job.log_tail));raw.append(node('pre',JSON.stringify(job,null,2)));detail.append(raw);detail.focus({preventScroll:true});
   }
   async function openIssue(issue){

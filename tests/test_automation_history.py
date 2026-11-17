@@ -200,6 +200,44 @@ def test_once_records_manual_origin_and_limit_validation(config):
             history.list_runs(config, limit=limit)
 
 
+def test_collection_timings_are_durable_per_attempt_without_private_fields(config):
+    refresh = {'database': 'PRIVATE_PATH', 'mode': 'incremental', 'changed': True,
+               'timings_seconds': {'total': 12.5, 'PRIVATE_KEY': 123, 'capture': float('nan')},
+               'page_refresh': {'pages_total': 300, 'pages_written': 2,
+                                'timings_seconds': {'capture': 3, 'candidates_before': 5,
+                                                    'verify': float('inf'), 'commit': -1}},
+               'logical_sync': {'candidate_rows': 4, 'rows_written': 0, 'database': 'PRIVATE_PATH',
+                                'timings_seconds': {'compare_and_write': 0.1, 'verify': True}},
+               'unrecognized': {'PRIVATE_KEY': 'PRIVATE_TEXT'}}
+    service = core.SchedulerService(config, callbacks={'qq': lambda: {'matched': 0, 'refresh': refresh}}, clock=Clock())
+    service.execute('qq', manual=True)
+    first = history.list_runs(config, module='qq')[0]
+    expected = {'collection': {
+        'refresh': {'mode': 'incremental', 'changed': True, 'timings_seconds': {'total': 12.5}},
+        'page_refresh': {'pages_total': 300, 'pages_written': 2,
+                         'timings_seconds': {'capture': 3, 'candidates_before': 5}},
+        'logical_sync': {'candidate_rows': 4, 'rows_written': 0,
+                         'timings_seconds': {'compare_and_write': 0.1}}}}
+    assert first['result'] == {'matched': 0}
+    assert history.get_run(config, first['id'])['attempts'][0]['details'] == expected
+    refresh['timings_seconds']['total'] = 1
+    service.execute('qq', manual=True)
+    record = history.get_run(config, first['id'])
+    assert record['attempts'][0]['details'] == expected
+    assert 'PRIVATE_' not in json.dumps(record)
+
+
+@pytest.mark.parametrize('result', [None, {}, {'refresh': 'PRIVATE_TEXT'},
+    {'refresh': {'reused': True, 'timings_seconds': {'total': 120}}},
+    {'refresh': {'mode': [], 'timings_seconds': None, 'page_refresh': [], 'logical_sync': False}},
+    {'refresh': {'mode': 'PRIVATE_TEXT', 'pages_total': True, 'rows_written': -1}}])
+def test_missing_or_malformed_collection_metrics_do_not_change_job_outcome(config, result):
+    core.SchedulerService(config, callbacks={'qq': lambda: result}, clock=Clock()).execute('qq', manual=True)
+    first = history.list_runs(config, module='qq')[0]
+    assert first['status'] == 'succeeded'
+    assert history.get_run(config, first['id'])['attempts'][0]['details'] is None
+
+
 def test_manual_worker_crash_detection_finishes_history(config, monkeypatch):
     from automation import control
     def crash():

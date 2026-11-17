@@ -259,8 +259,12 @@ def _refresh_database(source,target,*,platform,account,key,key_mode,work_dir,lib
                         step=time.perf_counter()
                         if collect_changes:
                             dirty_pages=set(changed)|set(range(count+1,len(previous)+1))
-                            old_schema=destination.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
-                            before_rows=collect_changes(destination, dirty_pages)
+                            # SQLite bypasses mmap in write transactions; keep their lock while a reader walks.
+                            with NativeSQLite(target,readonly=True,**native_options) as previous_snapshot:
+                                previous_snapshot.execute(f'PRAGMA mmap_size={target.stat().st_size}')
+                                previous_snapshot.execute('BEGIN')
+                                old_schema=previous_snapshot.execute('SELECT type,name,sql FROM sqlite_master ORDER BY type,name')
+                                before_rows=collect_changes(previous_snapshot, dirty_pages)
                         stage_timings['candidates_before']=round(time.perf_counter()-step,3)
                         resized=count!=len(previous)
                         image=None

@@ -26,10 +26,15 @@ def setup_refresh(config, monkeypatch):
 
 def test_combined_entry_collects_without_rules_and_throttles_from_collection_progress(config, monkeypatch):
     calls, clock = setup_refresh(config, monkeypatch)
-    assert run_round(config)['status'] == 'no_enabled_rules'
+    first = run_round(config)
+    assert first['status'] == 'no_enabled_rules' and 'reused' not in first['refresh']
     assert publication_path(config).exists() and calls == [111]
     clock[0] = 120
-    assert run_round(config)['status'] == 'no_enabled_rules'
+    reused = run_round(config)
+    assert reused['status'] == 'no_enabled_rules' and reused['refresh']['reused'] is True
+    from automation.core import _stats, _collection_details
+    assert _stats(reused) == {'matched': 0, 'emitted': 0, 'duplicates': 0}
+    assert _collection_details(reused) is None
     assert calls == [111]
     with sqlite3.connect(config['storage']['state_file']) as db:
         assert db.execute("SELECT value FROM settings WHERE key='window_end'").fetchone() is None

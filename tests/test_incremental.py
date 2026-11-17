@@ -342,7 +342,7 @@ def test_multi_page_schema_and_index_growth_publishes_header_last(fixture,monkey
     assert refresh()['pages_written']==0
 
 
-def test_qq_resize_reads_locked_page_through_native_engine(tmp_path):
+def test_qq_resize_reads_locked_page_through_native_engine(tmp_path, monkeypatch):
     from collector.native_delta import capture_rows
 
     library=Path(__file__).parents[1]/'runtime-deps/native/sqlcipher-qq-pages.dll'
@@ -352,6 +352,30 @@ def test_qq_resize_reads_locked_page_through_native_engine(tmp_path):
     options={'library':library,'pending_byte':16*4096-1024}
     original,source,target=(tmp_path/name for name in ('source/encrypted.db','source/nt_msg.db','plain/qq-native.db'))
     original.parent.mkdir()
+    mapped_reads = []
+    readers = []
+    execute = NativeSQLite.execute
+    def check_unmapped_write(db, sql, parameters=()):
+        if sql.startswith('INSERT INTO sqlite_dbpage'):
+            assert execute(db, 'PRAGMA main.mmap_size') == [(0,)]
+            assert all(reader.db is None for reader in readers)
+        return execute(db, sql, parameters)
+    monkeypatch.setattr(NativeSQLite, 'execute', check_unmapped_write)
+    def capture(db, dirty):
+        if any(Path(row[2]) == target.resolve() for row in db.execute('PRAGMA database_list') if row[2]):
+            readers.append(db)
+            import ctypes
+            readonly = db.lib.sqlite3_db_readonly
+            readonly.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+            readonly.restype = ctypes.c_int
+            assert readonly(db.db, b'main') == 1
+            mapped_reads.append(db.execute('PRAGMA main.mmap_size')[0][0])
+            assert mapped_reads[-1] > 0
+            with NativeSQLite(target, **options) as contender:
+                contender.execute('PRAGMA busy_timeout=0')
+                with pytest.raises(RuntimeError, match='locked'):
+                    contender.execute('BEGIN IMMEDIATE')
+        return capture_rows(db, dirty)
     try:
         with NativeSQLite(original,**options) as db:
             db.execute("PRAGMA key='test-only-key'")
@@ -363,12 +387,21 @@ def test_qq_resize_reads_locked_page_through_native_engine(tmp_path):
             db.execute('COMMIT')
             def refresh():
                 source.write_bytes(bytes(1024)+original.read_bytes())
-                return incremental.refresh_database(source,target,platform='qq',account='test',key='test-only-key',collect_changes=capture_rows,**options)
+                return incremental.refresh_database(source,target,platform='qq',account='test',key='test-only-key',collect_changes=capture,**options)
             first=refresh()
             assert first['pages_total']>16
             db.execute("UPDATE messages SET body=x'65646974' WHERE id=1")
             db.execute('DELETE FROM messages WHERE id=2')
             db.execute('INSERT INTO messages VALUES(?,?)',(1000,b'new'*20000))
+            before = target.read_bytes()
+            def fail(stage):
+                if stage == 'before_commit':
+                    raise RuntimeError('injected disk failure')
+            with monkeypatch.context() as patch:
+                patch.setattr(incremental, '_fault', fail)
+                with pytest.raises(RuntimeError, match='rollback=complete'):
+                    refresh()
+            assert target.read_bytes() == before
             second=refresh()
             assert second['mode']=='incremental' and second['pages_total']>first['pages_total']
             assert {1,2,1000}<=set(second['_row_candidates']['messages'])
@@ -382,6 +415,7 @@ def test_qq_resize_reads_locked_page_through_native_engine(tmp_path):
             with NativeSQLite(target,readonly=True,**options) as plain:
                 assert plain.execute('PRAGMA integrity_check')==[('ok',)]
                 assert plain.execute('SELECT * FROM messages ORDER BY id')==db.execute('SELECT * FROM messages ORDER BY id')
+            assert len(mapped_reads) == 3  # Failed growth, recovered growth, shrink.
     finally:
         with NativeSQLite(':memory:',library=library,pending_byte=0x3ffffc00):pass
 

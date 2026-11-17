@@ -17,4 +17,6 @@ def run_round(config, *, start=None, end=None):
         if snapshot.get('status') == 'waiting_for_refresh' and result.get('status') == 'no_new_time_window':
             result.update(status='waiting_for_refresh', retry_after_seconds=snapshot['retry_after_seconds'])
         result.update(refresh=snapshot['refresh'])
+        if snapshot.get('status') == 'waiting_for_refresh':
+            result['refresh'] = dict(snapshot['refresh'], reused=True)
         return result
