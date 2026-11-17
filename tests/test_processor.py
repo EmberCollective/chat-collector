@@ -253,6 +253,25 @@ def test_invalid_model_result_never_commits_task(config, monkeypatch, invalid):
     assert status(config)['counts']['pending_groups'] == 1
 
 
+def test_new_task_cannot_request_remind_again(config):
+    batch(config, 'one', event('a'))
+    group = preview(config)['groups'][0]
+    submitted = response(['a'])
+    submitted['tasks'][0]['remind_again'] = True
+    with pytest.raises(ValueError, match='existing task_id'):
+        core._validate_response(submitted, group, [], 'Asia/Shanghai')
+
+
+@pytest.mark.parametrize('field', ['urgent', 'remind_again'])
+def test_new_boolean_flags_reject_non_boolean_values(config, field):
+    batch(config, 'one', event('a'))
+    group = preview(config)['groups'][0]
+    submitted = response(['a'], identifier='existing')
+    submitted['tasks'][0][field] = 1
+    with pytest.raises(ValueError, match='must be booleans'):
+        core._validate_response(submitted, group, [{'task_id': 'existing'}], 'Asia/Shanghai')
+
+
 def test_chunk_history_cannot_generate_old_only_tasks(config, monkeypatch):
     config['context'].update(max_messages=1, history_messages=1)
     batch(config, 'one', event('a'), event('b', 101))
@@ -263,18 +282,19 @@ def test_chunk_history_cannot_generate_old_only_tasks(config, monkeypatch):
         core._validate_response(response(['a']), groups[1], [], 'Asia/Shanghai')
 
 
-def test_rules_changed_reextracts_and_supersedes_without_deleting_history(config, monkeypatch):
+def test_rules_changed_keeps_unmentioned_task_open_without_new_event(config, monkeypatch):
     batch(config, 'one', event('a'))
     monkeypatch.setattr(core, '_call_model', lambda *args: response(['a']))
     run_round(config)
     Path(config['rules']['file']).write_text('Ignore report tasks.', encoding='utf-8')
     monkeypatch.setattr(core, '_call_model', lambda *args: {'tasks': []})
     run_round(config)
-    assert list_tasks(config) == []
+    tasks = list_tasks(config)
+    assert len(tasks) == 1 and tasks[0]['status'] == 'open' and tasks[0]['revision'] == 1
     with sqlite3.connect(config['storage']['state_file']) as db:
         body = json.loads(db.execute('SELECT body FROM tasks').fetchone()[0])
-        assert body['status'] == 'superseded' and body['revision'] == 2
-        assert db.execute('SELECT count(*) FROM outbox').fetchone()[0] == 2
+        assert body['status'] == 'open' and body['revision'] == 1
+        assert db.execute('SELECT count(*) FROM outbox').fetchone()[0] == 1
 
 
 def test_late_earlier_message_regroups_without_duplicate_active_task(config, monkeypatch):

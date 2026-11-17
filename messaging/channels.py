@@ -112,6 +112,9 @@ def public_envelope(envelope):
         if type(task['needs_review']) is not bool:
             raise DeliveryRejected('invalid_delivery_payload')
         result['needs_review'] = task['needs_review']
+    if type(task.get('urgent', False)) is not bool:
+        raise DeliveryRejected('invalid_delivery_payload')
+    result['urgent'] = task.get('urgent', False)
     result['time'] = _text_fields(task.get('time', {}), ('start', 'deadline', 'timezone', 'text'))
     if any(not isinstance(task.get(field, []), list) for field in ('people', 'sources', 'resources')):
         raise DeliveryRejected('invalid_delivery_payload')

@@ -141,6 +141,59 @@ def test_human_edits_finish_during_model_and_survive_stale_submission(config, mo
     assert task['title'] == 'Fresh details' and set(task['source_message_keys']) == {'a', 'b'}
 
 
+def test_extraction_persists_urgent_and_one_shot_remind_again(config, monkeypatch):
+    batch(config, 'first', event('a'))
+    def extract(*args):
+        result = response(['a'])
+        result['tasks'][0]['urgent'] = True
+        return result
+    monkeypatch.setattr(core, '_call_model', extract)
+    core.run_round(config)
+    saved = service.get_task(config, core.list_tasks(config)[0]['task_id'])
+    assert saved['urgent'] is True
+
+    submission = response(['a'], identifier=saved['task_id'])
+    submission['tasks'][0].update(urgent=False, remind_again=True)
+    service.apply_extraction(config, submission, request_id='flags:1', context=extraction_context(config, [saved]))
+    saved = service.get_task(config, saved['task_id'])
+    assert saved['urgent'] is False and saved['remind_again'] is True
+
+    submission = response(['a'], identifier=saved['task_id'])
+    service.apply_extraction(config, submission, request_id='flags:2', context=extraction_context(config, [saved]))
+    saved = service.get_task(config, saved['task_id'])
+    assert saved['urgent'] is False and 'remind_again' not in saved
+
+
+def test_manual_task_update_clears_one_shot_remind_again(config, monkeypatch):
+    batch(config, 'first', event('a'))
+    monkeypatch.setattr(core, '_call_model', lambda *args: response(['a']))
+    core.run_round(config)
+    saved = service.get_task(config, core.list_tasks(config)[0]['task_id'])
+    submission = response(['a'], identifier=saved['task_id'])
+    submission['tasks'][0]['remind_again'] = True
+    service.apply_extraction(config, submission, request_id='flags:manual', context=extraction_context(config, [saved]))
+    saved = service.get_task(config, saved['task_id'])
+    assert saved['remind_again'] is True
+    service.update_task_priority(config, saved['task_id'], 'P1', request_id='manual:priority', actor=ACTOR)
+    assert 'remind_again' not in service.get_task(config, saved['task_id'])
+
+
+def test_model_cannot_reopen_non_open_task_without_human_control(config, monkeypatch):
+    batch(config, 'first', event('a'))
+    monkeypatch.setattr(core, '_call_model', lambda *args: response(['a']))
+    core.run_round(config)
+    saved = core.list_tasks(config)[0]
+    saved['status'] = 'completed'
+    with service._task_connection(config) as conn, conn:
+        storage._save_task(conn, saved)
+    completed = service.get_task(config, saved['task_id'])
+    assert completed['status'] == 'completed' and 'status_control' not in completed
+
+    submission = response(['a'], identifier=completed['task_id'])
+    service.apply_extraction(config, submission, request_id='reopen:1', context=extraction_context(config, [completed]))
+    assert service.get_task(config, completed['task_id'])['status'] == 'completed'
+
+
 def extraction_context(config, existing):
     conn = core._connect(config)
     try:
@@ -200,20 +253,21 @@ def test_legacy_evidence_only_material_is_available_by_stable_id(config, monkeyp
     assert service.get_material(config, task['task_id'], selected['material_id'])['name'] == 'legacy.pdf'
 
 
-def test_changing_rules_then_restoring_them_does_not_reuse_an_unrelated_request(config, monkeypatch):
+def test_changing_rules_then_restoring_them_does_not_retire_the_original_task(config, monkeypatch):
     batch(config, 'first', event('a'))
     monkeypatch.setattr(core, '_call_model', lambda *args: response(['a']))
     core.run_round(config)
     original = core.list_tasks(config)[0]
     rules = Path(config['rules']['file'])
     text = rules.read_text(encoding='utf-8')
+    monkeypatch.setattr(core, '_call_model', lambda *args: {'tasks': []})
     rules.write_text('Different rules', encoding='utf-8')
     core.run_round(config)
     rules.write_text(text, encoding='utf-8')
     core.run_round(config)
     active = core.list_tasks(config)
-    assert len(active) == 1 and active[0]['task_id'] != original['task_id']
-    assert service.get_task(config, original['task_id'])['status'] == 'superseded'
+    assert len(active) == 1 and active[0]['task_id'] == original['task_id']
+    assert service.get_task(config, original['task_id'])['status'] == 'open'
 
 
 def test_extraction_rejects_fabricated_or_cross_conversation_input(config, monkeypatch):

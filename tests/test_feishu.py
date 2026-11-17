@@ -419,6 +419,16 @@ def test_card_main_details_localized_and_all_steps_preserved(case, status, label
             assert sections[index - 1]['tag'] == 'hr'
 
 
+@pytest.mark.parametrize('priority', ['P1', 'P2'])
+def test_urgent_flag_reaches_contract_and_feishu_header(case, priority):
+    _, _, envelope = case
+    task = envelope['task']
+    task.update(priority=priority, urgent=True)
+    assert feishu.public_envelope(envelope)['task']['urgent'] is True
+    expected = f'[{priority}][' + chr(0x7d27) + chr(0x6025) + '] Submit report'
+    assert feishu.card_content(task, {})['header']['title']['content'] == expected
+
+
 @pytest.mark.parametrize(('priority', 'color'), [('P0', 'red'), ('P1', 'orange'), ('P2', 'blue'), ('P3', 'green'), ('P4', 'grey'), ('unexpected', 'grey')])
 def test_priority_header_colors(case, priority, color):
     task = case[2]['task']

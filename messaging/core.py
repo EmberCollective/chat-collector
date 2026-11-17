@@ -78,6 +78,9 @@ def _event(value):
             _string(task[name], name)
     if 'needs_review' in task and type(task['needs_review']) is not bool:
         raise ValueError('Task needs_review must be boolean')
+    for name in ('urgent', 'remind_again'):
+        if name in task and type(task[name]) is not bool:
+            raise ValueError(f'Task {name} must be boolean')
     _strings(task.get('review_reasons', []), 'review_reasons', 100, 20000)
     _strings(task.get('notes', []), 'notes', 100, 20000)
     _strings(task.get('action_steps', []), 'action_steps', 50, 2000)
@@ -400,28 +403,35 @@ def _queue(config, conn, tasks, local, packages, now):
             last = conn.execute("SELECT * FROM deliveries WHERE target_id=? AND target_hash=? AND task_id=? AND status IN ('sent','deferred') ORDER BY finished_at DESC,rowid DESC LIMIT 1",
                                 (target['id'], fingerprint, key)).fetchone()
             current = last and last['revision'] == task['revision'] and last['local_version'] == version and last['package_hash'] == package_hash
+            effective = _effective(task, state)
+            requested = task.get('remind_again') is True
             initial = config.get('initial_notifications', {}).get(task['priority'], True)
             if last and last['status'] == 'deferred' and initial:
                 current = False
             kind, anchor = 'upsert', ''
             if current:
-                if (sync_only or _effective(task, state)['status'] != 'open'
+                if requested:
+                    continue
+                if (sync_only or effective['status'] != 'open'
                         or state.get('snoozed_until', 0) > now):
                     continue
-                due, reminder = reminder_due(config, _effective(task, state), state, last, now)
+                due, reminder = reminder_due(config, effective, state, last, now)
                 if due is None or due > now:
                     continue
                 anchor = digest(reminder) if reminder is not None else last['id']
                 kind = 'reminder'
             elif state.get('snoozed_until', 0) > now and not sync_only:
                 continue
-            elif not last and _effective(task, state)['status'] != 'open' and not sync_only:
+            elif not last and effective['status'] != 'open' and not sync_only:
                 continue
             elif last and last['revision'] == task['revision'] and last['local_version'] == version:
                 anchor = last['id']
-            identifier = digest([target['id'], fingerprint, key, task['revision'], version, package_hash, kind, anchor])
+            if requested and not sync_only and effective['status'] == 'open' and state.get('snoozed_until', 0) <= now:
+                kind, anchor = 'reminder', 'requested'
+            delivery_hash = '' if requested and kind == 'reminder' else package_hash
+            identifier = digest([target['id'], fingerprint, key, task['revision'], version, delivery_hash, kind, anchor])
             envelope = {'schema_version': 1, 'delivery_id': identifier, 'kind': kind, 'task': packages[key]}
-            if kind == 'reminder' and deadline_mode:
+            if kind == 'reminder' and deadline_mode and node:
                 envelope['reminder'] = node
             deferred = (not sync_only and not initial and kind == 'upsert' and (not last or last['status'] == 'deferred'))
             with conn:

@@ -47,9 +47,9 @@ result = update_task_status(
 
 人工优先级保存为 `priority_control`，包含级别、操作者、操作编号和时间，`priority_reason` 标记为用户手动设置。模型后续更新同一待办时保留此级别及说明；再次人工调整可覆盖。它不修改完成状态。消息层消费新修订后淘汰旧修订的未发投递，更新已有卡片，按新级别安排后续节点，不额外补发过去的提醒。人工控制按 `task_id` 保存，不宣称可以自动识别所有语义相同但被模型误建为不同编号的事项。
 
-人工完成或取消写入任务的 `status_control`。模型后续复用同 `task_id` 时可以补充内容、来源和材料，但不能自动重开人工关闭的事项；重新分组也不把这类历史记录自动替代。只有用户通过该接口明确设为 `open` 才释放人工关闭状态。
+人工完成或取消写入任务的 `status_control`。模型后续复用同 `task_id` 时可以补充内容、来源和材料，但不能自动重开已完成、已取消或已替代的任务。重新提取不再自动替代本轮未重新提交的旧任务。只有用户通过该接口明确设为 `open` 才释放人工关闭状态。
 
-查重公开接口与 Pi `find_related_tasks` 支持 `statuses=["completed"]`，默认查询也包含已完成事项，避免模型因看不到历史而重复创建。Pi 的 `submit_tasks` 仍只允许 `open` / `cancelled`，模型不能代用户确认完成。
+查重公开接口与 Pi `find_related_tasks` 支持 `statuses=["completed"]`，默认查询也包含已完成事项，避免模型因看不到历史而重复创建。Pi 的 `submit_tasks` 仍只允许 `open` / `cancelled`，模型不能代用户确认完成。`submit_tasks` 中的 `urgent` 只控制卡片紧急标记；`remind_again=true` 仅对当前有效 open 任务生成一次立即提醒。
 
 ## 消息层反馈队列
 

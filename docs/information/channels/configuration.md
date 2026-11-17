@@ -91,6 +91,7 @@ Notion 目标写入 Date 属性后，用户在 Notion Calendar 中连接该数�
     "revision": 2,
     "title": "填写并提交申请表",
     "priority": "P1",
+    "urgent": true,
     "status": "open",
     "action_steps": ["填写申请表", "核对后按通知方式提交"],
     "resources": [{"id": "材料ID", "name": "申请表.docx", "type": "file", "status": "ready"}]
@@ -99,6 +100,8 @@ Notion 目标写入 Date 属性后，用户在 Notion Calendar 中连接该数�
 ```
 
 实际 task 还包含 event、time、people、location、review_reasons、精简 sources 等。外发字段逐层经过白名单：time 只含 start/deadline/timezone/text，people 只含 name/role，文本字段和 action_steps 等数组元素不能携带额外对象。不传 `local_path`、采集数据库路径、凭据和原聊天全文。资源链接仅允许无内嵌凭据的 HTTP(S) 地址；文件默认通过 ID 引用，不塞 Base64。资源 role=input 为执行材料，role=result 为完成成果，其 note 保留用户填写的成果说明。
+
+`task.urgent` 是必备布尔字段；true 时渠道应在优先级旁标记“紧急”，不得当作新建任务。
 
 已有 n8n 流程的最小连接方式：Webhook → 按 delivery_id 查询持久去重表 → 按 task_id 查询远程映射 → 上传需要的材料 → 平台新增/更新 → 保存映射与回执 → Respond to Webhook。重复 delivery_id 返回已保存收据，不能再次新增。响应必须等实际操作及回执持久化成功后返回：
 

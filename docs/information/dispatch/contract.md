@@ -20,6 +20,7 @@
     "event": "按通知要求完成申请表并提交到指定入口。",
     "action_steps": ["填写申请表", "核对材料并提交"],
     "priority": "P2",
+    "urgent": false,
     "priority_reason": "有明确期限的常规申请",
     "status": "open",
     "time": {"start": null, "deadline": "2026-11-20", "timezone": "Asia/Shanghai", "text": "11月20日前"},
@@ -44,6 +45,8 @@
 `sources[].text` 保留被引用消息的原文，不由模型改写。飞书折叠来源区与本地面板按群名、发信人、时间、原文展示，原有换行保留。卡片中的原文总预算为 2000 字符，超过时明确提示查看 `来源原文.txt`；完整文本由消息层归档，并通过已有材料投递、下载和校验机制提供。预览不写文件；关闭文件发送时可在本地面板查看完整原文或下载。原文对外提供，内部数据库路径、凭据和未引用的聊天内容仍不进入行动包。
 
 外部 `envelope` 提供 `delivery_id` 与 `kind=upsert|reminder`；自动化故障通知使用 `kind=alert`，没有业务待办操作按钮。字段映射和回执示例见 [渠道契约](../channels/configuration.md#外部工作流契约)。信息整理和渠道映射是确定性的，不额外建立 AI 信息处理层。
+
+`task.urgent` 进入对外任务包。Pi 提交中的 `remind_again=true` 不对外传递，而是由消息调度层将该修订立即排为一次性 `kind=reminder`；若任务已完成、已取消、已替代或本地已完成，则不发提醒。
 
 ## 材料生命周期
 

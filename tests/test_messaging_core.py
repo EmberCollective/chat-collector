@@ -368,6 +368,43 @@ def test_revisions_update_existing_remote_receipt(config, sent):
     assert sent[-1][2] == {'remote_id': first_receipt}
 
 
+def test_remind_again_sends_one_immediate_reminder(config, sent):
+    batch(config, 'first', event())
+    assert run_round(config, now=100)['sent'] == 1
+    update = event(revision=2)
+    update['task']['remind_again'] = True
+    batch(config, 'second', update)
+    assert run_round(config, now=101)['sent'] == 1
+    assert sent[-1][1]['kind'] == 'reminder' and 'reminder' not in sent[-1][1]
+    assert run_round(config, now=102)['sent'] == 0
+
+
+def test_requested_reminder_is_not_replayed_when_material_refreshes(config, sent, monkeypatch):
+    resource = {'id': 'asset', 'name': 'form.pdf', 'status': 'unavailable'}
+    monkeypatch.setattr(core, '_package', lambda task, config, prepare=False: dict(task, resources=[dict(resource)]))
+    batch(config, 'first', event())
+    run_round(config, now=100)
+    update = event(revision=2)
+    update['task']['remind_again'] = True
+    batch(config, 'second', update)
+    assert run_round(config, now=101)['sent'] == 1
+    resource.update(status='ready', local_path='A:/assets/form.pdf', sha256='a' * 64)
+    assert run_round(config, now=102)['sent'] == 0
+    assert sent[-1][1]['kind'] == 'reminder'
+
+
+def test_remind_again_does_not_override_local_completion(config, sent):
+    batch(config, 'first', event())
+    run_round(config, now=100)
+    set_task_state(config, 'one', 'complete')
+    update = event(revision=2)
+    update['task']['remind_again'] = True
+    batch(config, 'second', update)
+    run_round(config, now=101)
+    assert sent[-1][1]['kind'] == 'upsert'
+    assert sent[-1][1]['task']['status'] == 'completed'
+
+
 @pytest.mark.parametrize('target', [{'kind': 'notion'}, {'kind': 'webhook', 'mode': 'sync'}])
 def test_sync_only_targets_never_repeat_reminders(config, sent, target):
     config['targets'][0].update(target)
@@ -521,6 +558,7 @@ def test_result_material_persists_after_completion_and_new_revision(config, monk
     ('materials', [{'message_key': 'm', 'attachment_index': 0, 'attachment': {}}]),
     ('action_steps', ['x' * 2001]), ('action_steps', ['step'] * 51), ('action_steps', {}),
     ('unknown_metadata', float('nan')), ('review_reasons', [None]), ('needs_review', 1),
+    ('urgent', 1), ('remind_again', 1),
 ])
 def test_invalid_nested_task_rejected_before_persisting(config, field, value):
     malformed = event('invalid')

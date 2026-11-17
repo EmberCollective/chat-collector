@@ -69,6 +69,7 @@ def _update_task(config, task_id, field, value, *, request_id, actor, expected_r
         changed = previous_value != value or task.get(field + '_control', {}).get(field) != value
         now = _now()
         if changed:
+            task.pop('remind_again', None)
             task.update({field: value, 'updated_at': now,
                          field + '_control': {field: value, 'request_id': request_id, 'actor': actor, 'at': now}})
             if field == 'priority':
@@ -294,6 +295,8 @@ def apply_extraction(config, submission, *, request_id, context):
                     if control:
                         task[field + '_control'] = control
                         task[field] = control[field]
+                if previous['status'] != 'open':
+                    task['status'] = previous['status']
                 if previous.get('priority_control'):
                     task['priority_reason'] = previous['priority_reason']
                 task['source_message_keys'] = sorted(set(task['source_message_keys']) | set(previous['source_message_keys']))
@@ -326,10 +329,6 @@ def apply_extraction(config, submission, *, request_id, context):
             storage._save_task(conn, task)
             ids.append(task['task_id'])
             saved.append(task)
-        for identifier in set(context['previous_ids']) - set(ids):
-            old = _get_task(conn, identifier)
-            if old.get('context', {}).get('group_id') == group['id']:
-                _retire_task(conn, old, now, 'group_reprocessed')
         conn.execute('INSERT INTO groups VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,task_ids=excluded.task_ids',
                      (group['id'], group['fingerprint'], canonical(ids)))
         outcome = {'group_id': group['id'], 'updated_at': now, 'tasks_count': len(ids),
@@ -345,25 +344,14 @@ def apply_extraction(config, submission, *, request_id, context):
     return dict(result, batches=batches)
 
 
-def _retire_task(conn, task, now, reason):
-    if task['status'] != 'superseded' and not task.get('status_control'):
-        task.update(status='superseded', updated_at=now, superseded_reason=reason)
-        storage._save_task(conn, task)
-
-
 def _retire_groups(config, current_ids):
     with _task_connection(config) as conn:
         with conn:
             for identifier, in conn.execute('SELECT id FROM groups').fetchall():
                 if identifier in current_ids:
                     continue
-                for body, in conn.execute("SELECT body FROM tasks WHERE json_extract(body,'$.context.group_id')=?", (identifier,)).fetchall():
-                    _retire_task(conn, json.loads(body), _now(), 'context_regrouped')
                 conn.execute('DELETE FROM groups WHERE id=?', (identifier,))
                 conn.execute('DELETE FROM group_results WHERE id=?', (identifier,))
-        changed = conn.total_changes > 0
-    if changed:
-        _notify(config)
     return _export_pending(config)
 
 
