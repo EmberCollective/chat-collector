@@ -24,9 +24,11 @@ from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# Embedded Python does not add the entry script's directory to sys.path.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Embedded Python does not add the entry script or project root to sys.path.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(Path(__file__).resolve().parent), str(PROJECT_ROOT)]
 from bridge import Bridge, atomic_json
+from common.version import project_version
 
 ROOT = Path(__file__).resolve().parent
 Module = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,100}$')]
@@ -339,7 +341,7 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
             warmup.join(timeout=3)
             app.state.runtime_monitor.close()
 
-    app = FastAPI(title='拾序 · Loose Ends · 本地调试台', version='0.1.0', docs_url=None, redoc_url=None,
+    app = FastAPI(title='拾序 · Loose Ends · 本地调试台', version=project_version(), docs_url=None, redoc_url=None,
                   description='消息收集项目的可选本机调试工具。预览不推进断点；正式采集和重放会写入主项目。', lifespan=lifespan)
     app.state.jobs, app.state.bridge = jobs, bridge
     from messaging_routes import register_messaging_routes
@@ -399,7 +401,7 @@ def create_app(settings_path=ROOT/'console.toml', runtime=None):
 
     @app.get('/api/session', include_in_schema=False)
     def session():
-        return {'token': token, 'application': 'chat-collector-console',
+        return {'token': token, 'application': 'chat-collector-console', 'version': project_version(),
                 'root': str(bridge.root), 'pid': os.getpid()}
 
     @app.get('/api/catalog', dependencies=[Depends(authenticate)], summary='信息源实例与操作能力')

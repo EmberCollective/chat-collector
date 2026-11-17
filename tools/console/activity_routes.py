@@ -1,4 +1,5 @@
 """Read-only view of manual console jobs and durable automation executions."""
+import math
 import time
 from typing import Literal
 
@@ -42,6 +43,67 @@ def register_activity_routes(app, bridge, jobs, authenticate):
             warnings.append('后台执行记录暂时无法读取：' + type(exc).__name__)
         records.sort(key=lambda record: (record['started_at'], record['source'], record['id']), reverse=True)
         return {'records': records[:limit], 'warnings': warnings}
+
+    @app.get('/api/activity/performance', dependencies=[Depends(authenticate)],
+             summary='查看最近会影响本机性能的采集与 AI 处理任务')
+    def performance_activity(window_seconds: int = Query(75, ge=30, le=180)):
+        now = time.time()
+        since = now - window_seconds
+        records, seen = [], set()
+
+        def include(record, source):
+            action = record.get('action')
+            status = record.get('status')
+            started = record.get('started_at')
+            finished = record.get('finished_at')
+            if action not in {'collect', 'process'} or type(started) not in (int, float):
+                return
+            if not math.isfinite(started) or started < 0 or started > now:
+                return
+            if finished is None:
+                # Waiting for retry is not executing; only a running episode is open-ended.
+                if status != 'running':
+                    return
+                end = now
+            elif type(finished) in (int, float) and math.isfinite(finished) and finished >= started:
+                end = finished
+            else:
+                return
+            if end < since:
+                return
+            identity = (source, record.get('id') or started)
+            if identity in seen:
+                return
+            seen.add(identity)
+            records.append({
+                'id': str(record.get('id') or started),
+                'source': source,
+                'module': record.get('module'),
+                'action': action,
+                'origin': record.get('origin'),
+                'status': status,
+                'started_at': started,
+                'finished_at': end if finished is not None else None,
+            })
+
+        with jobs.mutex:
+            for job in jobs.jobs.values():
+                include(job, 'console')
+        warnings = []
+        try:
+            from automation.history import list_runs
+            automatic = config()
+            if automatic:
+                # Running episodes may be older than the newest completed records.
+                for run in list_runs(automatic, status='running', limit=100):
+                    include(run, 'automation')
+                for run in list_runs(automatic, limit=100):
+                    include(run, 'automation')
+        except Exception as exc:
+            # Manual runs remain usable when the automation history is unavailable.
+            warnings.append('后台执行记录暂时无法读取：' + type(exc).__name__)
+        records.sort(key=lambda record: (record['started_at'], record['source'], record['id']))
+        return {'records': records, 'warnings': warnings}
 
     @app.get('/api/activity/{source}/{identifier}', dependencies=[Depends(authenticate)],
              summary='查看同一轮执行及各次重试的结果')

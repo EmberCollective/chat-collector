@@ -17,3 +17,5 @@ tools/qq-nt-export/config.json
 !.env.example
 node_modules/
 processor/pi-runtime/node/
+/config/*.toml
+/tools/console/console.toml

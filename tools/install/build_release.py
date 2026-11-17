@@ -9,8 +9,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = ('common', 'application', 'collector', 'providers', 'selection', 'rulesets', 'processor', 'messaging', 'automation',
-               'processing-rules', 'docs', 'assets/readme', 'tools/console', 'tools/automation', 'tools/install')
-SOURCE_FILES = ('contracts.py', 'README.md', 'FILTERS.md', '.env.example', 'requirements.txt',
+               'processing-rules', 'docs', 'assets/readme', 'mcp_service', 'tools/console', 'tools/automation', 'tools/install')
+SOURCE_FILES = ('contracts.py', 'README.md', 'CHANGELOG.md', 'FILTERS.md', '.env.example', 'version.json', 'requirements.txt',
                 'Install.cmd', 'Start.cmd', 'Configure.cmd', 'tools/qq_recover.py', 'tools/qq-recover.cmd',
                 'tools/qq-nt-export/scripts/ntqq_key_scan.py', 'tools/qq-nt-export/LICENSE')
 EXCLUDED = {'__pycache__', 'node_modules', '.runtime', '.pytest_cache', 'tests', 'node'}
@@ -46,10 +46,12 @@ def payload(root):
 
 def build(root, output):
     files = payload(root)
+    version = json.loads((root / 'version.json').read_text(encoding='utf-8'))['version']
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
     dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=root))
     manifest = {'format': 1, 'platform': 'windows-x64', 'python': '3.13.8',
-                'source_commit': sha, 'working_tree_dirty': dirty, 'release': 'local-use-preview',
+                'version': version, 'source_commit': sha,
+                'working_tree_dirty': dirty, 'release': 'local-use-preview',
                 'files': [{'path': name, 'sha256': hashlib.sha256(data).hexdigest()} for name, data in sorted(files.items())]}
     files['release-manifest.json'] = json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -58,7 +60,8 @@ def build(root, output):
             archive.writestr('chat-collector/' + name, data)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     output.with_suffix('.zip.sha256').write_text(digest + '  ' + output.name + '\n')
-    return {'artifact': str(output), 'sha256': digest, 'files': len(files), 'source_commit': sha, 'working_tree_dirty': dirty}
+    return {'artifact': str(output), 'sha256': digest, 'version': manifest['version'],
+            'files': len(files), 'source_commit': sha, 'working_tree_dirty': dirty}
 
 
 if __name__ == '__main__':

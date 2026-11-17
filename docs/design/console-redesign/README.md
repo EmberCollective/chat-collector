@@ -124,7 +124,7 @@
 | [GitHub Actions：Using workflow run logs](https://github.com/github/docs/blob/main/content/actions/how-tos/monitor-workflows/use-workflow-run-logs.md) | 任务列表先看结果，进入单次运行后看分步骤与日志；适合采集 / Agent 的失败定位 | 不照搬一键重跑；采集和投递有实际写入，结果未知时先核对 |
 | [unslop](https://github.com/heydamir/unslop) | 沿用品牌色，统一间距、字级、控件与状态，不用装饰图表或渐变代替内容 | 用户明确要求重写布局，因此不受其默认保持原布局的建议限制；审批节点放在静态稿交付之后 |
 
-设计检查参考 unslop by [Damir Sokolovsky](https://x.com/heydamir)，[CC BY 4.0](https://github.com/heydamir/unslop/blob/main/LICENSE)。技能已安装至 `C:/Users/Administrator/.codex/skills/unslop`，后续对话可调用。未新增项目依赖。
+设计检查参考 unslop by [Damir Sokolovsky](https://x.com/heydamir)，[CC BY 4.0](https://github.com/heydamir/unslop/blob/main/LICENSE)。可通过 Codex skills 机制调用。未新增项目依赖。
 
 ## 内部检查与尚未验证
 

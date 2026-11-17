@@ -43,19 +43,33 @@
 #view-overview .monitor-legend>span:last-child{margin-left:auto}
 #view-overview .monitor-legend i{width:16px;height:2px;background:var(--green);display:inline-block}
 #view-overview .monitor-legend .disk-key{background:var(--warn)}
+#view-overview .monitor-legend .monitor-legend-divider{width:1px;height:16px;background:var(--line)}
+#view-overview .monitor-legend .monitor-task-key i{width:13px;height:8px;border:1px solid #a9cbbb;border-radius:2px;background:#12634f14}
+#view-overview .monitor-legend .monitor-task-key.ai i{border-color:#bdccd2;background:#46586212}
+#view-overview .monitor-task-health{color:var(--warn);font-size:0.857143rem}
 #monitor-chart{position:relative;min-width:0;border-radius:4px;touch-action:pan-y;cursor:crosshair}
 #monitor-chart:focus-visible{outline:2px solid var(--green);outline-offset:4px}
 #monitor-chart svg{display:block;width:100%;height:180px}
 #monitor-chart text{fill:var(--muted);font:12px "Segoe UI","Microsoft YaHei",sans-serif}
-#monitor-chart .monitor-tooltip{position:absolute;top:8px;z-index:1;min-width:244px;max-width:calc(100% - 16px);padding:8px 12px;background:var(--paper);border:1px solid #ccd6cf;border-radius:6px;box-shadow:0 2px 8px #24332e0c;pointer-events:none;font-size:0.928571rem}
+#monitor-chart .monitor-tooltip{position:absolute;top:8px;z-index:1;width:340px;max-width:calc(100% - 16px);padding:8px 12px;background:var(--paper);border:1px solid #ccd6cf;border-radius:6px;box-shadow:0 2px 8px #24332e0c;pointer-events:none;font-size:0.928571rem}
 #monitor-chart .monitor-tooltip[hidden]{display:none}
 #monitor-chart .monitor-tooltip time{display:block;margin-bottom:4px;color:var(--secondary);font-variant-numeric:tabular-nums}
 #monitor-chart .monitor-tooltip>div{display:flex;justify-content:space-between;gap:16px}
 #monitor-chart .monitor-tooltip strong{font-variant-numeric:tabular-nums}
 #monitor-chart .monitor-tooltip .monitor-tooltip-io{justify-content:flex-end;flex-wrap:wrap;gap:0 12px;color:var(--secondary);font-size:0.857143rem}
 #monitor-chart .monitor-tooltip .monitor-tooltip-io>span{white-space:nowrap}
-#monitor-chart .monitor-tooltip .monitor-tooltip-process{display:block;color:var(--secondary);font-size:0.857143rem}
+
 #monitor-chart .monitor-tooltip p{font-size:0.857143rem;color:var(--muted);margin-top:4px;padding-top:4px;border-top:1px solid var(--line)}
+#monitor-chart .monitor-tooltip .monitor-tooltip-tasks{display:block;margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
+#monitor-chart .monitor-tooltip .monitor-tooltip-tasks-head{display:flex;align-items:center;justify-content:flex-start;gap:7px;flex-wrap:wrap;font-weight:600;color:var(--ink)}
+#monitor-chart .monitor-tooltip .monitor-tooltip-parallel{padding:0 6px;border-radius:3px;background:#fbf5e9;color:var(--warn);font-size:0.714286rem;font-weight:500;line-height:18px}
+#monitor-chart .monitor-tooltip .monitor-tooltip-task{display:grid;grid-template-columns:7px max-content minmax(0,1fr);align-items:baseline;gap:6px;margin-top:5px;justify-content:initial;color:var(--ink)}
+#monitor-chart .monitor-tooltip .monitor-tooltip-task>i{width:7px;height:7px;margin-top:7px;border-radius:50%;background:var(--green)}
+#monitor-chart .monitor-tooltip .monitor-tooltip-task.ai>i{background:#465862}
+#monitor-chart .monitor-tooltip .monitor-tooltip-task strong{font-size:0.857143rem;font-weight:600;line-height:1.45;white-space:nowrap}
+#monitor-chart .monitor-tooltip .monitor-tooltip-task small{color:var(--muted);font-size:0.75rem;line-height:1.45;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#monitor-chart .monitor-tooltip .monitor-tooltip-empty,#monitor-chart .monitor-tooltip .monitor-tooltip-warning{margin-top:6px;padding-top:0;border-top:0;font-size:0.785714rem;line-height:1.5}
+#monitor-chart .monitor-tooltip .monitor-tooltip-warning{color:var(--warn)}
 #view-overview .monitor-health{font-size:0.928571rem;color:var(--warn);margin:8px 0}
 #view-overview .monitor-attribution{border-top:1px solid var(--line);font-size:0.928571rem}
 #view-overview .monitor-attribution>summary{cursor:pointer;color:var(--green);min-height:44px;padding:12px 20px;list-style-position:inside}

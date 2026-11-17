@@ -54,7 +54,7 @@
 2. 按引导选择微信 / QQ，完成首次取钥，填写模型配置；飞书可选，稍后也能接入其他渠道。
 3. 引导首次处理最近 7 日符合 SQL 规则的消息；日常双击 `Start.cmd`，在本地调试台查看状态、预览筛选和调整规则。
 
-源码安装与分层运行见 [开发指南](docs/guides/development.md)。源码目录的 `Install.cmd` 使用已有发布 ZIP，缺包时需先按安装指南构建。
+源码安装与分层运行见 [开发指南](docs/guides/development.md)。源码目录的 `Install.cmd` 使用已有发布 ZIP，缺包时需先按安装指南构建。项目版本统一由 [version.json](version.json) 管理，发布清单和本地调试台读取同一版本号。
 
 ## 按需调整与扩展
 
@@ -65,6 +65,7 @@
 | 配置飞书、Notion、提醒与操作反馈 | [渠道配置](docs/information/channels/configuration.md) · [飞书设置](docs/information/channels/feishu-setup.md) |
 | 接入其他消息来源或通知平台 | [收集层开发](docs/collector/acquisition/development.md) · [数据契约](docs/processor/input-contract.md) · [渠道开发](docs/information/channels/development.md) |
 | 设置自动运行、失败重试与恢复 | [自动化](docs/information/dispatch/automation.md) |
+| 让 AI 客户端通过本地 MCP 搜索、修改待办并查看提醒 | [MCP 服务](mcp_service/README.md) |
 | 快速查询消息、分析索引与采集性能 | [查询方法](docs/collector/acquisition/fast-query.md) · [查询实现](docs/collector/compatibility/query-implementation.md) |
 
 ## 使用边界

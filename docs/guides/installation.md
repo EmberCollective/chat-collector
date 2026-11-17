@@ -80,4 +80,4 @@ QQ 取钥验证复用采集层的快照逻辑：允许复制期间继续追加�
 - 该包供当前用户本地验收。已有微信来源文件的授权记录未证明公开再分发许可，发布公共下载前还需核实上游许可；不将“本地可打包”等同于已完成公开发行审查。
 - 模型处理会把选中消息及实际读取的附件发到用户配置的接口；启用飞书后正式待办与材料会离开本机。首次 7 日处理可能比日常增量耗时、耗费更多额度。
 
-构建入口：`python tools/install/build_release.py`。默认产物在 `dist/`，附 `.zip.sha256`；包内 `release-manifest.json` 保存源码提交、构建时是否有未提交修改、文件清单及各文件 SHA-256。验收结果见 [安装验收](installation-acceptance.md)。
+构建入口：`python tools/install/build_release.py`。默认产物在 `dist/`，附 `.zip.sha256`；包内 `release-manifest.json` 保存版本、源码提交、构建时是否有未提交修改、文件清单及各文件 SHA-256。验收结果见 [安装验收](installation-acceptance.md)。

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
-const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'C:/Users/Administrator/AppData/Roaming/npm/node_modules/browser-use/node_modules/playwright');
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 for (const file of ['README.md','../../README.md']) {
  const source=path.resolve(__dirname,file);

@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>机器负载 · 任务悬浮提示草稿</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #24332e;
+    --muted: #68756e;
+    --line: #e0e6e2;
+    --green: #12634f;
+    --green-soft: #eaf3ee;
+    --ai: #465862;
+    --ai-soft: #edf2f4;
+    --paper: #fff;
+    --wash: #f7f8f7;
+    --soft: #f1f3f2;
+    --warn: #865b16;
+    --warn-soft: #fbf5e9;
+    font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-synthesis: none;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--wash); color: var(--ink); }
+  h1, h2, h3, p { margin: 0; }
+  h1, h2, h3 { font-weight: 500; }
+  time { font-variant-numeric: tabular-nums; }
+  code { font: 11px/1.5 Consolas, monospace; padding: 1px 4px; border-radius: 3px; background: var(--soft); color: var(--ink); }
+  [hidden] { display: none !important; }
+  .page { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 24px 0 20px; }
+  .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); overflow: hidden; }
+  .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .panel-head h2 { font-size: 16px; line-height: 1.4; }
+  .panel-head p { margin-top: 4px; color: var(--muted); font-size: 13px; }
+  .title-line { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .idle-pill, .draft-badge { padding: 1px 8px; border-radius: 4px; background: var(--green-soft); color: var(--green); font-size: 12px; line-height: 22px; }
+  .draft-badge { border: 1px solid #c9d8cf; border-radius: 999px; line-height: 20px; }
+  .disk-picker { display: flex; align-items: center; gap: 9px; margin-top: 1px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .disk-picker select { min-height: 34px; padding: 4px 30px 4px 9px; border: 1px solid #ced8d1; border-radius: 5px; background: var(--paper); color: var(--ink); font-size: 13px; }
+  .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 14px 0; }
+  .metric { min-width: 0; padding: 0 20px; border-right: 1px solid var(--line); }
+  .metric:last-child { border-right: 0; }
+  .metric > span { display: block; color: var(--muted); font-size: 13px; }
+  .metric > strong { display: block; margin: 2px 0; font-size: 26px; line-height: 1.35; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .metric > small { display: block; color: var(--muted); font-size: 12px; }
+  .io-values { display: flex; align-items: baseline; gap: 15px; margin: 2px 0; }
+  .io-values strong { font-size: 26px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .io-values small { color: var(--ink); font-size: 13px; }
+  .chart { padding: 11px 20px 8px; }
+  .chart-head { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; min-height: 25px; }
+  .line-key, .task-key { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+  .line-key i { width: 16px; height: 2px; background: var(--green); }
+  .line-key.disk i { background: var(--warn); }
+  .task-key i { width: 13px; height: 8px; border: 1px solid #a9cbbb; border-radius: 2px; background: rgba(18,99,79,.10); }
+  .task-key.ai i { border-color: #bdccd2; background: rgba(70,88,98,.09); }
+  .legend-divider { width: 1px; height: 16px; background: var(--line); }
+  .chart-head > span:last-child { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .plot { position: relative; min-width: 0; border-radius: 4px; touch-action: pan-y; cursor: crosshair; }
+  .plot svg { display: block; width: 100%; height: auto; }
+  .plot text { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .plot .muted-text { fill: var(--muted); font-size: 11px; }
+  .plot .axis-text { fill: var(--muted); font-size: 11px; }
+  .plot .hover-guide { stroke: #62746c; stroke-width: 1; stroke-dasharray: 3 4; opacity: .72; }
+  .plot .hover-point { stroke: white; stroke-width: 2; }
+  .chart-tooltip { position: absolute; z-index: 2; width: 292px; max-width: calc(100% - 16px); padding: 10px 12px; border: 1px solid #ccd6cf; border-radius: 6px; background: var(--paper); box-shadow: 0 3px 12px #24332e12; pointer-events: none; font-size: 12px; }
+  .chart-tooltip > time { display: block; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tooltip-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; margin-top: 4px; padding-bottom: 7px; border-bottom: 1px solid var(--line); color: var(--muted); }
+  .tooltip-metrics strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tooltip-tasks-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 7px; color: var(--ink); font-weight: 600; }
+  .tooltip-tasks-head .parallel { padding: 0 6px; border-radius: 3px; background: var(--warn-soft); color: var(--warn); font-size: 10px; font-weight: 500; line-height: 18px; }
+  .tooltip-task { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 7px; margin-top: 7px; }
+  .tooltip-task > i { width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--green); }
+  .tooltip-task.ai > i { background: var(--ai); }
+  .tooltip-task strong { display: block; font-size: 12px; font-weight: 600; }
+  .tooltip-task small { display: block; margin-top: 1px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+  .tooltip-empty { margin-top: 7px; color: var(--muted); }
+  .chart-foot { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; padding: 1px 0 5px; color: var(--muted); font-size: 11px; }
+  .chart-foot .parallel-note::before { content: ""; display: inline-block; width: 12px; height: 8px; margin-right: 6px; border-radius: 2px; background: rgba(134,91,22,.12); vertical-align: -1px; }
+  .chart-foot .scope-note { color: var(--green); }
+  .chart-foot .right-note { margin-left: auto; }
+  .interface-line { margin: 10px 2px 0; color: var(--muted); font-size: 11px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  @media (max-width: 760px) {
+    .page { width: calc(100% - 24px); padding-top: 12px; }
+    .panel-head { flex-direction: column; }
+    .disk-picker, .disk-picker select { width: 100%; }
+    .metrics { grid-template-columns: 1fr; }
+    .metric { padding: 9px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
+    .metric:last-child { border-bottom: 0; }
+    .chart { padding: 10px 12px 8px; }
+    .chart-head { gap: 10px 14px; }
+    .chart-head > span:last-child { margin-left: 0; }
+    .legend-divider { display: none; }
+    .plot { overflow-x: auto; }
+    .plot svg { width: 760px; max-width: none; }
+    .chart-tooltip { position: sticky; left: 8px; width: min(292px, calc(100vw - 48px)); }
+    .chart-foot { align-items: flex-start; }
+    .chart-foot .right-note { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <section class="panel" aria-labelledby="monitor-title">
+    <div class="panel-head">
+      <div>
+        <div class="title-line">
+          <h2 id="monitor-title">机器负载</h2>
+          <span class="idle-pill">当前空闲</span>
+          <span class="draft-badge">静态草稿 · 合成数据</span>
+        </div>
+        <p>最近 60 秒 · 3 个性能任务 · 峰值并发 2 · 悬停曲线查看正在执行的具体任务</p>
+      </div>
+      <label class="disk-picker">磁盘 0 · HDD · D: / E:
+        <select aria-label="监测的物理磁盘">
+          <option>磁盘 0 · HDD · D: / E:</option>
+          <option>磁盘 1 · HDD · F:</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="metrics">
+      <div class="metric">
+        <span>整机 CPU</span>
+        <strong>13.6%</strong>
+        <small>本程序合计 1% · 按整机总算力</small>
+      </div>
+      <div class="metric">
+        <span>所选机械硬盘繁忙度</span>
+        <strong>20%</strong>
+        <small>整块物理盘 · 包含其他程序</small>
+      </div>
+      <div class="metric">
+        <span>所选硬盘读写速度</span>
+        <div class="io-values"><small>读</small><strong>0.0</strong><small>MB/s</small><small>写</small><strong>0.1</strong><small>MB/s</small></div>
+        <small>物理盘吞吐 · 与进程 I/O 分开统计</small>
+      </div>
+    </div>
+
+    <div class="chart">
+      <div class="chart-head">
+        <span class="line-key"><i></i>整机 CPU</span>
+        <span class="line-key disk"><i></i>硬盘繁忙度</span>
+        <span class="legend-divider" aria-hidden="true"></span>
+        <span class="task-key"><i></i>采集</span>
+        <span class="task-key ai"><i></i>AI 处理</span>
+        <span>最近 60 秒 · 每 5 秒采样 · 悬停查看任务</span>
+      </div>
+
+      <div class="plot" id="load-plot" tabindex="0" role="group" aria-roledescription="交互式折线图" aria-label="最近 60 秒机器负载；悬停或使用方向键查看同一时刻正在执行的形成性能压力的任务">
+        <svg id="load-svg" viewBox="0 0 1200 220" aria-hidden="true">
+          <title>机器负载与性能任务</title>
+          <desc>半透明色带表示正式采集和 AI 处理任务的执行时间；色带重叠加深表示并发。悬停或使用方向键查看具体任务。</desc>
+
+          <rect x="168.7" y="18" width="333.6" height="152" fill="#12634f" opacity=".07"></rect>
+          <rect x="298.4" y="18" width="407.7" height="152" fill="#12634f" opacity=".055"></rect>
+          <rect x="520.8" y="18" width="500.8" height="152" fill="#465862" opacity=".07"></rect>
+
+          <g stroke-width="1" stroke-dasharray="2 4" opacity=".22">
+            <line x1="168.7" x2="168.7" y1="18" y2="170" stroke="#12634f"></line>
+            <line x1="502.3" x2="502.3" y1="18" y2="170" stroke="#12634f"></line>
+            <line x1="298.4" x2="298.4" y1="18" y2="170" stroke="#12634f"></line>
+            <line x1="706.1" x2="706.1" y1="18" y2="170" stroke="#12634f"></line>
+            <line x1="520.8" x2="520.8" y1="18" y2="170" stroke="#465862"></line>
+            <line x1="1021.6" x2="1021.6" y1="18" y2="170" stroke="#465862"></line>
+          </g>
+
+          <g stroke="#edf1ee" stroke-width="1">
+            <line x1="76" x2="1188" y1="18" y2="18"></line>
+            <line x1="76" x2="1188" y1="56" y2="56"></line>
+            <line x1="76" x2="1188" y1="94" y2="94"></line>
+            <line x1="76" x2="1188" y1="132" y2="132"></line>
+            <line x1="76" x2="1188" y1="170" y2="170"></line>
+          </g>
+          <g class="muted-text" text-anchor="end">
+            <text x="63" y="22">100%</text>
+            <text x="63" y="60">75%</text>
+            <text x="63" y="98">50%</text>
+            <text x="63" y="136">25%</text>
+            <text x="63" y="174">0%</text>
+          </g>
+
+          <path id="cpu-path" fill="none" stroke="#12634f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path id="disk-path" fill="none" stroke="#865b16" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <line class="hover-guide" id="hover-guide" x1="0" x2="0" y1="18" y2="170" hidden></line>
+          <circle class="hover-point" id="cpu-point" r="3.5" fill="#12634f" hidden></circle>
+          <circle class="hover-point" id="disk-point" r="3.5" fill="#865b16" hidden></circle>
+
+          <g class="axis-text">
+            <text x="76" y="198" text-anchor="start">60 秒前</text>
+            <text x="632" y="198" text-anchor="middle">30 秒前</text>
+            <text x="1188" y="198" text-anchor="end">最近采样</text>
+          </g>
+        </svg>
+
+        <div class="chart-tooltip" id="chart-tooltip" hidden>
+          <time id="tooltip-time"></time>
+          <div class="tooltip-metrics">
+            <span>CPU <strong id="tooltip-cpu"></strong></span>
+            <span>硬盘 <strong id="tooltip-busy"></strong></span>
+            <span>读 <strong id="tooltip-read"></strong></span>
+            <span>写 <strong id="tooltip-write"></strong></span>
+          </div>
+          <div class="tooltip-tasks-head" id="tooltip-tasks-head"></div>
+          <div id="tooltip-tasks"></div>
+        </div>
+        <span class="sr-only" id="chart-announcement" aria-live="polite"></span>
+      </div>
+
+      <div class="chart-foot">
+        <span class="parallel-note">色带 = 任务执行区间；重叠加深 = 并发</span>
+        <span>开始 / 结束来自统一运行记录</span>
+        <span class="scope-note">仅正式采集与 AI 处理</span>
+        <span class="right-note">悬停查看任务名称与起止时间</span>
+      </div>
+    </div>
+  </section>
+
+  <p class="interface-line">接入：统一读取 <code>GET /api/activity</code>，前端只筛选 <code>action=collect</code> 与 <code>action=process</code>；投递、回写不渲染，模块无需额外适配。</p>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const SVG_W = 1200;
+  const X0 = 76;
+  const X1 = 1188;
+  const Y0 = 18;
+  const Y1 = 170;
+  const WINDOW_START = Date.parse('2026-11-17T14:31:00+08:00') / 1000;
+  const SAMPLE_SECONDS = 5;
+  const samples = [
+    { cpu: 13.0, busy: 0, read: 0.0, write: 0.1 },
+    { cpu: 13.2, busy: 24, read: 0.7, write: 0.2 },
+    { cpu: 12.1, busy: 28, read: 1.1, write: 0.3 },
+    { cpu: 17.9, busy: 42, read: 3.2, write: 0.8 },
+    { cpu: 24.2, busy: 50, read: 5.8, write: 1.6 },
+    { cpu: 28.8, busy: 49, read: 4.9, write: 1.4 },
+    { cpu: 23.0, busy: 17, read: 1.1, write: 0.4 },
+    { cpu: 27.8, busy: 25, read: 3.4, write: 1.0 },
+    { cpu: 20.0, busy: 16, read: 0.8, write: 0.3 },
+    { cpu: 24.0, busy: 12, read: 0.5, write: 0.2 },
+    { cpu: 24.0, busy: 14, read: 0.8, write: 0.2 },
+    { cpu: 24.0, busy: 6, read: 0.4, write: 0.1 },
+    { cpu: 23.8, busy: 3, read: 0.2, write: 0.1 }
+  ];
+  const tasks = [
+    { name: 'QQ', kind: '采集', detail: '正式采集', start: 5, end: 23, tone: 'collect' },
+    { name: '微信', kind: '采集', detail: '正式采集', start: 12, end: 34, tone: 'collect' },
+    { name: '待办处理', kind: 'AI 处理', detail: '提取待办', start: 24, end: 51, tone: 'ai' }
+  ];
+  const $ = id => document.getElementById(id);
+  const plot = $('load-plot');
+  const svg = $('load-svg');
+  const tooltip = $('chart-tooltip');
+  const guide = $('hover-guide');
+  const cpuPoint = $('cpu-point');
+  const diskPoint = $('disk-point');
+  let activeIndex = null;
+
+  const xForSeconds = seconds => X0 + seconds / 60 * (X1 - X0);
+  const yForPercent = value => Y1 - Math.max(0, Math.min(100, value)) / 100 * (Y1 - Y0);
+  const pathFor = key => samples.map((sample, index) =>
+    `${index ? 'L' : 'M'}${xForSeconds(index * SAMPLE_SECONDS).toFixed(1)} ${yForPercent(sample[key]).toFixed(1)}`
+  ).join(' ');
+
+  $('cpu-path').setAttribute('d', pathFor('cpu'));
+  $('disk-path').setAttribute('d', pathFor('busy'));
+
+  function formatClock(seconds) {
+    const date = new Date((WINDOW_START + seconds) * 1000);
+    return new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Shanghai'
+    }).format(date);
+  }
+  function formatPercent(value) { return Number(value).toFixed(1) + '%'; }
+  function formatSpeed(value) { return Number(value).toFixed(1) + ' MB/s'; }
+  function tasksAt(seconds) { return tasks.filter(task => task.start <= seconds && seconds < task.end); }
+  function taskNode(task) {
+    const row = document.createElement('div');
+    row.className = 'tooltip-task ' + task.tone;
+    const dot = document.createElement('i');
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = `${task.kind} · ${task.name}`;
+    const meta = document.createElement('small');
+    meta.textContent = `${formatClock(task.start)} 开始 → ${formatClock(task.end)} 结束 · ${(task.end - task.start).toFixed(1)} 秒`;
+    copy.append(title, meta);
+    row.append(dot, copy);
+    return row;
+  }
+  function positionTooltip(seconds) {
+    const svgRect = svg.getBoundingClientRect();
+    const plotRect = plot.getBoundingClientRect();
+    const scale = svgRect.width / SVG_W;
+    const x = svgRect.left - plotRect.left + xForSeconds(seconds) * scale;
+    const width = Math.min(292, Math.max(220, plotRect.width - 16));
+    tooltip.style.width = width + 'px';
+    tooltip.style.left = Math.max(8, Math.min(x + 14, plotRect.width - width - 8)) + 'px';
+    tooltip.style.top = '8px';
+  }
+  function showSample(index, position = true) {
+    activeIndex = Math.max(0, Math.min(samples.length - 1, index));
+    const seconds = activeIndex * SAMPLE_SECONDS;
+    const sample = samples[activeIndex];
+    const active = tasksAt(seconds);
+    const x = xForSeconds(seconds);
+    guide.setAttribute('x1', x);
+    guide.setAttribute('x2', x);
+    guide.hidden = false;
+    cpuPoint.setAttribute('cx', x);
+    cpuPoint.setAttribute('cy', yForPercent(sample.cpu));
+    cpuPoint.hidden = false;
+    diskPoint.setAttribute('cx', x);
+    diskPoint.setAttribute('cy', yForPercent(sample.busy));
+    diskPoint.hidden = false;
+
+    $('tooltip-time').textContent = formatClock(seconds);
+    $('tooltip-cpu').textContent = formatPercent(sample.cpu);
+    $('tooltip-busy').textContent = formatPercent(sample.busy);
+    $('tooltip-read').textContent = formatSpeed(sample.read);
+    $('tooltip-write').textContent = formatSpeed(sample.write);
+
+    const head = $('tooltip-tasks-head');
+    head.replaceChildren();
+    if (active.length) {
+      head.append(document.createTextNode(`正在执行 ${active.length} 个性能任务`));
+      if (active.length > 1) {
+        const badge = document.createElement('span');
+        badge.className = 'parallel';
+        badge.textContent = '并发';
+        head.append(badge);
+      }
+    } else {
+      head.textContent = '当前没有采集或 AI 处理任务';
+    }
+
+    const list = $('tooltip-tasks');
+    list.replaceChildren(...active.map(task => taskNode(task)));
+    if (!active.length) {
+      const empty = document.createElement('p');
+      empty.className = 'tooltip-empty';
+      empty.textContent = '负载可能来自其他程序或轻量任务。';
+      list.append(empty);
+    }
+    tooltip.hidden = false;
+    if (position) positionTooltip(seconds);
+    $('chart-announcement').textContent = `${formatClock(seconds)}，${active.length ? active.map(task => task.kind + ' ' + task.name).join('、') + ' 正在执行' : '没有性能任务执行'}`;
+  }
+  function sampleFromPointer(event) {
+    const rect = svg.getBoundingClientRect();
+    const xInSvg = (event.clientX - rect.left) / rect.width * SVG_W;
+    const ratio = Math.max(0, Math.min(1, (xInSvg - X0) / (X1 - X0)));
+    return Math.round(ratio * (samples.length - 1));
+  }
+  function hide() {
+    activeIndex = null;
+    tooltip.hidden = true;
+    guide.hidden = true;
+    cpuPoint.hidden = true;
+    diskPoint.hidden = true;
+  }
+
+  plot.addEventListener('pointermove', event => {
+    if (event.pointerType === 'touch' && !event.buttons) return;
+    showSample(sampleFromPointer(event));
+  });
+  plot.addEventListener('pointerdown', event => showSample(sampleFromPointer(event)));
+  plot.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') hide(); });
+  plot.addEventListener('focus', () => { if (activeIndex === null) showSample(samples.length - 1); });
+  plot.addEventListener('blur', hide);
+  plot.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === 'Escape') return hide();
+    const current = activeIndex === null ? samples.length - 1 : activeIndex;
+    showSample(event.key === 'Home' ? 0 : event.key === 'End' ? samples.length - 1 : current + (event.key === 'ArrowLeft' ? -1 : 1));
+  });
+
+  // Static fixture checks: overlap intervals show two tasks, idle tail shows none.
+  console.assert(tasksAt(20).length === 2, 'Expected overlap at 14:31:20');
+  console.assert(tasksAt(30).length === 2, 'Expected overlap at 14:31:30');
+  console.assert(tasksAt(55).length === 0, 'Expected no task at 14:31:55');
+
+  if (new URLSearchParams(location.search).has('demo')) {
+    requestAnimationFrame(() => showSample(6));
+  }
+})();
+</script>
+</body>
+</html>
