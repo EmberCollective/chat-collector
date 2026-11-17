@@ -50,7 +50,7 @@ const base=process.env.CONSOLE_TEST_URL||'http://127.0.0.1:18447';
     const collectionRun={id:'collection-timings',module:'qq',action:'collect',source:'automation',origin:'schedule',status:'succeeded',started_at:100,finished_at:120,result:{matched:0},attempts:[{number:1,status:'succeeded',started_at:100,result:{matched:0},details:{collection:{refresh:{timings_seconds:{total:18}},page_refresh:{pages_total:300,pages_written:2,timings_seconds:{capture:5,candidates_before:8}},logical_sync:{candidate_rows:4,rows_written:0,timings_seconds:{compare_and_write:0.1,verify:3}}}}}]};
     await page.route('**/api/activity/automation/collection-timings',route=>route.fulfill({json:collectionRun}));
     await page.evaluate(()=>openOverviewJob('collection-timings','automation'));
-    assert.match(await page.locator('#run-detail').textContent(),/数据库刷新合计18.0 秒/);
+    assert.equal(await page.locator('#dialog-heading').textContent(),'采集');assert.match(await page.locator('#run-detail').textContent(),/采集阶段耗时/);assert.match(await page.locator('#run-detail').textContent(),/数据库刷新合计18.0 秒/);
     assert.match(await page.locator('#run-detail').textContent(),/更新前候选定位8.0 秒/);
     assert.match(await page.locator('#run-detail').textContent(),/候选记录4写入记录0/);
     delete collectionRun.attempts[0].details;

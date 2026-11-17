@@ -374,7 +374,7 @@ class SchedulerService:
             if isinstance(result, dict) and result.get('status') == 'failed':
                 raise RuntimeError('job_returned_failed')
             summary = _stats(result)
-            details = _collection_details(result) if name in {'wechat', 'qq'} else None
+            details = _collection_details(result)
             attention = any(summary.get(key, 0) > 0 for key in ('failed', 'conflict', 'unknown', 'unresolved_deliveries'))
             code = 'downstream_attention' if attention else None
         except Exception as exc:

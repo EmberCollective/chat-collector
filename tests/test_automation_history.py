@@ -227,6 +227,22 @@ def test_collection_timings_are_durable_per_attempt_without_private_fields(confi
     assert 'PRIVATE_' not in json.dumps(record)
 
 
+def test_collection_details_are_projected_without_module_name_whitelist(config):
+    refresh = {'mode': 'incremental', 'changed': True,
+               'timings_seconds': {'total': 3.5, 'capture': 1.25}}
+    service = core.SchedulerService(
+        config,
+        callbacks={'processor': lambda: {'tasks': 0, 'refresh': refresh}},
+        clock=Clock(),
+    )
+    assert service.execute('processor', manual=True)['state'] == 'idle'
+    run = history.list_runs(config, module='processor')[0]
+    details = history.get_run(config, run['id'])['attempts'][0]['details']
+    assert details == {'collection': {'refresh': {
+        'mode': 'incremental', 'changed': True,
+        'timings_seconds': {'total': 3.5, 'capture': 1.25},
+    }}}
+
 @pytest.mark.parametrize('result', [None, {}, {'refresh': 'PRIVATE_TEXT'},
     {'refresh': {'reused': True, 'timings_seconds': {'total': 120}}},
     {'refresh': {'mode': [], 'timings_seconds': None, 'page_refresh': [], 'logical_sync': False}},

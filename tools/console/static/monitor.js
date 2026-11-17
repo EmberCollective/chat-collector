@@ -18,7 +18,7 @@
   function sourceName(module){
     return (overview?.sources||[]).find(item=>item.id===module)?.name||(data?.modules||[]).find(item=>item.id===module)?.name||names[module]||module||'采集来源';
   }
-  function taskLabel(task){return task.action==='process'?'待办处理 · AI 处理':sourceName(task.module)+' · 正式采集';}
+  function taskLabel(task){return task.action==='process'?'待办处理 · AI 处理':sourceName(task.module)+' · 采集';}
   function normalizeTasks(records){
     return (Array.isArray(records)?records:[]).flatMap(record=>{
       if(!performanceActions.has(record?.action)||!valid(record?.started_at))return [];
@@ -46,7 +46,7 @@
     if(probed&&(stale()||sample.active_jobs===null))return '当前任务状态未确认';
     const running=probed?sample.active_jobs:(overview?.jobs||[]).filter(job=>job.state==='running').map(job=>({...job,started_at:job.last_start}));
     if(!running.length)return (probed?processes(sample).some(group=>group.id==='shared'&&group.status==='stopped'):overview?.service?.verified&&overview.service.running===false)?'业务后台已停止 · 整机负载仍单独监测':'暂无正在执行的任务';
-    return running.map(job=>{const name=job.name||(overview?.sources||[]).find(source=>source.id===job.source_id)?.name||names[job.module]||job.module;return name+(job.source_id?' 正式采集':'')+'执行中'+(valid(job.started_at)?' · 已运行 '+Math.max(0,Math.floor(Date.now()/1000-job.started_at))+' 秒':'');}).join('；');
+    return running.map(job=>{const name=job.name||(overview?.sources||[]).find(source=>source.id===job.source_id)?.name||names[job.module]||job.module;return name+(job.source_id?' 采集':'')+'执行中'+(valid(job.started_at)?' · 已运行 '+Math.max(0,Math.floor(Date.now()/1000-job.started_at))+' 秒':'');}).join('；');
   }
   window.setOverviewSnapshot=value=>{overview=value;if(ready)$('monitor-current').textContent=taskCaption();};
   window.updateRuntimeElapsed=()=>{if(ready&&visible())$('monitor-current').textContent=taskCaption();};
@@ -107,7 +107,7 @@
       row.append(node('i'),title,meta);row.dataset.taskId=task.id;section.append(row);
     }
     if(active.length>shown)section.append(node('p','另有 '+(active.length-shown)+' 个性能任务；可在运行记录中查看。','monitor-tooltip-empty'));
-    if(!active.length)section.append(node('p','该时刻没有正式采集或 AI 处理任务执行；负载可能来自其他程序或轻量任务。','monitor-tooltip-empty'));
+    if(!active.length)section.append(node('p','该时刻没有采集或 AI 处理任务执行；负载可能来自其他程序或轻量任务。','monitor-tooltip-empty'));
     if(taskWarnings.length)section.append(node('p','部分后台任务记录暂不可读，当前列表可能不完整。','monitor-tooltip-warning'));
     tooltip.append(section);
   }
