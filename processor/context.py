@@ -24,10 +24,11 @@ accounts 标明当前账号，conversations.people 仅包含选中上下文涉�
 新建前用 find_related_tasks 查询完整待办库去重，支持关键词、人物、平台、状态、优先级、时间与分页。可先限定 conversation_ref，再按需要扩大范围；不传范围时查询全部平台和会话。人物筛选针对待办关联人员，不等同于消息发送者。时间范围起点包含、终点不包含。has_more=true 表示结果未列完，不能据此断言库中不存在。查询到明确同一事项时复用 t 引用更新，可跨会话或平台；仅同名、相似标题或周期性重复事项不能直接合并。新证据仍引用当前单个会话的消息，程序自动保留旧来源。
 同一批多个会话更新同一待办时，各会话分别提交同一 task_id，sources 各自只引用该会话。按消息时间和本地规则确定统一的最终业务字段，各项只允许 sources 和 material_refs 不同；冲突或重复项被拒绝后应修正并重新提交。
 最终必须调用 submit_tasks 提交结果；普通文字不是最终结果。新任务 task_id=null；更新事项使用工具返回的 t 引用。sources 只使用消息短引用 m1 或已读取证据 f1:p2 等，不得编造。无需生成真实 ID、hash、数据库路径或跳转地址，它们由本地程序补全。
-每项字段：task_id,title,event,action_steps,material_refs,priority,priority_reason,status(open/cancelled),time({start,deadline,text}),people([{name,role}]),location,notes,needs_review,review_reasons,sources。action_steps 为有原文依据的行动步骤字符串数组；未知操作不补造。title 写动作与对象，event 说明具体交付物和明确的提交方式。material_refs 用附件索引 f1 等明确选出执行本任务所需的材料；其所属消息必须在本任务 sources 引用。同条消息里的其他附件不会自动交付。允许选择未读文件，但选择不是阅读证据，不能声称内容已核实；已读并在 sources 中引用的附件证据自动关联材料。不提供文件路径。
+每项字段：task_id,title,event,action_steps,material_refs,priority,priority_reason,urgent,remind_again,status(open/cancelled),time({start,deadline,text}),people([{name,role}]),location,notes,needs_review,review_reasons,sources。action_steps 为有原文依据的行动步骤字符串数组；未知操作不补造。title 写动作与对象，event 说明具体交付物和明确的提交方式。material_refs 用附件索引 f1 等明确选出执行本任务所需的材料；其所属消息必须在本任务 sources 引用。同条消息里的其他附件不会自动交付。允许选择未读文件，但选择不是阅读证据，不能声称内容已核实；已读并在 sources 中引用的附件证据自动关联材料。不提供文件路径。
+urgent 仅在正文有明确紧迫依据时设为 true；remind_again 仅用于已有任务，且只在明确要求立即再次提醒时设为 true；已完成、已取消、已替代的任务不得恢复。
 时间为带时区 ISO 时间、YYYY-MM-DD 或 null。无待办提交 {"tasks":[]}。
 合成结构示例（引用必须换为实际输入）：
-{"tasks":[{"task_id":null,"title":"提交材料","event":"按通知提交材料，具体提交要求未提供。","priority":"P4","priority_reason":"存在行动要求，期限尚未明确。","status":"open","time":{"start":null,"deadline":null,"text":null},"people":[],"location":null,"notes":["通知未提供具体提交入口。"],"needs_review":false,"review_reasons":[],"sources":["m1"]}]}。
+{"tasks":[{"task_id":null,"title":"提交材料","event":"按通知提交材料，具体提交要求未提供。","priority":"P4","priority_reason":"存在行动要求，期限尚未明确。","urgent":false,"remind_again":false,"status":"open","time":{"start":null,"deadline":null,"text":null},"people":[],"location":null,"notes":["通知未提供具体提交入口。"],"needs_review":false,"review_reasons":[],"sources":["m1"]}]}。
 '''
 
 
@@ -78,7 +79,7 @@ def prepare_input(config, groups, existing=()):
             'platform', 'account_id', 'conversation_id'))), None)
         if owner is None:
             continue
-        row = {key: task.get(key) for key in ('title', 'event', 'action_steps', 'notes', 'priority', 'status', 'time', 'people', 'location')}
+        row = {key: task.get(key) for key in ('title', 'event', 'action_steps', 'notes', 'priority', 'urgent', 'status', 'time', 'people', 'location')}
         row.update(task_id=ref, conversation_ref=group_refs[owner['id']])
         related.append(row)
     return payload, attachments, message_map, task_map, related

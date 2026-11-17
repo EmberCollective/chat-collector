@@ -9,6 +9,7 @@
 | `title` | 动作和对象，如“填写并提交申请表” |
 | `event` | 成果、明确的接收人、提交入口或验收要求；不确定的要求不能写成事实 |
 | `action_steps` | 按执行顺序排列的字符串数组，仅含原文有依据的步骤；最多 50 项，每项最多 2000 字符 |
+| `urgent` / `remind_again` | 布尔值；`urgent` 进入渠道包，`remind_again` 仅用于已有 open 任务请求一次性立即重发提醒 |
 | `time`、`people`、`location` | `people` 为有依据需要参与事项的人，角色可为参与人、提交人、审批人等；仅明确指派时才写负责人。其他字段未知值保留 `null` 或空数组 |
 | `sources`、`attachment_evidence` | 程序映射的消息和已读附件证据，供核查和整理材料 |
 | `material_refs` → `materials` | 模型选择所需附件短编号；程序映射成消息与附件序号以及原始或已解析附件元数据 |

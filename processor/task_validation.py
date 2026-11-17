@@ -43,6 +43,13 @@ def _validate_response(response, group, existing, timezone):
         task['task_id'] = identifier
         if identifier:
             assigned.add(identifier)
+        if type(item.get('urgent', False)) is not bool or type(item.get('remind_again', False)) is not bool:
+            raise ValueError('Model task urgent and remind_again must be booleans')
+        if item.get('remind_again', False) and identifier is None:
+            raise ValueError('Model task remind_again requires an existing task_id')
+        task['urgent'] = item.get('urgent', False)
+        if item.get('remind_again', False):
+            task['remind_again'] = True
         time = item.get('time')
         if not isinstance(time, dict):
             raise ValueError('Model task time must be an object')

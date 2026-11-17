@@ -283,6 +283,7 @@ sequenceDiagram
     "revision": 4,
     "title": "提交报名材料",
     "priority": "P1",
+    "urgent": true,
     "status": "open",
     "action_steps": ["填写并提交报名表"],
     "resources": [],
@@ -291,7 +292,7 @@ sequenceDiagram
 }
 ```
 
-这是最小示意，实际校验沿用完整任务包契约。`kind` 支持 `upsert/reminder/alert/daily_digest`；早报使用 `digest`，不创建假待办。
+这是最小示意，实际校验沿用完整任务包契约。`kind` 支持 `upsert/reminder/alert/daily_digest`；早报使用 `digest`，不创建假待办。`task.urgent=true` 表示渠道在优先级旁标记“紧急”。
 
 渠道只能处理自身的 SDK、卡片或页面结构、文件上传、远端对象 ID、鉴权和回执。同一 `task_id` 对应不同目标的远端对象彼此独立；回调不能跨群或跨应用借用 token。
 

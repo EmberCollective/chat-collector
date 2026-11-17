@@ -155,6 +155,7 @@ def _material(attachment, source_key, index, config, prepare):
 def build_package(task, config, *, prepare=False):
     package = {key: deepcopy(task.get(key)) for key in ('task_id', 'revision', 'title', 'event', 'priority',
         'priority_reason', 'status', 'time', 'people', 'location', 'needs_review', 'review_reasons', 'updated_at')}
+    package['urgent'] = task.get('urgent') is True
     package['time'] = {k: (task.get('time') or {}).get(k) for k in ('start', 'deadline', 'timezone', 'text')}
     package['people'] = [{k: p[k] for k in ('name', 'role')} for p in task.get('people', [])]
     package['notes'] = list(dict.fromkeys([*task.get('notes', []), *task.get('review_reasons', [])]))

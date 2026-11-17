@@ -220,8 +220,9 @@ def card_content(task, tokens, *, alert=False, upload_files=True, reminder=None,
             buttons.append({'tag': 'column', 'width': 'weighted', 'weight': 1, 'elements': [control]})
         elements.append({'tag': 'column_set', 'flex_mode': 'none', 'columns': buttons})
     prefix = '早报' if daily_digest else '已恢复' if recovered else 'ERROR' if alert else task['priority']
+    tags = f'[{prefix}]' + ('[紧急]' if task.get('urgent') and not alert and not daily_digest else '')
     card = {'schema': '2.0', 'config': {'update_multi': True, 'width_mode': 'default', 'enable_forward': False},
-            'header': {'title': {'tag': 'plain_text', 'content': f"[{prefix}] {task['title']}"},
+            'header': {'title': {'tag': 'plain_text', 'content': f"{tags} {task['title']}"},
                        'template': color, 'icon': {'tag': 'standard_icon', 'token': 'todo_colorful'}},
             'body': {'direction': 'vertical', 'vertical_spacing': '12px', 'elements': elements}}
     encoded = json.dumps(card, ensure_ascii=False)

@@ -40,7 +40,7 @@ timeout_seconds = 30
 Webhook 的请求、回执示例见 [外部工作流契约](configuration.md#外部工作流契约)。接收端应完成以下步骤：
 
 1. 验证 Bearer token 和请求结构，按 `delivery_id` 查持久去重记录；并发重复请求也只能执行一次。
-2. 按目标实例和 `task_id` 查远程对象映射。`upsert` 更新已有对象；`reminder` 发送提醒，不重复创建页面或日程。
+2. 按目标实例和 `task_id` 查远程对象映射。`upsert` 更新已有对象；`reminder` 发送提醒，不重复创建页面或日程。任务提交的 `remind_again=true` 在有效 open 任务上只生成一次 `kind=reminder`，不恢复已完成、已取消或已替代状态。
 3. 上传所需材料，执行远程操作，保存对象映射与结果。若进程可能在远端成功后、本地保存前退出，使用平台幂等键或查询对账恢复。
 4. 实际操作及回执持久化完成后，返回 `accepted=true`、匹配的 `delivery_id`，以及可选 `remote_id`、`url`。重复请求返回原回执。
 
@@ -61,6 +61,7 @@ def deliver_example(target, envelope, config, previous=None):
 | `envelope.delivery_id` | 本次投递的稳定 ID；重试时保持不变 |
 | `envelope.kind` | 常规任务为 `upsert` / `reminder`；`alert` 是故障通知；`daily_digest` 是今日通知安排，正文使用 `digest` 而非 `task` |
 | `envelope.task` | 统一行动包，含 `task_id`、`revision`、步骤、时间、参与人员、材料和精简来源 |
+| `envelope.task.urgent` | 布尔值；true 表示渠道在优先级标签旁显示“紧急”标记 |
 | `config` | 消息层配置、状态和归档位置，不是模型配置 |
 | `previous` | 同目标配置、同任务最近一次成功投递的回执，首次可为 `None` |
 
