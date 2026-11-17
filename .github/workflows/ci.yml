@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64 tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: tools/install/requirements.lock.txt
+
+      - name: Set up Node 22.19
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: npm
+          cache-dependency-path: processor/pi-runtime/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r tools/install/requirements.lock.txt
+          python -m pip install pytest==9.0.3
+
+      - name: Install Pi runtime
+        working-directory: processor/pi-runtime
+        run: npm ci --ignore-scripts
+
+      - name: Test Pi runtime
+        working-directory: processor/pi-runtime
+        run: npm test
+
+      # The native SQLCipher bundle is not committed; release acceptance covers these two native-only tests.
+      - name: Test Python services
+        run: >-
+          python -m pytest tests -q
+          --ignore=tests/test_qq_recovery.py
+          --deselect=tests/test_installation.py::test_release_payload_never_copies_accounts_keys_or_installed_node
+
+      - name: Test console
+        working-directory: tools/console
+        run: python -m pytest tests -q

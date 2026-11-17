@@ -8,6 +8,10 @@
 <p align="center">本地采集 · SQL 筛选 · 自定义规则 · 多渠道提醒</p>
 
 <p align="center">
+  <a href="https://github.com/EmberCollective/loose-ends/actions/workflows/ci.yml"><img src="https://github.com/EmberCollective/loose-ends/actions/workflows/ci.yml/badge.svg" alt="CI 状态"></a>
+</p>
+
+<p align="center">
   <a href="#快速开始">快速开始</a> ·
   <a href="FILTERS.md">SQL 筛选</a> ·
   <a href="processing-rules/default.md">待办规则</a> ·
@@ -15,6 +19,8 @@
 </p>
 
 从不同来源的信息中整理个人待办，保留材料与来源。内置微信、QQ 本地采集，支持接入其他消息来源，并将结果交给飞书、Notion 或自己的应用与通知平台。
+
+> **⚠️ 实验性项目。** 本项目仅在有限的 Windows x64 环境验证，不保证在任意机型、系统版本或微信/QQ 客户端版本上可用，也不保证取钥、解密、增量刷新、采集和附件读取始终正常运行。客户端或系统更新可能使相关功能随时失效；请先备份数据，并在非关键环境中验证。
 
 ## 看看效果
 
@@ -74,6 +80,6 @@
 - **账号与兼容性**：本地解密减少了与平台服务的交互，但没有封号率实测，不能保证零风险。首次取钥涉及微信 Hook 或 QQ 进程内存读取；客户端升级可能影响兼容性。
 - **隐私与费用**：配置远程模型后，选中消息及实际读取的附件会发到该服务；启用通知渠道后，相应待办和材料会离开本机。修改待办规则可能重新处理历史分组并产生费用。
 - **结果与数据**：模型可能误判，需结合来源核对。聊天、附件和凭据均属敏感数据，请保管好 `.env`、`secrets/` 与 `data/`；已有部署请勿用新包直接覆盖。
-- **第三方与分发**：仓库根目录尚无项目许可证文件，部分上游授权仍待解决，不能视为已获任意再分发许可。来源、许可证原文、修改记录及当前缺口见 [第三方说明](THIRD_PARTY_NOTICES.md)。以上使用边界不能替代第三方许可或平台授权。
+- **项目许可与分发**：当前仓库是实验性源码预览，尚无覆盖整个项目的许可证，不应视为 MIT 或已获自由再分发许可。微信提取与取钥组件仍有授权缺口，QQ 解析器为 GPLv3，PyMuPDF 为 AGPLv3／商业双许可；MIT 目标的清理路径见 [许可与再分发](docs/guides/licensing.md)，来源与原文见 [第三方说明](THIRD_PARTY_NOTICES.md)。以上使用边界不能替代第三方许可或平台授权。
 
 更多说明见 [文档索引](docs/README.md)，增量机制与实测见 [增量刷新](docs/collector/acquisition/incremental-refresh.md)。

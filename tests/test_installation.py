@@ -111,6 +111,12 @@ def test_launcher_requires_ready_before_starting_workers(tmp_path):
         launch.start_all(tmp_path)
 
 
+def test_release_allowlist_keeps_third_party_notices():
+    build = module('build_release')
+    assert 'third_party' in build.SOURCE_DIRS
+    assert {'THIRD_PARTY_NOTICES.md', 'tools/qq-nt-export/PROVENANCE.md'} <= set(build.SOURCE_FILES)
+
+
 def test_release_payload_never_copies_accounts_keys_or_installed_node():
     build = module('build_release')
     files = build.payload(ROOT)
@@ -118,6 +124,9 @@ def test_release_payload_never_copies_accounts_keys_or_installed_node():
         'selection/__init__.py', 'providers/query.py', 'providers/content.py',
         'providers/platforms/qq.py', 'processor/service.py', 'automation/wakeup.py'))
     assert 'version.json' in files
+    assert 'THIRD_PARTY_NOTICES.md' in files
+    assert 'third_party/licenses/PyMuPDF-AGPL-3.0.txt' in files
+    assert 'tools/qq-nt-export/PROVENANCE.md' in files
     assert 'mcp_service/server.py' in files and 'mcp_service/README.md' in files
     assert 'tools/install/defaults/processor.toml' in files
     assert 'tools/install/console.toml' in files

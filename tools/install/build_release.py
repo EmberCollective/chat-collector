@@ -9,10 +9,12 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = ('common', 'application', 'collector', 'providers', 'selection', 'rulesets', 'processor', 'messaging', 'automation',
-               'processing-rules', 'docs', 'assets/readme', 'mcp_service', 'tools/console', 'tools/automation', 'tools/install')
-SOURCE_FILES = ('contracts.py', 'README.md', 'CHANGELOG.md', 'FILTERS.md', '.env.example', 'version.json', 'requirements.txt',
+               'processing-rules', 'docs', 'assets/readme', 'mcp_service', 'tools/console', 'tools/automation', 'tools/install',
+               'third_party')
+SOURCE_FILES = ('contracts.py', 'README.md', 'CHANGELOG.md', 'FILTERS.md', '.env.example', 'version.json', 'requirements.txt', 'THIRD_PARTY_NOTICES.md',
                 'Install.cmd', 'Start.cmd', 'Configure.cmd', 'tools/qq_recover.py', 'tools/qq-recover.cmd',
-                'tools/qq-nt-export/scripts/ntqq_key_scan.py', 'tools/qq-nt-export/LICENSE')
+                'tools/qq-nt-export/scripts/ntqq_key_scan.py', 'tools/qq-nt-export/LICENSE',
+                'tools/qq-nt-export/PROVENANCE.md')
 EXCLUDED = {'__pycache__', 'node_modules', '.runtime', '.pytest_cache', 'tests', 'node'}
 
 
