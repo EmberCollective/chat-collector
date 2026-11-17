@@ -6,6 +6,8 @@
 | --- | --- |
 | 安装、启动、升级 | [安装指南](guides/installation.md) · [安装验收](guides/installation-acceptance.md) |
 | 从源码运行、定位模块 | [开发指南](guides/development.md) · [架构边界](architecture/README.md) |
+| 准备版本、打包与发布 | [发布流程](guides/release-process.md) |
+| 判断项目许可证与再分发边界 | [许可与再分发](guides/licensing.md) |
 | 快速读取消息、判断是否需要索引 | [快速数据库查询](collector/acquisition/fast-query.md) |
 | 编写筛选 SQL | [规则与参数](../FILTERS.md) |
 | 配置模型、待办与提醒 | [处理配置](processor/processing.md) · [渠道配置](information/channels/configuration.md) · [自动运行](information/dispatch/automation.md) |
@@ -36,6 +38,6 @@
 - 合成示例：[提供方事件](examples/provider-event-v1.json)、[AI 输入](examples/ai-context-v1.json)。
 - 面板设计与验收：[整体重写](design/console-redesign/README.md)、[运行概览](design/overview-dashboard/README.md)、[负载与加载优化](design/runtime-monitoring/README.md)、[逐项投递计划与每日早报](design/delivery-schedule/README.md)。
 
-任务通过程序校验后直接入库；缺失信息记入 `notes`。模型与外部投递是否启用，以本机配置为准。使用边界与第三方授权见 [项目说明](../README.md) 和 [第三方说明](../THIRD_PARTY_NOTICES.md)。
+任务通过程序校验后直接入库；缺失信息记入 `notes`。模型与外部投递是否启用，以本机配置为准。使用边界、许可证目标与第三方授权见 [项目说明](../README.md)、[许可与再分发](guides/licensing.md) 和 [第三方说明](../THIRD_PARTY_NOTICES.md)。
 
 文档维护者请遵循 [目录与写作规则](AGENTS.md)。
