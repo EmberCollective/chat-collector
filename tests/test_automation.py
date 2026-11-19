@@ -391,6 +391,39 @@ def test_listener_restart_budget_is_not_reset_by_monitor_poll(config, monkeypatc
     assert status(config)['listener']['attempts'] == 3
 
 
+def test_stable_listener_regains_retry_budget(config, monkeypatch):
+    from automation.listener import ListenerSupervisor
+    clock = Clock()
+    service = SchedulerService(config, clock=clock)
+    with core._connect(config, write=True) as conn:
+        conn.execute("UPDATE listener SET state='running',attempts=3,create_time=100,pid=123 WHERE id=1")
+    supervisor = ListenerSupervisor(service)
+    monkeypatch.setattr(supervisor, '_owned', lambda row: object())
+    clock.value = 399
+    supervisor.poll()
+    assert status(config)['listener']['attempts'] == 3
+    clock.value = 400
+    supervisor.poll()
+    assert status(config)['listener']['attempts'] == 1
+    monkeypatch.setattr(supervisor, '_owned', lambda row: None)
+    supervisor.poll()
+    assert status(config)['listener']['state'] == 'retry'
+
+
+@pytest.mark.parametrize('error,expected', [('listener_exited', 'idle'), ('listener_identity_unverifiable', 'paused')])
+def test_service_start_recovers_only_transient_listener_pause(config, error, expected):
+    config['listener']['enabled'] = True
+    with core._connect(config, write=True) as conn:
+        conn.execute("UPDATE listener SET state='paused',attempts=3,error=? WHERE id=1", (error,))
+    service = SchedulerService(config, scheduler=FakeScheduler()).start()
+    try:
+        listener = status(config)['listener']
+        assert listener['state'] == expected
+        assert listener['attempts'] == (0 if expected == 'idle' else 3)
+    finally:
+        service.stop()
+
+
 @pytest.mark.parametrize('legacy', [True, False])
 def test_listener_recovers_unrecorded_child_instead_of_launching_twice(config, monkeypatch, legacy):
     from automation.listener import ListenerSupervisor

@@ -74,6 +74,10 @@ class ListenerSupervisor:
                 with closing(_connect(self.config, write=True)) as conn, conn:
                     conn.execute('UPDATE listener SET error=? WHERE id=1', (code,))
                 self.service._alert('listener', 'failure' if code else 'recovery', code or 'listener_configuration_restored')
+            # shortcut: process uptime, not WebSocket readiness; switch to a connection heartbeat when available.
+            if not code and row['attempts'] > 1 and row['create_time'] is not None and self.service.clock() - row['create_time'] >= 300:
+                with closing(_connect(self.config, write=True)) as conn, conn:
+                    conn.execute('UPDATE listener SET attempts=1 WHERE id=1')
             return
         if row['state'] == 'running':
             self._failed(row['attempts'], 'listener_exited')

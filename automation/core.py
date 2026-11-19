@@ -441,6 +441,8 @@ class SchedulerService:
                 else:
                     _setting(conn, 'stop_requested', False)
                 _setting(conn, 'service', dict(process_record(), started_at=self.clock(), state='running', config_hash=config_digest(self.config)))
+                if self.config['listener']['enabled']:
+                    conn.execute("UPDATE listener SET state='idle',attempts=0,next_run=0,error=NULL WHERE id=1 AND state='paused' AND pid IS NULL AND error IN ('listener_exited','listener_start_failed','listener_start_interrupted')")
                 interrupted = conn.execute("SELECT * FROM jobs WHERE state='running'").fetchall()
                 conn.execute("UPDATE operations SET state='failed',error='interrupted_execution',updated_at=? WHERE kind='once' AND state='running'", (self.clock(),))
             for row in interrupted:

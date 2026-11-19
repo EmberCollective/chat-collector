@@ -47,7 +47,7 @@ enabled = false
 config = "messaging.toml"
 interval_seconds = 5
 
-# 飞书官方长连接进程；重启预算包含首次启动，不因正常轮询而重置。
+# 飞书官方长连接进程；重启预算包含首次启动，连续存活 5 分钟后恢复预算。
 max_attempts = 3
 backoff_seconds = 30
 max_backoff_seconds = 900

@@ -124,6 +124,21 @@ def test_automatic_retry_episode_maps_by_config_path_and_deduplicates_child(cons
     assert 'PRIVATE_CONTENT_NOT_FOR_OVERVIEW' not in json.dumps(data)
 
 
+def test_running_service_overview_reports_paused_listener(console, monkeypatch):
+    from automation import control
+    client, app, root, now = console
+    cfg = automation_config(app, root)
+    path = Path(cfg['_config_path'])
+    path.write_text(path.read_text(encoding='utf8') + '\n[listener]\nenabled=true\n', encoding='utf8')
+    monkeypatch.setattr(control, 'status', lambda cfg: {'state': 'running', 'running': True, 'verified': True,
+        'jobs': [], 'listener': {'state': 'paused', 'error': 'listener_exited'}})
+    data = client.get('/api/overview').json()
+    assert data['service']['running'] is True
+    issue = next(item for item in data['issues'] if item['module'] == 'listener')
+    assert issue['status'] == 'paused' and issue['next_action'] == 'open_config'
+    assert '恢复监听重试' in issue['next_action_label']
+
+
 def test_retention_cap_marks_window_truncation_and_does_not_claim_all_history(console, monkeypatch):
     from automation import SchedulerService, control
     client, app, root, now = console

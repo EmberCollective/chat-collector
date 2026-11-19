@@ -395,6 +395,16 @@ class Overview:
                         run = next((run for run in automatic if run['id'] == item['current_run_id']), None)
                         issues.append(_issue('job', module, source_id=source_id, run=run,
                                              error=item['error'] or item['state'], last_at=item['last_start'], status=item['state']))
+                if auto_cfg['listener']['enabled']:
+                    listener = live.get('listener') or {}
+                    item = {'module': 'listener', 'source_id': None, 'enabled': True,
+                            'state': listener.get('state', 'unknown'), 'error': listener.get('error'),
+                            'next_run': _number(listener.get('next_run')), 'last_success': None,
+                            'last_start': _number(listener.get('create_time')), 'current_run_id': None,
+                            'config_target': {'kind': 'config', 'id': 'listener'}}
+                    live_jobs.append(item)
+                    if item['error'] or item['state'] in {'paused', 'retry'}:
+                        issues.append(_issue('job', 'listener', error=item['error'] or item['state'], status=item['state']))
                 if live.get('config_changed'):
                     issues.append(_issue('config', 'automation', error='config_changed'))
                 if live.get('enabled') and live.get('state') in {'stopped', 'unknown', 'duplicate'}:
@@ -478,11 +488,13 @@ class Overview:
                   and any(other['kind'] in {'delivery', 'feedback'} and other['module'] == issue['module'] for other in issues))]
         for issue in issues:
             label = bridge.sources.get(issue['source_id'], {}).get('name') or {
-                'processor': '待办处理', 'messaging': '消息投递', 'feedback': '状态回写', 'automation': '后台服务'}.get(issue['module'], issue['module'])
+                'processor': '待办处理', 'messaging': '消息投递', 'feedback': '状态回写', 'listener': '飞书回调监听', 'automation': '后台服务'}.get(issue['module'], issue['module'])
             issue['title'] = label + '：' + ('投递结果待核对' if issue['next_action'] == 'verify_delivery' else '需要检查运行记录')
             if issue['kind'] == 'job' and issue['status'] == 'paused':
                 issue['title'] = label + ('采集已暂停' if issue['source_id'] else '已暂停')
                 issue.update(next_action='open_config', next_action_label='连续失败后已暂停，不会自动继续。前往自动化中的对应任务，修复故障后点击“已解决，恢复重试”。')
+            if issue['module'] == 'listener':
+                issue.update(next_action='open_config', next_action_label='卡片按钮回调可能不可用。前往投递与提醒检查监听状态，暂停时点击“恢复监听重试”。')
             issue['severity'] = 'warning' if issue['status'] == 'unknown' or issue['kind'] in {'service', 'config'} else 'error'
         resources = self.storage.measure(specs, sources)
         for row in resources['sources']:
