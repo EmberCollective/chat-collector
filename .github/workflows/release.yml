@@ -97,10 +97,11 @@ jobs:
           Expand-Archive -LiteralPath $zip -DestinationPath $extracted
           $installer = "$extracted/chat-collector/tools/install/install.ps1"
           # PrepareOnly checks the runtime without configuring real clients, accounts, or startup.
-          for ($i = 0; $i -lt 2; $i++) {
-            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Destination $destination -PrepareOnly
-            if ($LASTEXITCODE -ne 0) { throw 'Isolated installation check failed' }
-          }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Destination $destination -PrepareOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated installation check failed' }
+          # Recheck from the installed copy; the installer refuses to overwrite a nonempty destination.
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$destination/tools/install/install.ps1" -Destination $destination -PrepareOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Installed runtime recheck failed' }
       - name: Upload verified assets
         uses: actions/upload-artifact@v6
         with:
