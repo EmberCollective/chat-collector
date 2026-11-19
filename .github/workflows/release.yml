@@ -86,6 +86,9 @@ jobs:
           python -m pytest tests/test_native_delta.py tests/test_installation.py::test_release_payload_never_copies_accounts_keys_or_installed_node -q
           if ($LASTEXITCODE -ne 0) { throw 'Artifact smoke tests failed' }
       - name: Prepare and recheck the actual preview ZIP in isolation
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: utf-8
         run: |
           $version = $env:RELEASE_TAG.Substring(1)
           $zip = "$env:RUNNER_TEMP/release-output/chat-collector-$version-windows-x64-preview.zip"
