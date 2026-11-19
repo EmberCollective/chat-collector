@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      commit: ${{ steps.ci.outputs.commit }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate tag
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $env:GITHUB_REF -ne 'refs/heads/main') { throw 'Manual release must run from main' }
+          if ($env:RELEASE_TAG -cnotmatch '^v\d+\.\d+\.\d+$') { throw 'Expected vX.Y.Z' }
+      - name: Check out workflow tools
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          path: workflow-source
+      - name: Check out tagged source
+        uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: release-source
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Require successful main CI for the tagged commit
+        id: ci
+        working-directory: release-source
+        run: |
+          $commit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve tag commit' }
+          git merge-base --is-ancestor $commit origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Tag is not on main' }
+          $run = $null
+          for ($i = 0; $i -lt 12 -and -not $run; $i++) {
+            $runs = gh run list --repo $env:GITHUB_REPOSITORY --workflow ci.yml --branch main --commit $commit --event push --limit 1 --json databaseId
+            if ($LASTEXITCODE -ne 0) { throw 'Could not query CI' }
+            $run = @($runs | ConvertFrom-Json) | Select-Object -First 1
+            if (-not $run) { Start-Sleep -Seconds 10 }
+          }
+          if (-not $run) { throw 'No main CI run for this commit' }
+          gh run watch $run.databaseId --repo $env:GITHUB_REPOSITORY --exit-status --interval 15
+          if ($LASTEXITCODE -ne 0) { throw 'Tagged commit CI did not pass' }
+          "commit=$commit" >> $env:GITHUB_OUTPUT
+      - name: Download pinned native dependency baseline
+        run: |
+          gh release download v1.1.0 --repo $env:GITHUB_REPOSITORY --pattern 'chat-collector-1.1.0-windows-x64-preview.zip' --output "$env:RUNNER_TEMP/native-baseline.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Native baseline unavailable' }
+      - name: Build and verify versioned archive and changelog
+        run: |
+          python workflow-source/tools/release.py --source release-source --tag $env:RELEASE_TAG --native-archive "$env:RUNNER_TEMP/native-baseline.zip" --output "$env:RUNNER_TEMP/release-output"
+          if ($LASTEXITCODE -ne 0) { throw 'Release build or verification failed' }
+      - name: Smoke test packaged native dependencies
+        working-directory: release-source
+        run: |
+          python -m pip install pytest==9.0.3
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install test runner' }
+          $env:PYTHONPATH = "$PWD/runtime-deps"
+          python -m pytest tests/test_native_delta.py tests/test_installation.py::test_release_payload_never_copies_accounts_keys_or_installed_node -q
+          if ($LASTEXITCODE -ne 0) { throw 'Artifact smoke tests failed' }
+      - name: Prepare and recheck the actual preview ZIP in isolation
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $zip = "$env:RUNNER_TEMP/release-output/chat-collector-$version-windows-x64-preview.zip"
+          $extracted = "$env:RUNNER_TEMP/release-extracted"
+          $destination = "$env:RUNNER_TEMP/release-install"
+          Expand-Archive -LiteralPath $zip -DestinationPath $extracted
+          $installer = "$extracted/chat-collector/tools/install/install.ps1"
+          # PrepareOnly checks the runtime without configuring real clients, accounts, or startup.
+          for ($i = 0; $i -lt 2; $i++) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Destination $destination -PrepareOnly
+            if ($LASTEXITCODE -ne 0) { throw 'Isolated installation check failed' }
+          }
+      - name: Upload verified assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-package
+          path: ${{ runner.temp }}/release-output/*
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      EXPECTED_COMMIT: ${{ needs.build.outputs.commit }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-package
+      - name: Publish preview release (never overwrite an existing release)
+        run: |
+          $commit = gh api "repos/$env:GITHUB_REPOSITORY/commits/$env:RELEASE_TAG" --jq .sha
+          if ($LASTEXITCODE -ne 0 -or $commit -ne $env:EXPECTED_COMMIT) { throw 'Tag changed since the verified build' }
+          $version = $env:RELEASE_TAG.Substring(1)
+          $zip = "chat-collector-$version-windows-x64-preview.zip"
+          $expected = ((Get-Content -LiteralPath "$zip.sha256" -Raw).Trim() -split '\s+')[0]
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $expected) { throw 'Artifact checksum mismatch' }
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; do not replace published assets' }
+          gh release create $env:RELEASE_TAG $zip "$zip.sha256" --repo $env:GITHUB_REPOSITORY --verify-tag --title "拾序 · Loose Ends $version" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

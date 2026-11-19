@@ -6,6 +6,14 @@
 
 公开再分发前还必须阅读 [许可与再分发](licensing.md)。当前项目存在无明确许可和 GPL/AGPL 组件，不能把“可以构建 ZIP”当作已经取得公开再分发许可，也不能宣称整体为 MIT。
 
+## 自动发布（GitHub Actions）
+
+日常发布在版本与更新日志合入 `main`、确认发布范围后，只需推送对应版本 tag。GitHub Actions 中的 `Release` 工作流 会自动等待该提交的主分支 CI，通过后从干净的 tag 构建版本化 ZIP 和 SHA-256，核对包清单、版本、许可文件与原生依赖，在隔离目录以 `PrepareOnly` 安装并复验运行环境，再从 `CHANGELOG.md` 截取该版本的章节作为 Release 正文；已存在的 Release 不覆盖。发布仍限于 Windows x64 本地使用预览，不代表用户真实环境或再分发授权已经核实。
+
+对于在工作流上线前已经推送的 tag，可在 Actions → Release → Run workflow 中选择 `main` 并填写原 tag（例如 `v1.1.2`）。不需要移动或重打 tag。失败时查看 Actions 日志，修复工作流后，可对尚未发布的原 tag 手动重试；若已发布则另升补丁版本。
+
+GitHub runner 未包含原生 DLL 和 Python SQLCipher 包，因此当前只从 `v1.1.0` 已审核的 ZIP 中恢复固定 SHA-256 的 16 个原生依赖文件，再用目标 tag 的源码重新打包。其余源码、配置和旧包数据不复用。原生构建脚本变化时工作流拒绝发布，须先重新编译、核验许可与来源，并更新 `tools/release.py` 的依赖基线。自动检查不启动配置向导、真实客户端或外部通知，不替代真实账号、长期运行及发布后下载验收。
+
 ## 1. 冻结发布范围
 
 1. 确认要发布的功能已通过独立评审并合入 `main`；目标提交的 GitHub Actions CI 必须通过。不要把未评审实验、个人筛选规则或本机配置带入发布。
@@ -116,7 +124,7 @@ git tag -a vX.Y.Z -m "拾序 · Loose Ends vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-创建 GitHub Release 时：
+自动工作流负责创建 GitHub Release；仅在人工补发时遵循以下相同要求：
 
 - 标题使用 `拾序 · Loose Ends X.Y.Z`，发布说明只摘取 `CHANGELOG.md` 中该版本内容，不把开发日志或未验证能力写成用户已获得的功能。
 - 上传版本化 ZIP 与 `.sha256`；资产上传后不再静默覆盖。
