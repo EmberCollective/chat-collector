@@ -6,6 +6,7 @@
 | --- | --- |
 | 了解快照、扫描、SQL 与缓存的实现 | [查询实现方法](query-implementation.md) |
 | 接入新的消息或附件提供方 | [提供方接入](provider-api.md) |
+| 配置学习通只读采集与 SQL 筛选 | [学习通来源](chaoxing.md) |
 | 理解附件工具与证据范围 | [附件上下文](attachment-context.md) |
 | 编写跨来源 SQL | [规则契约](../../../FILTERS.md) |
 
