@@ -131,11 +131,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const listener=details(delivery,'监听与操作回写');listener.className='automation-advanced';listener.open=true;
     for(const [name]of additional.filter(([,description])=>description.action==='feedback'))jobRow(listener,name,'完成、取消和稍后提醒等待处理层确认保存');
     const listenerRow=node('div',null,'automation-task-row'),listenerMain=node('div');listener.append(listenerRow);listenerRow.append(listenerMain);field(listenerMain,config.automation.listener,'enabled','boolean',{label:'监听渠道操作'});listenerMain.append(node('p','仅对声明监听能力的渠道生效'));
-    const listenerInterval=node('div',null,'automation-number');listenerRow.append(listenerInterval);const listenerCheck=field(listenerInterval,config.automation.listener,'check_interval_seconds','integer',{label:'存活检查',max:60});listenerCheck.parentElement.className='automation-number';listenerInterval.append(node('span','秒'));
+    const listenerInterval=node('div',null,'automation-number');listenerRow.append(listenerInterval);const listenerCheck=field(listenerInterval,config.automation.listener,'check_interval_seconds','integer',{label:'存活检查',max:60});listenerCheck.parentElement.className='automation-number';listenerInterval.append(node('span','秒'));button(listenerRow,'恢复监听重试',()=>operate('/jobs/listener/resume','已提交恢复监听重试。'));
     for(const parent of [processor,delivery]){
       const advanced=details(byId(parent===processor?'processor-advanced':'delivery-advanced'),'运行一轮与失败重试设置');
       for(const [name,description]of additional.filter(([,description])=>(['deliver','feedback'].includes(description.action)?delivery:processor)===parent))jobExtra(advanced,name);
-      if(parent===delivery){button(advanced,'恢复监听重试',()=>operate('/jobs/listener/resume','已提交恢复监听重试。'));advanced.append(node('p','同一应用的目标可共用监听；不同应用需分别启动监听程序。监听仅用于渠道声明支持的操作。','automation-boundary'));}
+      if(parent===delivery){advanced.append(node('p','同一应用的目标可共用监听；不同应用需分别启动监听程序。监听仅用于渠道声明支持的操作。','automation-boundary'));}
     }
     const limits=grid(details(byId('delivery-advanced'),'投递与回写限制'));
     field(limits,config.messaging,'enabled','boolean',{label:'允许外部投递'});field(limits,config.messaging,'feedback_enabled','boolean',{label:'允许操作结果回写处理层'});

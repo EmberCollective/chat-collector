@@ -13,8 +13,8 @@
   const warningLabels={storage_partial:'部分存储路径尚未完成测量',state_missing:'运行数据库尚不存在',history_not_provided:'旧运行数据库未提供历史记录',not_configured:'尚未配置后台服务',console_records_unreadable:'部分本地运行记录不可读',history_window_truncated:'历史保留或读取上限可能截断当前窗口'};
   const warningText=value=>typeof value==='string'?value:warningLabels[value.code]||((value.module==='automation'?'后台服务':names[value.module]||value.module||'部分')+'数据暂时不可读');
   const issueLabels=new Map([['result_unknown','本轮结果尚未确认，请先核对实际输出。'],['config_changed','已保存配置与运行中服务不一致，请在后台服务中核对。'],['service_stopped','后台服务已停止，已启用的计划暂不执行。'],['service_unknown','无法确认后台进程状态，请先核对。'],['service_duplicate','发现重复后台进程，请在后台服务中检查。'],['retry','任务正在等待重试，请核对上次错误。'],['paused','任务因错误暂停，请核对原因后恢复。'],['failed','任务执行失败，请查看原始记录。'],['unknown','执行结果未知，请先核对实际输出。'],['conflict','回写与当前待办状态冲突，请刷新待办后重新操作。']]);
-  const issueText=issue=>issue.status==='paused'?nextStep(issue):issueLabels.get(issue.error)||issue.error||nextStep(issue);
-  const automationJobPath=job=>'automation/'+(['messaging','feedback'].includes(job.module)?'channels':'collection')+'/'+encodeURIComponent(job.module);
+  const issueText=issue=>issue.status==='paused'||issue.module==='listener'?nextStep(issue):issueLabels.get(issue.error)||issue.error||nextStep(issue);
+  const automationJobPath=job=>'automation/'+(['messaging','feedback','listener'].includes(job.module)?'channels':'collection')+'/'+encodeURIComponent(job.module);
   let snapshot=null,runtime=null,runtimeKey='',ready=false,loading=false,generation=0,metric='messages',scope={},records=[],current=null,returnContext=null,detailGeneration=0,listGeneration=0;
   const duration=seconds=>{seconds=Math.max(0,Math.floor(seconds));return (seconds>=3600?Math.floor(seconds/3600)+' 小时 ':'')+(seconds>=60?Math.floor(seconds/60)%60+' 分 ':'')+seconds%60+' 秒';};
   const liveSample=()=>{const sample=runtime?.samples?.at(-1);return sample&&Array.isArray(sample.active_jobs)&&Date.now()/1000-sample.at<=15&&sample.at>=(snapshot?.generated_at||0)?sample:null;};
@@ -60,7 +60,7 @@
       const row=node('div',null,'problem-row'),text=node('div'),unknown=['unknown','delivery_unknown'].includes(issue.kind)||issue.status==='unknown';
       text.append(node('strong',issue.title||(names[issue.source_id||issue.module]||issue.source_id||issue.module||'系统')+'：'+(unknown?'结果待确认':'运行异常')),node('p',issueText(issue)));
       row.append(node('span',issue.status==='paused'?'已暂停':unknown?'待确认':issue.severity==='warning'?'需检查':'失败','problem-tag'+(unknown||issue.severity==='warning'?' warn':'')),text,node('time',clock(issue.last_at)));
-      const button=node('button',issue.status==='paused'?'前往'+(names[issue.source_id||issue.module]||issue.module)+'处理 →':'查看相关记录','secondary');button.dataset.issueKey=issue.key;button.addEventListener('click',()=>guard(()=>openIssue(issue)));row.append(button);attention.append(row);
+      const button=node('button',issue.module==='listener'?'检查回调监听 →':issue.status==='paused'?'前往'+(names[issue.source_id||issue.module]||issue.module)+'处理 →':'查看相关记录','secondary');button.dataset.issueKey=issue.key;button.addEventListener('click',()=>guard(()=>openIssue(issue)));row.append(button);attention.append(row);
     }
     const metrics=[['入库消息变更',count(summary.emitted)+(summary.emitted==null?'':' 条'),(summary.emitted_complete===false?'统计不完整 · ':'含新增与修订 · ')+'重复跳过 '+count(summary.duplicates)+' 条'],['采集成功率',rate(summary.success_rate),summary.valid_count?`${summary.success} 成功 / ${summary.valid_count} 个有效结束轮次`:'暂无有效样本'],['平均采集耗时',summary.avg_seconds==null?'—':summary.avg_seconds.toFixed(1)+' 秒',summary.sample_count?`${count(summary.sample_count)} 个有效结束轮次 · 含失败耗时`:'暂无有效样本']];
     $('kpis').replaceChildren(...metrics.map(([label,value,detail,bad])=>{const item=node('div',null,'metric');item.append(node('span',label),node('strong',value,bad?'bad':''),node('small',detail));return item;}));
@@ -93,20 +93,21 @@
   }
   function renderServices(){
     const s=snapshot,service=s.service||{},sample=liveSample(),queues=s.queues||{},sources=s.sources||[];
-    const jobs=(s.jobs||[]).map(job=>{if(!sample)return job;const active=sample.active_jobs.find(task=>sameModule(task,job));return active?{...job,state:'running',last_start:active.started_at}:job.state==='running'?{...job,state:'updating',next_run:null}:job;});
+    const jobs=(s.jobs||[]).map(job=>{if(!sample||job.module==='listener')return job;const active=sample.active_jobs.find(task=>sameModule(task,job));return active?{...job,state:'running',last_start:active.started_at}:job.state==='running'?{...job,state:'updating',next_run:null}:job;});
     $('system-pill').textContent='后台服务'+serviceState(service);
     $('system-pill').classList.toggle('warn',!service.running||service.verified===false);
-    const collect=jobs.filter(job=>job.source_id),processor=jobs.find(job=>job.module==='processor'),delivery=jobs.find(job=>job.module==='messaging'),feedback=jobs.find(job=>job.module==='feedback');
+    const collect=jobs.filter(job=>job.source_id),processor=jobs.find(job=>job.module==='processor'),delivery=jobs.find(job=>job.module==='messaging'),feedback=jobs.find(job=>job.module==='feedback'),listener=jobs.find(job=>job.module==='listener');
     const queueNote=(queue,keys)=>queue?.counts?keys.map(([key,label])=>count(queue.counts[key]??0)+' '+label).join(' · '):'队列状态尚不可读';
     const running=collect.filter(job=>job.state==='running').length;
     const rows=[['collect','信息源采集',collect.filter(job=>job.enabled).length+' 个来源'+(running?' · '+running+' 个执行中':''),''],['process','待办处理',processor?processor.state==='running'?'执行中':processor.enabled?state(processor.state):'已关闭':'状态未知',''],['delivery','消息投递',delivery?delivery.enabled?state(delivery.state):'未启用':'状态未知',queueNote(queues.messaging,[['pending','待投递'],['retry','待重试'],['unknown','结果未知']])],['feedback','状态回写',feedback?feedback.enabled?state(feedback.state):'未启用':'状态未知',queueNote(queues.feedback,[['queued','待回写'],['failed','失败'],['conflict','冲突']])]];
+    if(listener)rows.push(['listener','飞书回调监听',!service.running?'后台未运行':listener.state==='running'?'监听进程运行中':state(listener.state),'卡片按钮依赖独立监听进程']);
     const serviceRows=[];
     for(const [id,name,value,note]of rows){
       const row=node('div',null,'service-row'),text=node('div'),status=node('div',null,'service-state');row.dataset.serviceId=id;text.append(node('strong',name));if(note)text.append(node('p',note));
-      const issue=(s.issues||[]).find(issue=>id==='collect'?!!issue.source_id:issue.module===({process:'processor',delivery:'messaging',feedback:'feedback'})[id]);
+      const issue=(s.issues||[]).find(issue=>id==='collect'?!!issue.source_id:issue.module===({process:'processor',delivery:'messaging',feedback:'feedback',listener:'listener'})[id]);
       status.append(node('span',value,'pill'+(issue?' warn':'')));
       const button=node('button',issue?'查看'+(names[issue.source_id||issue.module]||issue.module)+'问题':id==='process'?'查看 Pi 工作流':'自动化设置','text-button');
-      button.addEventListener('click',()=>guard(async()=>{if(issue)return openIssue(issue);location.hash=id==='process'?'pi-workflow':'automation/'+(['delivery','feedback'].includes(id)?'channels':'background');}));
+      button.addEventListener('click',()=>guard(async()=>{if(issue)return openIssue(issue);location.hash=id==='process'?'pi-workflow':'automation/'+(['delivery','feedback','listener'].includes(id)?'channels':'background');}));
       if(issue)button.dataset.serviceProblem=issue.key;
       if(['collect','process'].includes(id)){
         row.classList.add('schedule-service');const heading=node('div',null,'schedule-heading');text.append(...status.childNodes);heading.append(text,button);row.append(heading);
@@ -240,7 +241,7 @@
   }
   async function openIssue(issue){
     const job=snapshot?.jobs?.find(job=>job.source_id?job.source_id===issue.source_id:job.module===issue.module);
-    if(issue.kind==='job'&&issue.status==='paused'&&job){location.hash=automationJobPath(job);return;}
+    if(issue.kind==='job'&&job&&(issue.status==='paused'||issue.module==='listener')){location.hash=automationJobPath(job);return;}
     scope=windowScope({module:issue.source_id||issue.module,label:(names[issue.source_id||issue.module]||issue.module||'系统')+' · 当前问题'});
     $('run-result-filter').value='all';
     if(issue.run_id)return openOverviewJob(issue.run_id,issue.run_source,scope);

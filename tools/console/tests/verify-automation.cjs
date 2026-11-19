@@ -85,6 +85,8 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
   for(const id of ['future','reserved-kind'])assert.ok(saved.messaging.targets.some(target=>target.id===id),'unknown target was lost');
   assert.ok(saved.messaging.targets.some(target=>target.id===newId&&!target.enabled));
   assert.equal(saves.length,2);assert.ok(!saves[1].messaging.targets.some(target=>target.kind==='constructor'),'unsupported target must remain server managed');
+  await page.locator('#tab-automation-channels').click();
+  const recoverListener=page.getByRole('button',{name:'恢复监听重试',exact:true});assert.equal(await recoverListener.isVisible(),true);await recoverListener.click();await page.waitForFunction(()=>!document.getElementById('ops-save').disabled);assert.ok(posts.some(post=>post.path==='/api/operations/jobs/listener/resume'));
   await page.locator('#tab-automation-collection').click();
   await page.locator('#ops-source-advanced').locator('..').locator('summary').first().click();
   const extra=page.locator('#ops-source-advanced [data-job="wechat"]');
@@ -101,7 +103,7 @@ const screenshots=process.env.CONSOLE_SCREENSHOTS;
   for(const id of ['ops-start','ops-stop','ops-restart','ops-startup-enable','ops-startup-disable']){await page.locator('#'+id).click();await page.waitForFunction(id=>!document.getElementById(id).disabled,id);}
   for(const path of ['service/start','service/stop','service/restart'])assert.ok(posts.some(post=>post.path==='/api/operations/'+path));
   assert.ok(posts.some(post=>post.path==='/api/operations/startup'&&post.body.enabled===true));assert.ok(posts.some(post=>post.path==='/api/operations/startup'&&post.body.enabled===false));
-  await page.evaluate(()=>{location.hash='delivery';});await page.waitForSelector('#ops-recovery button');
+  await page.evaluate(()=>{location.hash='delivery';});await page.locator('#delivery-recovery > summary').click();await page.waitForSelector('#ops-recovery button');
   await page.locator('#ops-recovery').getByRole('button',{name:'已核实未送达，重试',exact:true}).click();
   await page.locator('#ops-recovery').getByRole('button',{name:'已核实送达',exact:true}).click();
   await page.locator('#ops-recovery').getByRole('button',{name:'重试回写',exact:true}).click();
